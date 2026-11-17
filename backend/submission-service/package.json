@@ -1,0 +1,28 @@
+{
+  "name": "submission-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon ./src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "axios": "^1.11.0",
+    "bullmq": "^5.56.9",
+    "dotenv": "^17.2.1",
+    "fastify": "^5.4.0",
+    "fastify-plugin": "^5.0.1",
+    "ioredis": "^5.7.0",
+    "mongoose": "^8.17.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
