@@ -1,17 +1,16 @@
 "use client";
 import React, { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import ReactMarkdown from "react-markdown";
-import DOMPurify from "dompurify";
-import { cn } from "@/app/coding-platform/lib/utils";
 import { useParams } from "next/navigation";
+import { AlertCircle } from "lucide-react";
+import { DifficultyBadge, EmptyState, Skeleton } from "@logixai/ui";
+import Markdown from "@/app/coding-platform/components/Markdown";
 import { clearRunOutput } from "@/app/coding-platform/store/runOutputSlice";
 
 export default function ProblemDescription() {
   const problem = useSelector((state) => state.problem.data);
   const loading = useSelector((state) => state.problem.loading);
   const error = useSelector((state) => state.problem.error);
-
   const dispatch = useDispatch();
   const { id } = useParams();
 
@@ -19,81 +18,35 @@ export default function ProblemDescription() {
     dispatch(clearRunOutput());
   }, [id, dispatch]);
 
-  const difficultyBadge = (diff) =>
-    cn(
-      "text-[10px] uppercase font-semibold px-2 py-1 rounded",
-      diff === "easy" && "bg-emerald-500/15 text-emerald-500",
-      diff === "medium" && "bg-amber-500/15 text-amber-500",
-      diff === "hard" && "bg-rose-500/15 text-rose-500",
-    );
-
   return (
-    <section className="lg:w-[45%] xl:w-[40%] border-r border-border flex flex-col h-full">
-      <div className="p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
-        {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
-        {error && <p className="text-sm text-destructive">{error}</p>}
+    <section className="flex h-full min-h-0 flex-col border-border bg-background lg:w-[44%] lg:border-r xl:w-[40%]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+        {loading && (
+          <div className="space-y-3">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="mt-6 h-4 w-full" />
+            <Skeleton className="h-4 w-11/12" />
+            <Skeleton className="h-4 w-4/5" />
+          </div>
+        )}
+
+        {!loading && error && (
+          <EmptyState
+            icon={<AlertCircle />}
+            title="Couldn't load this problem"
+            description="It may have been deleted, or the problem service isn't running."
+          />
+        )}
+
         {!loading && !error && problem && (
-          <>
-            <div className="flex items-center gap-3">
-              <span className={difficultyBadge(problem.difficulty)}>
-                {problem.difficulty}
-              </span>
+          <article>
+            <h2 className="text-xl font-semibold">{problem.title}</h2>
+            <div className="mt-2 flex items-center gap-2">
+              <DifficultyBadge difficulty={problem.difficulty} />
             </div>
-            <h2 className="text-base font-semibold tracking-tight">
-              Description
-            </h2>
-            <article className="prose dark:prose-invert max-w-none text-sm leading-relaxed">
-              <ReactMarkdown
-                components={{
-                  // Custom components for better styling
-                  h1: ({ children }) => (
-                    <h1 className="text-lg font-bold mb-3">{children}</h1>
-                  ),
-                  h2: ({ children }) => (
-                    <h2 className="text-base font-semibold mb-2">{children}</h2>
-                  ),
-                  h3: ({ children }) => (
-                    <h3 className="text-sm font-medium mb-2">{children}</h3>
-                  ),
-                  p: ({ children }) => (
-                    <p className="mb-3 leading-relaxed">{children}</p>
-                  ),
-                  code: ({ inline, children }) =>
-                    inline ? (
-                      <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">
-                        {children}
-                      </code>
-                    ) : (
-                      <pre className="bg-muted p-3 rounded-md overflow-x-auto text-xs font-mono mb-3">
-                        <code>{children}</code>
-                      </pre>
-                    ),
-                  ul: ({ children }) => (
-                    <ul className="list-disc list-inside mb-3 space-y-1">
-                      {children}
-                    </ul>
-                  ),
-                  ol: ({ children }) => (
-                    <ol className="list-decimal list-inside mb-3 space-y-1">
-                      {children}
-                    </ol>
-                  ),
-                  li: ({ children }) => <li className="text-sm">{children}</li>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-l-4 border-muted-foreground pl-4 italic mb-3">
-                      {children}
-                    </blockquote>
-                  ),
-                  strong: ({ children }) => (
-                    <strong className="font-semibold">{children}</strong>
-                  ),
-                  em: ({ children }) => <em className="italic">{children}</em>,
-                }}
-              >
-                {DOMPurify.sanitize(problem.description || "")}
-              </ReactMarkdown>
-            </article>
-          </>
+            <Markdown className="mt-6">{problem.description}</Markdown>
+          </article>
         )}
       </div>
     </section>

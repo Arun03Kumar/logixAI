@@ -1,23 +1,27 @@
-import HeroSection    from "./components/HeroSection";
-import AboutSection   from "./components/AboutSection";
+import SiteHeader from "./components/layout/SiteHeader";
+import HeroSection from "./components/HeroSection";
+import PlatformSection from "./components/PlatformSection";
+import AboutSection from "./components/AboutSection";
 import XFactorSection from "./components/XFactorSection";
 import ServicesSection from "./components/ServicesSection";
-import CTASection     from "./components/CTASection";
-import TeamSection    from "./components/TeamSection";
-import Footer         from "./components/Footer";
-import AnimatedX      from "./components/AnimatedX";
+import TeamSection from "./components/TeamSection";
+import CTASection from "./components/CTASection";
+import Footer from "./components/Footer";
 
 export default function Home() {
   return (
-    <main className="overflow-x-hidden">
-      <HeroSection />
-      <AboutSection />
-      <XFactorSection />
-      <ServicesSection />
-      <TeamSection />
-      <CTASection />
+    <>
+      <SiteHeader />
+      <main>
+        <HeroSection />
+        <PlatformSection />
+        <AboutSection />
+        <XFactorSection />
+        <ServicesSection />
+        <TeamSection />
+        <CTASection />
+      </main>
       <Footer />
-      {/* <AnimatedX /> */}
-    </main>
+    </>
   );
 }

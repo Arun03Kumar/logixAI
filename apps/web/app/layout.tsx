@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { ThemeScript } from "@logixai/ui";
 import "./globals.css";
-import Navbar from "./components/Navbar";
 import ReduxProvider from "./coding-platform/components/ReduxProvider";
+import AppToaster from "./components/layout/AppToaster";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-jakarta",
   subsets: ["latin"],
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrains = JetBrains_Mono({
+  variable: "--font-jetbrains",
   subsets: ["latin"],
   display: "swap",
 });
@@ -19,13 +20,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "LogixAI | Find Your X Factor",
   description:
-    "LogixAI is an edtech platform founded by IITians that helps students discover their X Factor, find the logic behind every 'why', and build deep analytical thinking.",
+    "LogixAI is an edtech platform founded by IITians: computer science courses, coding practice and proctored tests for schools and colleges.",
   keywords: [
     "edtech",
     "IITians",
-    "mentorship",
-    "logical thinking",
-    "AI learning",
+    "coding practice",
+    "computer science courses",
+    "online exams",
     "LogixAI",
   ],
   openGraph: {
@@ -39,12 +40,17 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="scroll-smooth">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#09090B]`}
-      >
-        {/* <Navbar /> */}
+    <html
+      lang="en"
+      className={`${jakarta.variable} ${jetbrains.variable} scroll-smooth`}
+      suppressHydrationWarning
+    >
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <ReduxProvider>{children}</ReduxProvider>
+        <AppToaster />
       </body>
     </html>
   );

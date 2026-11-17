@@ -2,11 +2,18 @@
 import React from "react";
 import { useSelector, useDispatch } from "react-redux";
 import dynamic from "next/dynamic";
+import { Spinner } from "@logixai/ui";
 import { setUserCode } from "@/app/coding-platform/store/problemSlice";
 import { findLanguage } from "@logixai/languages";
+import { editorOptions, handleEditorMount } from "./editorConfig";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
+  loading: () => (
+    <div className="grid h-full place-items-center bg-[#1e1e1e]">
+      <Spinner />
+    </div>
+  ),
 });
 
 export default function CodeEditor() {
@@ -14,26 +21,16 @@ export default function CodeEditor() {
   const language = useSelector((state) => state.problem.language);
   const userCode = useSelector((state) => state.problem.userCode);
 
-  const handleCodeChange = (value) => {
-    dispatch(setUserCode(value || ""));
-  };
-
   return (
-    <div className="flex-1 min-h-0 border-b border-border">
+    <div className="min-h-0 flex-1 bg-[#1e1e1e]">
       <MonacoEditor
         height="100%"
         language={findLanguage(language || "")?.monacoId || "plaintext"}
         theme="vs-dark"
         value={userCode}
-        onChange={handleCodeChange}
-        options={{
-          fontSize: 13,
-          minimap: { enabled: false },
-          wordWrap: "on",
-          automaticLayout: true,
-          scrollBeyondLastLine: false,
-          padding: { top: 8 },
-        }}
+        onChange={(value) => dispatch(setUserCode(value || ""))}
+        onMount={handleEditorMount}
+        options={editorOptions()}
       />
     </div>
   );

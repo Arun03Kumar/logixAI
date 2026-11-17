@@ -1,4 +1,5 @@
 import { io } from "socket.io-client";
+import toast from "react-hot-toast";
 import { setRunOutput } from "@/app/coding-platform/store/runOutputSlice";
 import { SOCKET_URL } from "@/app/coding-platform/lib/config";
 import { getClientUserId } from "@/app/coding-platform/lib/clientUserId";
@@ -10,6 +11,14 @@ const SOCKET_EVENTS = {
   SUBMISSION_RESULT: "submissionPayloadResponse",
 };
 
+const VERDICT_TOASTS = {
+  Success: (n) => toast.success(`Accepted. All ${n} tests passed.`),
+  WA: () => toast.error("Wrong answer on at least one test."),
+  TLE: () => toast.error("Time limit exceeded."),
+  MLE: () => toast.error("Memory limit exceeded."),
+  RE: () => toast.error("Your code hit an error. Check the output."),
+};
+
 let socket = null;
 
 export const initializeSocket = (dispatch) => {
@@ -17,17 +26,12 @@ export const initializeSocket = (dispatch) => {
     socket = io(SOCKET_URL);
 
     socket.on("connect", () => {
-      console.log("Connected to socket server");
       socket.emit(SOCKET_EVENTS.SET_USER_ID, getClientUserId());
     });
 
     socket.on(SOCKET_EVENTS.SUBMISSION_RESULT, (data) => {
-      console.log("Received run output:", data);
       dispatch(setRunOutput(data));
-    });
-
-    socket.on("disconnect", () => {
-      console.log("Disconnected from socket server");
+      VERDICT_TOASTS[data?.status]?.(data?.response?.length ?? 0);
     });
   }
 

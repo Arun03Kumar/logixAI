@@ -1,8 +1,7 @@
 "use client";
-
 import React from "react";
-import { Button } from "@/app/coding-platform/components/ui/button";
-import { Textarea } from "@/app/coding-platform/components/ui/textarea";
+import { Plus, Trash2 } from "lucide-react";
+import { Button, Card, Textarea } from "@logixai/ui";
 
 export default function TestCasesPanel({ testCases, setTestCases }) {
   const updateField = (index, field, value) => {
@@ -15,70 +14,65 @@ export default function TestCasesPanel({ testCases, setTestCases }) {
     setTestCases((prev) => [...prev, { input: "", output: "" }]);
   };
 
+  const removeTestCase = (index) => {
+    setTestCases((prev) => prev.filter((_, i) => i !== index));
+  };
+
   return (
-    <div className="h-[80vh] flex flex-col border border-border rounded-lg bg-background shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-border bg-muted/40">
-        <h2 className="text-sm font-medium">Test Cases</h2>
-        <p className="text-xs text-muted-foreground">
-          Provide sample inputs and expected outputs. They will be used to
-          validate user solutions.
+    <div className="mx-auto max-w-4xl space-y-4">
+      <div>
+        <h2 className="text-base font-semibold">Test cases</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Each submission runs against every case. The first three are shown to
+          students as examples. Rows missing input or output are skipped.
         </p>
       </div>
 
-      <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
-        {testCases.map((tc, idx) => (
-          <div
-            key={idx}
-            className="rounded-lg border border-border/60 bg-muted/10 p-4 flex flex-col gap-3"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-muted-foreground">
-                Test Case #{idx + 1}
-              </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Input
-                </label>
-                <Textarea
-                  value={tc.input}
-                  onChange={(e) => updateField(idx, "input", e.target.value)}
-                  placeholder="Enter input..."
-                  className="resize-none h-32 text-sm font-mono"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Output
-                </label>
-                <Textarea
-                  value={tc.output}
-                  onChange={(e) => updateField(idx, "output", e.target.value)}
-                  placeholder="Enter expected output..."
-                  className="resize-none h-32 text-sm font-mono"
-                />
-              </div>
-            </div>
+      {testCases.map((tc, idx) => (
+        <Card key={idx}>
+          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+            <p className="text-sm font-medium">Case {idx + 1}</p>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove case ${idx + 1}`}
+              onClick={() => removeTestCase(idx)}
+              disabled={testCases.length === 1}
+            >
+              <Trash2 />
+            </Button>
           </div>
-        ))}
-        {testCases.length === 0 && (
-          <div className="text-xs text-muted-foreground">
-            No test cases yet. Click Add Test Case to begin.
+          <div className="grid gap-4 p-4 md:grid-cols-2">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Input
+              </span>
+              <Textarea
+                value={tc.input}
+                onChange={(e) => updateField(idx, "input", e.target.value)}
+                placeholder="5"
+                className="h-28 resize-y font-mono text-[13px]"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Expected output
+              </span>
+              <Textarea
+                value={tc.output}
+                onChange={(e) => updateField(idx, "output", e.target.value)}
+                placeholder="25"
+                className="h-28 resize-y font-mono text-[13px]"
+              />
+            </label>
           </div>
-        )}
-      </div>
+        </Card>
+      ))}
 
-      <div className="border-t border-border bg-background/70 backdrop-blur px-4 py-3">
-        <Button
-          variant="secondary"
-          size="sm"
-          className="w-full"
-          onClick={addTestCase}
-        >
-          Add Test Case
-        </Button>
-      </div>
+      <Button onClick={addTestCase}>
+        <Plus />
+        Add test case
+      </Button>
     </div>
   );
 }

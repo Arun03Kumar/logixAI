@@ -6,23 +6,15 @@ import MarkdownTab from "./MarkdownTab";
 import TestCasesTab from "./TestCasesTab";
 import CodeStubTab from "./CodeStubTab";
 
+const PANELS = {
+  description: DescriptionTab,
+  markdown: MarkdownTab,
+  testcases: TestCasesTab,
+  codestub: CodeStubTab,
+};
+
 export default function TabContent() {
   const activeTab = useSelector((state) => state.createProblem.activeTab);
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case "description":
-        return <DescriptionTab />;
-      case "markdown":
-        return <MarkdownTab />;
-      case "testcases":
-        return <TestCasesTab />;
-      case "codestub":
-        return <CodeStubTab />;
-      default:
-        return <DescriptionTab />;
-    }
-  };
-
-  return <div className="mx-auto max-w-7xl">{renderTabContent()}</div>;
+  const Panel = PANELS[activeTab] ?? DescriptionTab;
+  return <Panel />;
 }

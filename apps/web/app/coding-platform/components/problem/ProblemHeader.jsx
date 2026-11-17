@@ -1,24 +1,26 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import { useSelector, useDispatch } from "react-redux";
-import { Button } from "@/app/coding-platform/components/ui/button";
+import toast from "react-hot-toast";
+import { ChevronLeft, Play, Send } from "lucide-react";
 import {
+  Button,
+  Logo,
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
-} from "@/app/coding-platform/components/ui/select";
-import ThemeToggle from "@/app/coding-platform/components/ThemeToggle";
+  SelectTrigger,
+  SelectValue,
+  Spinner,
+  ThemeToggle,
+} from "@logixai/ui";
 import { listLanguages } from "@logixai/languages";
 import { setLanguage } from "@/app/coding-platform/store/problemSlice";
 import {
   runCode,
   submitCode,
 } from "@/app/coding-platform/store/runOutputSlice";
-import toast from "react-hot-toast";
-import { Home } from "lucide-react";
-import Link from "next/link";
 
 export default function ProblemHeader({ problemId }) {
   const dispatch = useDispatch();
@@ -27,105 +29,70 @@ export default function ProblemHeader({ problemId }) {
   const userCode = useSelector((state) => state.problem.userCode);
   const isRunning = useSelector((state) => state.runOutput.isRunning);
   const isSubmitting = useSelector((state) => state.runOutput.isSubmitting);
-  const runOutput = useSelector((state) => state.runOutput.data);
 
-  const handleLanguageChange = (newLanguage) => {
-    dispatch(setLanguage(newLanguage));
-  };
-
-  const handleRun = () => {
-    console.log("Running code with language:", language, userCode);
-    dispatch(runCode({ id: problemId, userCode, language }));
-  };
-
-  // const handleSubmit = () => {
-  //   dispatch(submitCode({ id: problemId, userCode, language }));
-  // };
-
-  const handleSubmit = async () => {
+  // The verdict arrives later over the socket (see socketService); here we
+  // only report failures to queue the submission.
+  const send = async (action) => {
     try {
       const result = await dispatch(
-        submitCode({ id: problemId, userCode, language }),
+        action({ id: problemId, userCode, language }),
       ).unwrap();
-
-      console.log("Submission result:", runOutput);
-
-      // Assume runOutput.response is an array of test case results
-      if (runOutput?.response) {
-        const allPassed = runOutput.response.every(
-          (tc) => tc.status === "SUCCESS",
-        );
-        const anyError = runOutput.response.some((tc) => tc.status === "ERROR");
-
-        if (anyError) {
-          toast.error("There is an error in your code.", {
-            position: "bottom-right",
-          });
-        } else if (allPassed) {
-          toast.success("Code submitted successfully! All test cases passed.", {
-            position: "bottom-right",
-          });
-        } else {
-          toast("Some test cases are not passed.", {
-            position: "bottom-right",
-          });
-        }
-      } else {
-        toast.error("Unexpected response from server.", {
-          position: "bottom-right",
-        });
+      if (result?.success === false) {
+        toast.error(result.message || "Couldn't submit your code. Try again.");
       }
-    } catch (err) {
-      toast.error("Submission failed. Please try again.", {
-        position: "bottom-right",
-      });
+    } catch {
+      toast.error("Couldn't reach the judge. Try again.");
     }
   };
 
   return (
-    <header className="h-14 border-b border-border flex items-center px-4 gap-4 bg-background/80 backdrop-blur sticky top-0 z-20">
-      <Link
-        href="/problems"
-        className="flex items-center justify-center h-8 w-8 rounded-md border border-border hover:bg-accent hover:text-accent-foreground transition-colors"
-        title="Home"
-      >
-        <Home className="h-4 w-4" />
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-3 sm:px-4">
+      <Link href="/" aria-label="LogixAI home" className="hidden sm:block">
+        <Logo showMark className="text-[15px]" />
       </Link>
-      <h1 className="font-medium text-sm truncate flex-1">
-        {problem?.title || "Problem"}
+      <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
+      <Button asChild variant="ghost" size="sm" className="px-2">
+        <Link href="/problems">
+          <ChevronLeft />
+          Problems
+        </Link>
+      </Button>
+      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">
+        {problem?.title || ""}
       </h1>
-      <div className="flex items-center gap-2 mx-auto">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={isRunning}
-          onClick={handleRun}
-        >
-          {isRunning ? "Running..." : "Run"}
-        </Button>
-        <Button
-          size="sm"
-          variant="default"
-          disabled={isSubmitting}
-          onClick={handleSubmit}
-        >
-          {isSubmitting ? "Submitting..." : "Submit"}
-        </Button>
-      </div>
-      <div className="flex items-center gap-2">
-        <Select value={language} onValueChange={handleLanguageChange}>
-          <SelectTrigger className="w-28 h-8 text-xs">
-            <SelectValue placeholder="Lang" />
-          </SelectTrigger>
-          <SelectContent>
-            {listLanguages().map((lang) => (
-              <SelectItem key={lang.id} value={lang.id}>
-                {lang.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+
+      <Select
+        value={language}
+        onValueChange={(next) => dispatch(setLanguage(next))}
+      >
+        <SelectTrigger size="sm" className="w-28" aria-label="Language">
+          <SelectValue placeholder="Language" />
+        </SelectTrigger>
+        <SelectContent>
+          {listLanguages().map((lang) => (
+            <SelectItem key={lang.id} value={lang.id}>
+              {lang.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        size="sm"
+        disabled={isRunning || isSubmitting}
+        onClick={() => send(runCode)}
+      >
+        {isRunning ? <Spinner /> : <Play />}
+        Run
+      </Button>
+      <Button
+        size="sm"
+        variant="primary"
+        disabled={isRunning || isSubmitting}
+        onClick={() => send(submitCode)}
+      >
+        {isSubmitting ? <Spinner className="text-primary-foreground" /> : <Send />}
+        Submit
+      </Button>
       <ThemeToggle />
     </header>
   );

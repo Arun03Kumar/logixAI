@@ -1,31 +1,38 @@
 "use client";
-import React, { useRef, useEffect } from "react";
+import React from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { Button } from "@/app/coding-platform/components/ui/button";
-import { Loader2 } from "lucide-react";
+import toast from "react-hot-toast";
 import {
+  Button,
+  Container,
+  Input,
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
-} from "@/app/coding-platform/components/ui/select";
+  SelectTrigger,
+  SelectValue,
+  Spinner,
+  Tabs,
+} from "@logixai/ui";
 import {
   setActiveTab,
-  setIsEditingTitle,
   setTitle,
   setDifficulty,
   publishProblem,
 } from "@/app/coding-platform/store/createProblemSlice";
 
+const TABS = [
+  { value: "description", label: "Statement" },
+  { value: "markdown", label: "Markdown" },
+  { value: "testcases", label: "Test cases" },
+  { value: "codestub", label: "Code stubs" },
+];
+
 export default function CreateProblemHeader() {
   const dispatch = useDispatch();
-  const titleInputRef = useRef(null);
-
   const {
     activeTab,
     title,
-    isEditingTitle,
     difficulty,
     description,
     markdownText,
@@ -34,16 +41,8 @@ export default function CreateProblemHeader() {
     isPublishing,
   } = useSelector((state) => state.createProblem);
 
-  useEffect(() => {
-    if (isEditingTitle && titleInputRef.current) {
-      titleInputRef.current.focus();
-      const len = titleInputRef.current.value.length;
-      titleInputRef.current.setSelectionRange(len, len);
-    }
-  }, [isEditingTitle]);
-
   const buildProblemPayload = () => {
-    // Clean test cases: keep only rows where BOTH input & output have content
+    // Keep only rows where both input and output have content
     const cleanedTestCases = testCases
       .map((tc) => ({
         input: (tc.input || "").trim(),
@@ -51,30 +50,24 @@ export default function CreateProblemHeader() {
       }))
       .filter((tc) => tc.input && tc.output);
 
-    // Build codeStubs array from the codeStubs object
-    const codeStubsArray = [];
-    Object.entries(codeStubs || {}).forEach(([language, stub]) => {
-      const hasAnySnippet =
-        (stub.startSnippet && stub.startSnippet.trim()) ||
-        (stub.endSnippet && stub.endSnippet.trim()) ||
-        (stub.userSnippet && stub.userSnippet.trim());
-
-      if (hasAnySnippet) {
-        codeStubsArray.push({
-          language: language.toUpperCase(),
-          startSnippet: stub.startSnippet || "",
-          endSnippet: stub.endSnippet || "",
-          userSnippet: stub.userSnippet || "",
-        });
-      }
-    });
-
-    // Use markdown text if available, otherwise use description from BlockNote
-    const finalDescription = markdownText.trim() || description.trim();
+    // codeStubs object -> array, skipping languages with nothing filled in
+    const codeStubsArray = Object.entries(codeStubs || {})
+      .filter(([, stub]) =>
+        [stub.startSnippet, stub.endSnippet, stub.userSnippet].some((s) =>
+          s?.trim(),
+        ),
+      )
+      .map(([language, stub]) => ({
+        language: language.toUpperCase(),
+        startSnippet: stub.startSnippet || "",
+        endSnippet: stub.endSnippet || "",
+        userSnippet: stub.userSnippet || "",
+      }));
 
     return {
       title: title.trim(),
-      description: finalDescription,
+      // Markdown tab wins when filled, otherwise the rich editor's output
+      description: markdownText.trim() || description.trim(),
       difficulty,
       testCases: cleanedTestCases,
       codeStubs: codeStubsArray,
@@ -83,127 +76,68 @@ export default function CreateProblemHeader() {
   };
 
   const handlePublish = () => {
-    // Basic client-side validation
-    if (!title.trim()) {
-      console.error("Title required");
-      return;
-    }
-
-    const finalDescription = markdownText.trim() || description.trim();
-    if (!finalDescription) {
-      console.error("Description required");
-      return;
-    }
-
     const payload = buildProblemPayload();
-    console.log("Publishing problem with payload:", payload);
+    if (!payload.title) {
+      toast.error("Add a title before publishing.");
+      return;
+    }
+    if (!payload.description) {
+      toast.error("Write the problem statement before publishing.");
+      return;
+    }
+    if (payload.testCases.length === 0) {
+      toast.error("Add at least one test case with input and output.");
+      return;
+    }
+    if (payload.codeStubs.length === 0) {
+      toast.error("Add a code stub for at least one language.");
+      return;
+    }
     dispatch(publishProblem(payload));
   };
 
-  const isPublishDisabled =
-    isPublishing ||
-    !title.trim() ||
-    (activeTab === "description" &&
-      !description.trim() &&
-      !markdownText.trim());
-
   return (
-    <header className="sticky top-0 z-20 w-full bg-background/80 backdrop-blur border-b border-border">
-      <div className="mx-auto max-w-7xl px-6 h-14 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          {/* Difficulty */}
-          <Select
-            value={difficulty}
-            onValueChange={(v) => dispatch(setDifficulty(v))}
-          >
-            <SelectTrigger className="w-32 h-8 text-xs">
-              <SelectValue placeholder="Difficulty" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="easy">Easy</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="hard">Hard</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Tab Buttons */}
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant={activeTab === "description" ? "default" : "secondary"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => dispatch(setActiveTab("description"))}
-            >
-              Problem Description
-            </Button>
-            <Button
-              type="button"
-              variant={activeTab === "markdown" ? "default" : "secondary"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => dispatch(setActiveTab("markdown"))}
-            >
-              Markdown
-            </Button>
-            <Button
-              type="button"
-              variant={activeTab === "testcases" ? "default" : "secondary"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => dispatch(setActiveTab("testcases"))}
-            >
-              Test Cases
-            </Button>
-            <Button
-              type="button"
-              variant={activeTab === "codestub" ? "default" : "secondary"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => dispatch(setActiveTab("codestub"))}
-            >
-              Code Stub
-            </Button>
-          </div>
-
-          {/* Editable Title */}
-          <div className="flex-1 min-w-0">
-            {!isEditingTitle ? (
-              <h1
-                className="text-sm font-medium text-muted-foreground truncate cursor-pointer"
-                onDoubleClick={() => dispatch(setIsEditingTitle(true))}
-                title="Double click to edit title"
-              >
-                {title}
-              </h1>
-            ) : (
-              <input
-                ref={titleInputRef}
-                value={title}
-                onChange={(e) => dispatch(setTitle(e.target.value))}
-                onBlur={() => dispatch(setIsEditingTitle(false))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === "Escape") {
-                    dispatch(setIsEditingTitle(false));
-                  }
-                }}
-                className="w-full bg-transparent border border-border rounded px-2 py-1 text-sm text-foreground focus:outline-none focus:ring"
-              />
-            )}
-          </div>
-        </div>
-
-        {/* Publish */}
+    <div className="sticky top-14 z-30 border-b border-border bg-background">
+      <Container size="xl" className="flex flex-wrap items-center gap-3 pt-4">
+        <Input
+          aria-label="Problem title"
+          placeholder="Problem title"
+          value={title}
+          onChange={(e) => dispatch(setTitle(e.target.value))}
+          className="h-10 min-w-0 flex-1 border-transparent bg-transparent px-0 text-lg font-semibold hover:border-transparent focus-visible:border-transparent focus-visible:ring-0"
+        />
+        <Select
+          value={difficulty}
+          onValueChange={(v) => dispatch(setDifficulty(v))}
+        >
+          <SelectTrigger size="sm" className="w-28" aria-label="Difficulty">
+            <SelectValue placeholder="Difficulty" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="easy">Easy</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="hard">Hard</SelectItem>
+          </SelectContent>
+        </Select>
         <Button
-          variant="default"
+          variant="primary"
           size="sm"
           onClick={handlePublish}
-          disabled={isPublishDisabled}
+          disabled={isPublishing}
         >
-          {isPublishing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isPublishing ? "Publishing..." : "Publish"}
+          {isPublishing ? <Spinner className="text-primary-foreground" /> : null}
+          {isPublishing ? "Publishing…" : "Publish"}
         </Button>
-      </div>
-    </header>
+      </Container>
+      <Container size="xl">
+        <Tabs
+          aria-label="Problem sections"
+          items={TABS}
+          value={activeTab}
+          onValueChange={(tab) => dispatch(setActiveTab(tab))}
+          className="mt-2 border-b-0"
+        />
+      </Container>
+    </div>
   );
 }

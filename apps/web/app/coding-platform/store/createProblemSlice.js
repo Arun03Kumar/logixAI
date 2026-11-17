@@ -49,7 +49,7 @@ const createProblemSlice = createSlice({
     isPublishing: false,
 
     // Problem Data
-    title: "Title of Problem (double click to change)",
+    title: "",
     description: "", // markdown content from BlockNote editor
     markdownText: "", // raw markdown text from textarea
     difficulty: "easy",
@@ -110,7 +110,7 @@ const createProblemSlice = createSlice({
 
     // Reset Actions
     resetForm: (state) => {
-      state.title = "Title of Problem (double click to change)";
+      state.title = "";
       state.description = "";
       state.markdownText = "";
       state.difficulty = "easy";

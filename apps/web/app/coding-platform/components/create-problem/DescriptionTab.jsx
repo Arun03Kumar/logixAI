@@ -2,40 +2,38 @@
 import React from "react";
 import { useSelector, useDispatch } from "react-redux";
 import dynamic from "next/dynamic";
+import { Skeleton } from "@logixai/ui";
 import { setDescription } from "@/app/coding-platform/store/createProblemSlice";
+import Markdown from "@/app/coding-platform/components/Markdown";
+import EditorPreviewLayout from "./EditorPreviewLayout";
 
 const BlockNoteEditor = dynamic(
   () => import("@/app/coding-platform/components/BlockNoteEditor"),
-  {
-    ssr: false,
-  },
+  { ssr: false, loading: () => <Skeleton className="h-full w-full" /> },
 );
 
 export default function DescriptionTab() {
   const dispatch = useDispatch();
   const description = useSelector((state) => state.createProblem.description);
-
-  const handleMarkdownChange = (markdown) => {
-    dispatch(setDescription(markdown));
-  };
-
   const safeMarkdown = typeof description === "string" ? description : "";
 
   return (
-    <div className="flex flex-col lg:flex-row gap-8">
-      <div className="flex-1 min-w-0">
-        <BlockNoteEditor onMarkdownChange={handleMarkdownChange} />
-      </div>
-      <div className="w-full lg:w-[40%] flex flex-col">
-        <h2 className="text-sm font-semibold mb-2 text-muted-foreground">
-          Preview (Markdown)
-        </h2>
-        <div className="h-[76vh] border border-border rounded-lg bg-muted/30 p-4 overflow-auto text-sm whitespace-pre-wrap font-mono leading-relaxed">
-          {safeMarkdown.trim()
-            ? safeMarkdown
-            : "Start typing in the editor to see markdown preview..."}
-        </div>
-      </div>
-    </div>
+    <EditorPreviewLayout
+      editorLabel="Statement"
+      editor={
+        <BlockNoteEditor
+          onMarkdownChange={(markdown) => dispatch(setDescription(markdown))}
+        />
+      }
+      preview={
+        safeMarkdown.trim() ? (
+          <Markdown>{safeMarkdown}</Markdown>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            The statement as students will see it appears here.
+          </p>
+        )
+      }
+    />
   );
 }

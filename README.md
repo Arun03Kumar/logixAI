@@ -13,6 +13,7 @@ apps/
   evaluator-service/   Runs code in Docker, reports results (TS, BullMQ) :3002
   socket-service/      Pushes results to the browser (socket.io, Redis)  :3005
 packages/
+  ui/                  Design system: tokens, Tailwind theme, React components
   languages/           Language registry: ids, labels, Docker images, commands
   contracts/           Zod schemas + types for APIs, queue jobs and socket events
   service-kit/         Validated env config, logger, errors, response envelope,
@@ -69,6 +70,23 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
 - **Tests** live in each workspace's `test/` folder. Pass collaborators in
   (repositories, HTTP clients) instead of requiring them inside functions, so
   logic can be tested without Mongo, Redis or Docker.
+- **UI** ("Warm modern" design system in `packages/ui`):
+  - Build screens from `@logixai/ui` components (`Button`, `Card`, `Badge`,
+    `Tabs`, `Select`, `Input`, `EmptyState`, `PageHeader`, ...). If something
+    is missing, add it to the package instead of styling it inline.
+  - Colours only through tokens: `bg-background`, `bg-card`, `text-foreground`,
+    `text-muted-foreground`, `border-border`, `bg-primary`, `bg-success-soft`,
+    and so on. No hex values or Tailwind palette colours (`orange-500`) in app
+    code. New colours go into `packages/ui/src/styles.css` with a dark-mode
+    value.
+  - Type: Plus Jakarta Sans for UI, JetBrains Mono for code. Weights 400,
+    500, 600 and 700 for headings only. Smallest text is `text-xs` (12px).
+  - At most one `primary` button per view; the rest are `secondary` or
+    `ghost`.
+  - No emoji as icons (use `lucide-react`), no gradients, glows or
+    decorative animation. Sentence case for headings, buttons and labels.
+  - The code editor is always dark (`vs-dark`), in both page themes. Use
+    `editorOptions()` from `components/problem/editorConfig.js`.
 - **Users**: until accounts exist, each browser gets a random anonymous id
   (`apps/web/app/coding-platform/lib/clientUserId.js`), used for both the
   submission and the socket registration.

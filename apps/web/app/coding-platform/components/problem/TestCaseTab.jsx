@@ -1,7 +1,22 @@
 "use client";
 import React from "react";
 import { useSelector } from "react-redux";
-import { cn } from "@/app/coding-platform/lib/utils";
+import { VerdictBadge } from "@logixai/ui";
+
+function Block({ label, children, tone }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <pre
+        className={`whitespace-pre-wrap rounded-md border border-border bg-muted px-3 py-2 font-mono text-xs leading-relaxed ${
+          tone === "danger" ? "text-danger" : "text-foreground"
+        }`}
+      >
+        {children}
+      </pre>
+    </div>
+  );
+}
 
 export default function TestCaseTab() {
   const problem = useSelector((state) => state.problem.data);
@@ -14,53 +29,30 @@ export default function TestCaseTab() {
   const idx = Number(match[1]);
   const tc = problem?.testCases?.[idx];
   const resp = runOutput?.response?.[idx];
-  const status = resp?.status;
-  const isSuccess = status === "SUCCESS";
-  const isError = status === "ERROR";
-
-  const statusClass = isSuccess
-    ? "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
-    : isError
-      ? "bg-rose-500/15 text-rose-500 border border-rose-500/30"
-      : "bg-amber-500/15 text-amber-500 border border-amber-500/30";
 
   return (
-    <div className="space-y-2 text-xs">
-      <div>
-        <p className="text-[10px] font-semibold text-muted-foreground">Input</p>
-        <pre className="whitespace-pre-wrap bg-background/30 p-2 rounded">
-          {tc?.input ?? "-"}
+    <div className="grid gap-3 md:grid-cols-3">
+      <Block label="Input">{tc?.input ?? "—"}</Block>
+      <Block label="Expected output">{tc?.output ?? "—"}</Block>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-medium text-muted-foreground">
+            Your output
+          </p>
+          <VerdictBadge status={resp?.status} />
+        </div>
+        <pre
+          className={`whitespace-pre-wrap rounded-md border border-border bg-muted px-3 py-2 font-mono text-xs leading-relaxed ${
+            resp?.status === "ERROR" ? "text-danger" : "text-foreground"
+          }`}
+        >
+          {resp
+            ? resp.output || "(no output)"
+            : runOutput
+              ? "Not run: an earlier test stopped the judge."
+              : "Run your code to see the output."}
         </pre>
       </div>
-      <div>
-        <p className="text-[10px] font-semibold text-muted-foreground">
-          Expected Output
-        </p>
-        <pre className="whitespace-pre-wrap bg-background/30 p-2 rounded">
-          {tc?.output ?? "-"}
-        </pre>
-      </div>
-      <div className="flex items-center gap-2">
-        <p className="text-[10px] font-semibold text-muted-foreground">
-          Run Output
-        </p>
-        {status && (
-          <span
-            className={cn(
-              "text-[10px] font-semibold px-2 py-0.5 rounded",
-              statusClass,
-            )}
-          >
-            {status}
-          </span>
-        )}
-      </div>
-      <pre className="whitespace-pre-wrap bg-background/30 p-2 rounded">
-        {resp
-          ? (resp.output ??
-            (typeof resp === "string" ? resp : JSON.stringify(resp, null, 2)))
-          : "No run output for this test yet."}
-      </pre>
     </div>
   );
 }

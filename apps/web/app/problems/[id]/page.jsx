@@ -21,28 +21,22 @@ export default function ProblemDetailPage() {
   useEffect(() => {
     if (!id) return;
 
-    // Fetch problem data
     dispatch(fetchProblem({ id, language: DEFAULT_LANGUAGE }));
-
-    // Initialize socket connection
     initializeSocket(dispatch);
 
-    // Cleanup on unmount
     return () => {
       disconnectSocket();
     };
   }, [id, dispatch]);
 
-  if (!id) {
-    return <div>Loading...</div>;
-  }
+  if (!id) return null;
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex h-screen flex-col bg-background">
       <ProblemHeader problemId={id} />
-      <main className="flex flex-col lg:flex-row flex-1 min-h-0">
+      <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <ProblemDescription />
-        <section className="flex-1 min-h-0 flex flex-col">
+        <section className="flex min-h-0 flex-1 flex-col bg-card">
           <CodeEditor />
           <OutputTabs />
         </section>

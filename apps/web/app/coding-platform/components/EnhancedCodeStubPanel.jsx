@@ -1,27 +1,59 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback, memo } from "react";
+import React, { useCallback, useEffect, useRef, memo } from "react";
 import dynamic from "next/dynamic";
 import {
+  Badge,
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
-} from "@/app/coding-platform/components/ui/select";
+  SelectTrigger,
+  SelectValue,
+  Spinner,
+} from "@logixai/ui";
 import { LANGUAGES, listLanguages } from "@logixai/languages";
+import {
+  editorOptions,
+  handleEditorMount,
+} from "@/app/coding-platform/components/problem/editorConfig";
 
-// Monaco (uncontrolled to prevent re-mount flash each keypress)
+// Monaco is uncontrolled here to avoid re-mount flashes on every keypress.
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-      Loading code editor...
+    <div className="grid h-full place-items-center bg-[#1e1e1e]">
+      <Spinner />
     </div>
   ),
 });
 
 const DEBOUNCE_MS = 500;
+const EMPTY = { startSnippet: "", userSnippet: "", endSnippet: "" };
+
+/**
+ * The judge runs: startSnippet + student's code + endSnippet.
+ * Listed in that order so authors see how the final program is assembled.
+ */
+const SLOTS = [
+  {
+    key: "startSnippet",
+    title: "Code before the solution",
+    hint: "Hidden from students. Imports, helpers, class header.",
+  },
+  {
+    key: "userSnippet",
+    title: "Starter code",
+    hint: "Shown in the student's editor. They complete or replace it.",
+  },
+  {
+    key: "endSnippet",
+    title: "Code after the solution",
+    hint: "Hidden. Driver that reads input, calls the solution and prints the result.",
+  },
+];
+
+const hasContent = (stub) =>
+  Boolean(stub) && SLOTS.some(({ key }) => stub[key]?.trim());
 
 function EnhancedCodeStubPanelComponent({
   codeStubs,
@@ -29,249 +61,109 @@ function EnhancedCodeStubPanelComponent({
   onLanguageChange,
   onCodeStubUpdate,
 }) {
-  const prevLanguageRef = useRef(currentLanguage);
+  const currentStub = codeStubs[currentLanguage] || EMPTY;
 
-  // Get current language code stub or initialize empty
-  const currentStub = codeStubs[currentLanguage] || {
-    startSnippet: "",
-    endSnippet: "",
-    userSnippet: "",
+  // Live editor contents for the current language, pushed to the store on a debounce.
+  const valuesRef = useRef({ ...EMPTY, ...currentStub });
+  const timerRef = useRef(null);
+  const latest = useRef({ currentLanguage, onCodeStubUpdate });
+  useEffect(() => {
+    latest.current = { currentLanguage, onCodeStubUpdate };
+  });
+
+  const flush = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const { currentLanguage: lang, onCodeStubUpdate: update } = latest.current;
+    update(lang, { ...valuesRef.current });
+  }, []);
+
+  const schedule = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(flush, DEBOUNCE_MS);
+  }, [flush]);
+
+  // Save pending edits when leaving the tab instead of dropping them.
+  useEffect(
+    () => () => {
+      if (timerRef.current) flush();
+    },
+    [flush],
+  );
+
+  const changeLanguage = (next) => {
+    flush();
+    valuesRef.current = { ...EMPTY, ...(codeStubs[next] || {}) };
+    onLanguageChange(next);
   };
-
-  // Keep local refs for current editor content
-  const starterRef = useRef(currentStub.startSnippet || "");
-  const endRef = useRef(currentStub.endSnippet || "");
-  const userRef = useRef(currentStub.userSnippet || "");
-
-  const starterEditorRef = useRef(null);
-  const endEditorRef = useRef(null);
-  const userEditorRef = useRef(null);
-  const debounceTimerRef = useRef(null);
 
   const monacoLanguage = LANGUAGES[currentLanguage]?.monacoId || "plaintext";
 
-  // Handle language change - only update when language actually changes
-  useEffect(() => {
-    if (prevLanguageRef.current !== currentLanguage) {
-      const newStub = codeStubs[currentLanguage] || {
-        startSnippet: "",
-        endSnippet: "",
-        userSnippet: "",
-      };
-
-      // Update refs first (editors will mount/remount with keys)
-      starterRef.current = newStub.startSnippet || "";
-      endRef.current = newStub.endSnippet || "";
-      userRef.current = newStub.userSnippet || "";
-      prevLanguageRef.current = currentLanguage;
-    }
-  }, [currentLanguage, codeStubs]);
-
-  const flushNow = useCallback(() => {
-    // Immediate persist (used before language switch / unmount)
-    onCodeStubUpdate(currentLanguage, {
-      startSnippet: starterRef.current,
-      endSnippet: endRef.current,
-      userSnippet: userRef.current,
-    });
-  }, [currentLanguage, onCodeStubUpdate]);
-
-  const pushUp = useCallback(() => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      flushNow();
-    }, DEBOUNCE_MS);
-  }, [flushNow]);
-
-  const commonOptions = {
-    fontSize: 13,
-    minimap: { enabled: false },
-    automaticLayout: true,
-    wordWrap: "on",
-    padding: { top: 8, bottom: 8 },
-    scrollBeyondLastLine: false,
-    smoothScrolling: true,
-  };
-
-  const attachChangeListener = (editor, which) => {
-    editor.onDidChangeModelContent(() => {
-      if (which === "starter") {
-        starterRef.current = editor.getValue();
-      } else if (which === "end") {
-        endRef.current = editor.getValue();
-      } else if (which === "user") {
-        userRef.current = editor.getValue();
-      }
-      pushUp();
-    });
-  };
-
-  const handleStarterMount = (editor) => {
-    starterEditorRef.current = editor;
-    if (editor.getValue() !== starterRef.current) {
-      editor.setValue(starterRef.current);
-    }
-    attachChangeListener(editor, "starter");
-  };
-
-  const handleEndMount = (editor) => {
-    endEditorRef.current = editor;
-    if (editor.getValue() !== endRef.current) {
-      editor.setValue(endRef.current);
-    }
-    attachChangeListener(editor, "end");
-  };
-
-  const handleUserMount = (editor) => {
-    userEditorRef.current = editor;
-    if (editor.getValue() !== userRef.current) {
-      editor.setValue(userRef.current);
-    }
-    attachChangeListener(editor, "user");
-  };
-
-  useEffect(
-    () => () => {
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    },
-    [],
-  );
-
   return (
     <div className="space-y-6">
-      {/* Header with language selector */}
-      <div className="flex flex-wrap items-center gap-4 pb-4 border-b border-border">
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-muted-foreground">Language</p>
-          <Select
-            value={currentLanguage}
-            onValueChange={(nextLang) => {
-              // Flush pending edits before switching language
-              flushNow();
-              onLanguageChange(nextLang);
-            }}
-          >
-            <SelectTrigger className="w-40 h-8 text-xs">
-              <SelectValue placeholder="Language" />
-            </SelectTrigger>
-            <SelectContent>
-              {listLanguages().map((lang) => (
-                <SelectItem key={lang.id} value={lang.id}>
-                  {lang.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex-1">
-          <p className="text-xs text-muted-foreground">
-            Configure code stubs for{" "}
-            <span className="font-medium">{currentLanguage}</span>. Each
-            language can have different code stubs. Auto-saves after{" "}
-            {DEBOUNCE_MS}ms.
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Code stubs</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            The judge runs the code before the solution, then the student&apos;s
+            code, then the code after it. Set this up for each language you want
+            to allow. Changes save automatically.
           </p>
         </div>
+        <Select value={currentLanguage} onValueChange={changeLanguage}>
+          <SelectTrigger className="w-40" aria-label="Language">
+            <SelectValue placeholder="Language" />
+          </SelectTrigger>
+          <SelectContent>
+            {listLanguages().map((lang) => (
+              <SelectItem key={lang.id} value={lang.id}>
+                {lang.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Three-column editor layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Starter Snippet */}
-        <div className="flex flex-col min-w-0 gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              Starter Code
-            </span>
-            <div className="h-1 w-1 bg-blue-500 rounded-full"></div>
-          </div>
-          <div className="border border-border rounded-lg overflow-hidden bg-muted/5 h-[45vh]">
-            <MonacoEditor
-              key={`starter-${currentLanguage}`}
-              path={`starter-${currentLanguage}`}
-              language={monacoLanguage}
-              theme="vs-dark"
-              defaultValue={currentStub.startSnippet || ""}
-              onMount={handleStarterMount}
-              options={commonOptions}
-            />
-          </div>
-          <p className="text-[10px] text-muted-foreground italic">
-            Initial code template shown to users
-          </p>
-        </div>
-
-        {/* User Snippet */}
-        <div className="flex flex-col min-w-0 gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              User Code Area
-            </span>
-            <div className="h-1 w-1 bg-green-500 rounded-full"></div>
-          </div>
-          <div className="border border-border rounded-lg overflow-hidden bg-muted/5 h-[45vh]">
-            <MonacoEditor
-              key={`user-${currentLanguage}`}
-              path={`user-${currentLanguage}`}
-              language={monacoLanguage}
-              theme="vs-dark"
-              defaultValue={currentStub.userSnippet || ""}
-              onMount={handleUserMount}
-              options={commonOptions}
-            />
-          </div>
-          <p className="text-[10px] text-muted-foreground italic">
-            Where users write their solution code
-          </p>
-        </div>
-
-        {/* Reference Solution */}
-        <div className="flex flex-col min-w-0 gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              Reference Solution
-            </span>
-            <div className="h-1 w-1 bg-amber-500 rounded-full"></div>
-          </div>
-          <div className="border border-border rounded-lg overflow-hidden bg-muted/5 h-[45vh]">
-            <MonacoEditor
-              key={`end-${currentLanguage}`}
-              path={`end-${currentLanguage}`}
-              language={monacoLanguage}
-              theme="vs-dark"
-              defaultValue={currentStub.endSnippet || ""}
-              onMount={handleEndMount}
-              options={commonOptions}
-            />
-          </div>
-          <p className="text-[10px] text-muted-foreground italic">
-            Internal correct solution (not shown to users)
-          </p>
-        </div>
-      </div>
-
-      {/* Language status indicator */}
-      <div className="flex items-center gap-4 pt-2 border-t border-border">
-        <span className="text-xs text-muted-foreground">
-          Configured languages:
-        </span>
-        <div className="flex items-center gap-2">
-          {Object.keys(codeStubs).map((lang) => (
-            <div
-              key={lang}
-              className={`px-2 py-1 rounded-full text-[10px] font-medium ${
-                lang === currentLanguage
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {lang}
+      <div className="grid gap-5 xl:grid-cols-3">
+        {SLOTS.map(({ key, title, hint }) => (
+          <section key={key} className="flex min-w-0 flex-col gap-2">
+            <div>
+              <h3 className="text-sm font-semibold">{title}</h3>
+              <p className="text-xs text-muted-foreground">{hint}</p>
             </div>
-          ))}
-          {Object.keys(codeStubs).length === 0 && (
-            <span className="text-xs text-muted-foreground italic">
-              None configured yet
-            </span>
-          )}
-        </div>
+            <div className="h-[48vh] overflow-hidden rounded-lg border border-border bg-[#1e1e1e]">
+              <MonacoEditor
+                key={`${key}-${currentLanguage}`}
+                path={`${key}-${currentLanguage}`}
+                language={monacoLanguage}
+                theme="vs-dark"
+                defaultValue={currentStub[key] || ""}
+                onMount={(editor, monaco) => {
+                  handleEditorMount(editor, monaco);
+                  editor.onDidChangeModelContent(() => {
+                    valuesRef.current[key] = editor.getValue();
+                    schedule();
+                  });
+                }}
+                options={editorOptions()}
+              />
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+        <span className="text-xs text-muted-foreground">Languages set up:</span>
+        {listLanguages().map((lang) => (
+          <Badge
+            key={lang.id}
+            tone={hasContent(codeStubs[lang.id]) ? "success" : "outline"}
+          >
+            {lang.label}
+          </Badge>
+        ))}
       </div>
     </div>
   );
