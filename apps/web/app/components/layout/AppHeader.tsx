@@ -3,15 +3,28 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Container, Logo, ThemeToggle, cn } from "@logixai/ui";
+import { useSession } from "@/app/lib/auth/useSession";
+import UserMenu from "./UserMenu";
 
-const NAV = [
+type NavItem = { label: string; href: string; when?: "signedIn" | "admin" };
+
+const NAV: NavItem[] = [
   { label: "Practice", href: "/problems" },
-  { label: "Create problem", href: "/create-problem" },
+  { label: "Institutions", href: "/institutions", when: "signedIn" },
+  { label: "Create problem", href: "/create-problem", when: "admin" },
 ];
 
-/** Header for signed-in app pages (practice, authoring, later courses and tests). */
+/** Header for app pages (practice, institutions, authoring). */
 export default function AppHeader() {
   const pathname = usePathname();
+  const { status, user } = useSession();
+
+  const visible = NAV.filter(
+    (item) =>
+      !item.when ||
+      (item.when === "signedIn" && status === "authenticated") ||
+      (item.when === "admin" && user?.role === "admin"),
+  );
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
@@ -20,7 +33,7 @@ export default function AppHeader() {
           <Logo />
         </Link>
         <nav className="flex items-center gap-1 text-sm font-medium">
-          {NAV.map(({ label, href }) => {
+          {visible.map(({ label, href }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link
@@ -39,8 +52,9 @@ export default function AppHeader() {
             );
           })}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
+          <UserMenu />
         </div>
       </Container>
     </header>

@@ -8,6 +8,7 @@ in-browser IDE and a Docker-based judge).
 ```
 apps/
   web/                 Next.js app: marketing site + coding platform    :3008
+  identity-service/    Accounts, sessions, institutions, invites (TS)    :3006
   problem-service/     Problems CRUD (Express, MongoDB)                  :3001
   submission-service/  Accepts submissions, queues them (Fastify, Mongo) :3000
   evaluator-service/   Runs code in Docker, reports results (TS, BullMQ) :3002
@@ -36,6 +37,9 @@ Requires Node 22+, npm 11+ and Docker.
 npm install            # installs every workspace from the repo root
 npm run infra:up       # MongoDB + Redis via docker compose
 ```
+
+If Redis already runs on port 6379, start only MongoDB: `docker compose up -d mongo`.
+identity-service uses `mongodb://localhost:27017/logixai-identity` by default.
 
 Copy each `apps/*/.env.example` to `.env` (for `apps/web`, to `.env.local`) and
 adjust values. Each service validates its env on startup and exits with a clear
@@ -87,7 +91,23 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
     decorative animation. Sentence case for headings, buttons and labels.
   - The code editor is always dark (`vs-dark`), in both page themes. Use
     `editorOptions()` from `components/problem/editorConfig.js`.
-- **Users**: until accounts exist, each browser gets a random anonymous id
-  (`apps/web/app/coding-platform/lib/clientUserId.js`), used for both the
-  submission and the socket registration.
+- **Accounts and access** (identity-service):
+  - Sign-in gives the browser a short-lived access token (JWT, 15 min, kept in
+    memory) and a rotating refresh token in an httpOnly cookie. The web app's
+    `authFetch` (`apps/web/app/lib/auth/session.js`) attaches the token and
+    refreshes it automatically.
+  - Other services verify tokens with identity-service's public keys
+    (`/.well-known/jwks.json`) via `createAccessTokenVerifier` from
+    `@logixai/service-kit`. Never trust a user id sent in a request body.
+  - Platform roles: `user`, `admin`. Creating, editing or deleting problems
+    needs `admin`. Emails in identity-service's `BOOTSTRAP_ADMIN_EMAILS` get
+    `admin` when they sign up.
+  - Institution roles: `owner` > `admin` > `instructor` > `student`. Owners and
+    admins manage batches and invite codes; students join with a code at
+    `/join/<code>`.
+  - In production set `JWT_PRIVATE_KEY` (identity-service) and the same
+    `INTERNAL_API_TOKEN` in submission-service and socket-service.
+- **Lockfile**: root `optionalDependencies` pin lightningcss's platform
+  binaries. npm otherwise drops them from `package-lock.json` (npm bug), which
+  breaks `next build`. Bump them together when Tailwind updates lightningcss.
 - Install dependencies from the root: `npm install <pkg> -w @logixai/<app>`.

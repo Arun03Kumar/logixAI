@@ -2,14 +2,12 @@ import { z } from "zod";
 import { EvaluationJobPayloadSchema } from "./queues";
 import { SubmissionStatusSchema } from "./submission";
 
-/** socket.io event names shared by socket-service and the web app. */
+/**
+ * socket.io event names shared by socket-service and the web app.
+ * Clients authenticate with `io(url, { auth: { token: <access token> } })`;
+ * the user id comes from the token, so there is no "register user" event.
+ */
 export const SOCKET_EVENTS = {
-  /** client -> server: register the socket for a user id */
-  SET_USER_ID: "setUserId",
-  /** client -> server: ask for the socket id of a user */
-  GET_CONNECTION_ID: "getConnectionId",
-  /** server -> client: answer to GET_CONNECTION_ID */
-  CONNECTION_ID: "connectionId",
   /** server -> client: judge result for a submission */
   SUBMISSION_RESULT: "submissionPayloadResponse",
 } as const;

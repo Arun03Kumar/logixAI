@@ -31,4 +31,13 @@ export type { TabItem } from "./components/tabs";
 export { Spinner, Skeleton, EmptyState } from "./components/feedback";
 export { Container, PageHeader, Eyebrow } from "./components/layout";
 export { Logo } from "./components/brand";
+export { Avatar } from "./components/avatar";
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "./components/table";
 export { ThemeToggle, ThemeScript, useTheme } from "./components/theme-toggle";

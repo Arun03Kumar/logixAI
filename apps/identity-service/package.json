@@ -1,0 +1,29 @@
+{
+  "name": "@logixai/identity-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Accounts, sessions, institutions, batches and invites. Issues the access tokens every other service verifies.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/rate-limit": "^11.2.2",
+    "@logixai/contracts": "*",
+    "@logixai/service-kit": "*",
+    "fastify": "^5.4.0",
+    "jose": "^5.10.0",
+    "mongoose": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.2"
+  }
+}

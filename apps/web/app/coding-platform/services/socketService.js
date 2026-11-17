@@ -2,12 +2,11 @@ import { io } from "socket.io-client";
 import toast from "react-hot-toast";
 import { setRunOutput } from "@/app/coding-platform/store/runOutputSlice";
 import { SOCKET_URL } from "@/app/coding-platform/lib/config";
-import { getClientUserId } from "@/app/coding-platform/lib/clientUserId";
+import { getAccessToken } from "@/app/lib/auth/session";
 
 // Must match SOCKET_EVENTS in packages/contracts/src/socket.ts.
 // (Kept as plain strings so the browser bundle does not pull in zod.)
 const SOCKET_EVENTS = {
-  SET_USER_ID: "setUserId",
   SUBMISSION_RESULT: "submissionPayloadResponse",
 };
 
@@ -21,12 +20,14 @@ const VERDICT_TOASTS = {
 
 let socket = null;
 
+/** Connects as the signed-in user. Call only when a session exists. */
 export const initializeSocket = (dispatch) => {
   if (!socket) {
-    socket = io(SOCKET_URL);
-
-    socket.on("connect", () => {
-      socket.emit(SOCKET_EVENTS.SET_USER_ID, getClientUserId());
+    socket = io(SOCKET_URL, {
+      // Called on every (re)connect, so an expired token is refreshed first.
+      auth: (cb) => {
+        getAccessToken().then((token) => cb({ token }));
+      },
     });
 
     socket.on(SOCKET_EVENTS.SUBMISSION_RESULT, (data) => {

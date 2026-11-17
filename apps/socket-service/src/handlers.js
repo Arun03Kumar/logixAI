@@ -4,32 +4,38 @@ const { SOCKET_EVENTS, SendPayloadSchema } = require("@logixai/contracts");
 const userKey = (userId) => `socket:user:${userId}`;
 
 /**
- * Wires the socket.io connection events.
- * @param io socket.io server
+ * socket.io middleware: the client sends its access token in
+ * `io(url, { auth: { token } })`. The user id comes only from the verified
+ * token, so a browser can't subscribe to someone else's results.
+ */
+function createSocketAuth(verifier) {
+  return async (socket, next) => {
+    try {
+      const claims = await verifier.verify(String(socket.handshake.auth?.token ?? ""));
+      socket.data.userId = claims.sub;
+      next();
+    } catch {
+      next(new Error("unauthorized"));
+    }
+  };
+}
+
+/**
+ * Tracks which socket belongs to which user.
+ * @param io socket.io server (with createSocketAuth applied)
  * @param redis ioredis-like client (get/set/del)
  */
 function registerSocketHandlers(io, redis, logger = console) {
-  io.on("connection", (socket) => {
-    logger.log("A user connected:", socket.id);
-    let registeredUserId = null;
-
-    socket.on(SOCKET_EVENTS.SET_USER_ID, async (userId) => {
-      if (typeof userId !== "string" || userId.length === 0) return;
-      registeredUserId = userId;
-      await redis.set(userKey(userId), socket.id);
-    });
-
-    socket.on(SOCKET_EVENTS.GET_CONNECTION_ID, async (userId) => {
-      const connId = await redis.get(userKey(userId));
-      socket.emit(SOCKET_EVENTS.CONNECTION_ID, connId);
-    });
+  io.on("connection", async (socket) => {
+    const { userId } = socket.data;
+    await redis.set(userKey(userId), socket.id);
+    logger.log(`User ${userId} connected (${socket.id})`);
 
     socket.on("disconnect", async () => {
-      if (!registeredUserId) return;
       // Only clear the mapping if a newer tab has not replaced it.
-      const current = await redis.get(userKey(registeredUserId));
+      const current = await redis.get(userKey(userId));
       if (current === socket.id) {
-        await redis.del(userKey(registeredUserId));
+        await redis.del(userKey(userId));
       }
     });
   });
@@ -70,4 +76,9 @@ function createSendPayloadHandler(io, redis, logger = console) {
   };
 }
 
-module.exports = { registerSocketHandlers, createSendPayloadHandler, userKey };
+module.exports = {
+  createSocketAuth,
+  registerSocketHandlers,
+  createSendPayloadHandler,
+  userKey,
+};

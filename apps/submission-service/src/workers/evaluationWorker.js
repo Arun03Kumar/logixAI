@@ -2,14 +2,20 @@ const { Worker } = require("bullmq");
 const { QUEUE_NAMES, JOB_NAMES } = require("@logixai/contracts");
 const redisConnection = require("../config/redisConfig");
 const axiosInstance = require("../config/axiosInstance");
-const { SOCKET_SERVICE_URL } = require("../config/serverConfig");
+const {
+  SOCKET_SERVICE_URL,
+  INTERNAL_API_TOKEN,
+} = require("../config/serverConfig");
 const processEvaluation = require("./processEvaluation");
 
 async function notifyUser(userId, payload) {
-  await axiosInstance.post(`${SOCKET_SERVICE_URL}/sendPayload`, {
-    userId,
-    payload,
-  });
+  await axiosInstance.post(
+    `${SOCKET_SERVICE_URL}/sendPayload`,
+    { userId, payload },
+    INTERNAL_API_TOKEN
+      ? { headers: { "x-internal-token": INTERNAL_API_TOKEN } }
+      : undefined,
+  );
 }
 
 /**

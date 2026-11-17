@@ -4,6 +4,7 @@ import { ThemeScript } from "@logixai/ui";
 import "./globals.css";
 import ReduxProvider from "./coding-platform/components/ReduxProvider";
 import AppToaster from "./components/layout/AppToaster";
+import { SessionBootstrap } from "./lib/auth/useSession";
 
 const jakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
@@ -49,6 +50,7 @@ export default function RootLayout({
         <ThemeScript />
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
+        <SessionBootstrap />
         <ReduxProvider>{children}</ReduxProvider>
         <AppToaster />
       </body>

@@ -7,7 +7,11 @@ async function pingRequest(req, res) {
 }
 
 async function createSubmission(req, res) {
-  const parsed = CreateSubmissionSchema.safeParse(req.body ?? {});
+  // The user comes from the verified access token, never from the body.
+  const parsed = CreateSubmissionSchema.safeParse({
+    ...(req.body ?? {}),
+    userId: req.auth.sub,
+  });
   if (!parsed.success) {
     throw new BadRequestError("submission", parsed.error.issues);
   }

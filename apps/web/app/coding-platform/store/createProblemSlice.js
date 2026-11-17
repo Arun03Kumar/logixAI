@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { DEFAULT_LANGUAGE, LANGUAGE_IDS } from "@logixai/languages";
 import { PROBLEM_API_URL } from "@/app/coding-platform/lib/config";
+import { authFetch, readEnvelope } from "@/app/lib/auth/session";
 
 // One empty stub per supported language (from the shared language registry).
 const emptyCodeStubs = () =>
@@ -11,28 +12,16 @@ const emptyCodeStubs = () =>
     ]),
   );
 
-// Async thunk for publishing problem
+// Publishing needs a platform admin's access token.
 export const publishProblem = createAsyncThunk(
   "createProblem/publishProblem",
   async (payload, { rejectWithValue }) => {
     try {
-      // const res = await fetch(
-      //   "https://leetcode-problem-service-49a74a7445f0.herokuapp.com/api/v1/problems",
-      //   {
-      const res = await fetch(`${PROBLEM_API_URL}/problems`, {
+      const res = await authFetch(`${PROBLEM_API_URL}/problems`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText || "Failed to publish");
-      }
-
-      const created = await res.json();
-      console.log("Problem created:", created);
-      return created;
+      return await readEnvelope(res);
     } catch (error) {
       return rejectWithValue(error.message);
     }

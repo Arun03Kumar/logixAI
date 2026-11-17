@@ -1,7 +1,10 @@
 "use client";
 import React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useSelector, useDispatch } from "react-redux";
+import { useSession } from "@/app/lib/auth/useSession";
+import UserMenu from "@/app/components/layout/UserMenu";
 import toast from "react-hot-toast";
 import { ChevronLeft, Play, Send } from "lucide-react";
 import {
@@ -24,6 +27,8 @@ import {
 
 export default function ProblemHeader({ problemId }) {
   const dispatch = useDispatch();
+  const pathname = usePathname();
+  const { status } = useSession();
   const problem = useSelector((state) => state.problem.data);
   const language = useSelector((state) => state.problem.language);
   const userCode = useSelector((state) => state.problem.userCode);
@@ -76,24 +81,35 @@ export default function ProblemHeader({ problemId }) {
           ))}
         </SelectContent>
       </Select>
-      <Button
-        size="sm"
-        disabled={isRunning || isSubmitting}
-        onClick={() => send(runCode)}
-      >
-        {isRunning ? <Spinner /> : <Play />}
-        Run
-      </Button>
-      <Button
-        size="sm"
-        variant="primary"
-        disabled={isRunning || isSubmitting}
-        onClick={() => send(submitCode)}
-      >
-        {isSubmitting ? <Spinner className="text-primary-foreground" /> : <Send />}
-        Submit
-      </Button>
+      {status === "anonymous" ? (
+        <Button asChild size="sm" variant="primary">
+          <Link href={`/login?next=${encodeURIComponent(pathname)}`}>
+            Sign in to run code
+          </Link>
+        </Button>
+      ) : (
+        <>
+          <Button
+            size="sm"
+            disabled={status !== "authenticated" || isRunning || isSubmitting}
+            onClick={() => send(runCode)}
+          >
+            {isRunning ? <Spinner /> : <Play />}
+            Run
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={status !== "authenticated" || isRunning || isSubmitting}
+            onClick={() => send(submitCode)}
+          >
+            {isSubmitting ? <Spinner className="text-primary-foreground" /> : <Send />}
+            Submit
+          </Button>
+        </>
+      )}
       <ThemeToggle />
+      <UserMenu />
     </header>
   );
 }

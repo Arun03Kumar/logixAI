@@ -1,17 +1,12 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { SUBMISSION_API_URL } from "@/app/coding-platform/lib/config";
-import { getClientUserId } from "@/app/coding-platform/lib/clientUserId";
+import { authFetch } from "@/app/lib/auth/session";
 
+// The user is taken from the access token on the server.
 async function postSubmission({ id, userCode, language }) {
-  const res = await fetch(`${SUBMISSION_API_URL}/submission/`, {
+  const res = await authFetch(`${SUBMISSION_API_URL}/submission/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      userId: getClientUserId(),
-      problemId: id,
-      code: userCode,
-      language,
-    }),
+    body: JSON.stringify({ problemId: id, code: userCode, language }),
   });
   return res.json();
 }

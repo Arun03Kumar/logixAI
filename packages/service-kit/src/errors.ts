@@ -41,6 +41,24 @@ export class NotFoundError extends BaseError {
   }
 }
 
+export class UnauthorizedError extends BaseError {
+  constructor(description = "Sign in to continue") {
+    super("Unauthorized", 401, description, {});
+  }
+}
+
+export class ForbiddenError extends BaseError {
+  constructor(description = "You don't have access to this") {
+    super("Forbidden", 403, description, {});
+  }
+}
+
+export class ConflictError extends BaseError {
+  constructor(description: string, details?: unknown) {
+    super("Conflict", 409, description, details);
+  }
+}
+
 export class InternalServerError extends BaseError {
   constructor(details?: unknown) {
     super("InternalServerError", 500, "Something went wrong", details);

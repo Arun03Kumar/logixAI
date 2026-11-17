@@ -8,5 +8,8 @@ export const PROBLEM_API_URL =
 export const SUBMISSION_API_URL =
   process.env.NEXT_PUBLIC_SUBMISSION_API_URL || "http://localhost:3000/api/v1";
 
+export const IDENTITY_API_URL =
+  process.env.NEXT_PUBLIC_IDENTITY_API_URL || "http://localhost:3006/api/v1";
+
 export const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3005";

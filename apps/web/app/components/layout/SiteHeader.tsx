@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { Button, Container, Logo, ThemeToggle } from "@logixai/ui";
+import UserMenu from "./UserMenu";
 
 const LINKS = [
   { label: "Platform", href: "/#platform" },
@@ -38,6 +39,7 @@ export default function SiteHeader() {
 
         <div className="hidden items-center gap-2 md:flex">
           <ThemeToggle />
+          <UserMenu />
           <Button asChild variant="primary" size="sm">
             <Link href="/problems">Start practicing</Link>
           </Button>

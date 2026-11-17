@@ -8,6 +8,7 @@ import {
   initializeSocket,
   disconnectSocket,
 } from "@/app/coding-platform/services/socketService";
+import { useSession } from "@/app/lib/auth/useSession";
 import ProblemHeader from "@/app/coding-platform/components/problem/ProblemHeader";
 import ProblemDescription from "@/app/coding-platform/components/problem/ProblemDescription";
 import CodeEditor from "@/app/coding-platform/components/problem/CodeEditor";
@@ -16,18 +17,19 @@ import OutputTabs from "@/app/coding-platform/components/problem/OutputTabs";
 export default function ProblemDetailPage() {
   const params = useParams();
   const dispatch = useDispatch();
+  const { status } = useSession();
   const id = params?.id;
 
   useEffect(() => {
-    if (!id) return;
-
-    dispatch(fetchProblem({ id, language: DEFAULT_LANGUAGE }));
-    initializeSocket(dispatch);
-
-    return () => {
-      disconnectSocket();
-    };
+    if (id) dispatch(fetchProblem({ id, language: DEFAULT_LANGUAGE }));
   }, [id, dispatch]);
+
+  // Results arrive over the socket, which needs a signed-in user.
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    initializeSocket(dispatch);
+    return () => disconnectSocket();
+  }, [status, dispatch]);
 
   if (!id) return null;
 

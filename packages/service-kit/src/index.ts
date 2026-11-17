@@ -6,6 +6,9 @@ export {
   BaseError,
   BadRequestError,
   NotFoundError,
+  UnauthorizedError,
+  ForbiddenError,
+  ConflictError,
   InternalServerError,
   NotImplementedError,
 } from "./errors";
@@ -13,3 +16,5 @@ export { successResponse, errorResponse } from "./response";
 export { connectMongo, disconnectMongo } from "./mongo";
 export { createRedisConnection } from "./redis";
 export type { RedisOptions } from "./redis";
+export { createAccessTokenVerifier, requirePlatformRole } from "./auth";
+export type { AccessTokenVerifier } from "./auth";

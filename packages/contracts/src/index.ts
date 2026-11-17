@@ -4,6 +4,7 @@ export * from "./problem";
 export * from "./submission";
 export * from "./queues";
 export * from "./socket";
+export * from "./auth";
 export {
   LANGUAGE_IDS,
   LANGUAGES,
