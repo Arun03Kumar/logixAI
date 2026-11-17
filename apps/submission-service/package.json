@@ -1,0 +1,30 @@
+{
+  "name": "@logixai/submission-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "test": "vitest run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "axios": "^1.11.0",
+    "bullmq": "^5.56.9",
+    "fastify": "^5.4.0",
+    "fastify-plugin": "^5.0.1",
+    "ioredis": "^5.7.0",
+    "mongoose": "^8.17.1",
+    "@logixai/contracts": "*",
+    "@logixai/service-kit": "*"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "private": true
+}

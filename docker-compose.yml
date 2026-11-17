@@ -1,0 +1,37 @@
+# Local infrastructure for LogixAI development.
+#   npm run infra:up    -> start MongoDB + Redis
+#   npm run infra:down  -> stop them (data is kept in named volumes)
+#
+# The Node services run on the host with `npm run dev` so they hot-reload.
+# The evaluator talks to the host Docker daemon to start judge containers.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo-data:
+  redis-data:

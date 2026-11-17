@@ -1,0 +1,20 @@
+{
+  "name": "@logixai/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared Zod schemas and types for every API, queue job and socket event between LogixAI services.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@logixai/languages": "*",
+    "zod": "^4.0.14"
+  }
+}
