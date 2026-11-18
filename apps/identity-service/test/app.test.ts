@@ -296,6 +296,12 @@ describe("institutions", () => {
     expect(members.json().data.items.map((m: { role: string }) => m.role)).toEqual(["owner", "student"]);
     expect(members.json().data.nextCursor).toBeNull();
 
+    const inBatch = await app.inject({
+      url: `/api/v1/institutions/${institutionId}/members?batchId=${batchId}`,
+      headers: bearer(owner.token),
+    });
+    expect(inBatch.json().data.items.map((m: { role: string }) => m.role)).toEqual(["student"]);
+
     const batches = await app.inject({
       url: `/api/v1/institutions/${institutionId}/batches`,
       headers: bearer(owner.token),

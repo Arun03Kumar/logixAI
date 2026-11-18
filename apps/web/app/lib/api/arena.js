@@ -24,4 +24,20 @@ export const arenaApi = {
   submission: (id) => call(`/submissions/${encodeURIComponent(id)}`),
   submissions: ({ cursor, limit = 20, itemId } = {}) => call(`/submissions?${pageQuery({ cursor, limit, itemId })}`),
   dashboard: () => call("/me/dashboard"),
+  reviewQueue: () => call("/me/review"),
+  skillMap: () => call("/skill-map"),
+  myAssignments: () => call("/me/assignments"),
+
+  // Institutions (instructors and admins manage; students see their batches)
+  assignments: (institutionId) => call(`/institutions/${encodeURIComponent(institutionId)}/assignments`),
+  assignTrack: (institutionId, input) =>
+    call(`/institutions/${encodeURIComponent(institutionId)}/assignments`, { method: "POST", body: input }),
+  unassignTrack: (institutionId, assignmentId) =>
+    call(`/institutions/${encodeURIComponent(institutionId)}/assignments/${encodeURIComponent(assignmentId)}`, {
+      method: "DELETE",
+    }),
+  batchReport: (institutionId, batchId, trackId) =>
+    call(
+      `/institutions/${encodeURIComponent(institutionId)}/report?${new URLSearchParams({ batchId, trackId })}`,
+    ),
 };

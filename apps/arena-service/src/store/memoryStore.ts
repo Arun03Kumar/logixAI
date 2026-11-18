@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { decodeCursor, encodeCursor } from "@logixai/service-kit";
-import type { ProgressRecord, StatsRecord, Store, SubmissionRecord } from "./types.js";
+import type { AuditEvent } from "@logixai/contracts";
+import type { AssignmentRecord, ProgressRecord, StatsRecord, Store, SubmissionRecord } from "./types.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -9,6 +10,8 @@ export function createMemoryStore(): Store {
   const progress = new Map<string, ProgressRecord>();
   const submissions: SubmissionRecord[] = [];
   const stats = new Map<string, StatsRecord>();
+  const assignments: AssignmentRecord[] = [];
+  const auditLog: AuditEvent[] = [];
   const key = (u: string, i: string) => `${u}|${i}`;
 
   return {
@@ -66,6 +69,12 @@ export function createMemoryStore(): Store {
         });
         return true;
       },
+      async setReview(u, i, review) {
+        const row = progress.get(key(u, i));
+        if (row) row.review = clone(review);
+      },
+      listForUsers: async (userIds, itemIds) =>
+        [...progress.values()].filter((p) => userIds.includes(p.userId) && itemIds.includes(p.itemId)).map(clone),
     },
     submissions: {
       async create(data) {
@@ -107,6 +116,40 @@ export function createMemoryStore(): Store {
         row.solvedCount += change.solved;
         row.days[day] = (row.days[day] ?? 0) + change.solved;
         stats.set(u, row);
+      },
+      getMany: async (userIds) => [...stats.values()].filter((s) => userIds.includes(s.userId)).map(clone),
+    },
+    assignments: {
+      async create(data) {
+        if (assignments.some((a) => a.institutionId === data.institutionId && a.batchId === data.batchId && a.trackId === data.trackId)) {
+          throw Object.assign(new Error("duplicate key"), { code: 11000 });
+        }
+        const row = { ...clone(data), id: randomUUID() };
+        assignments.push(row);
+        return clone(row);
+      },
+      get: async (id) => clone(assignments.find((a) => a.id === id) ?? null),
+      async delete(id) {
+        const i = assignments.findIndex((a) => a.id === id);
+        if (i >= 0) assignments.splice(i, 1);
+      },
+      listForInstitution: async (institutionId, batchIds) =>
+        assignments
+          .filter((a) => a.institutionId === institutionId && (!batchIds || batchIds.includes(a.batchId)))
+          .reverse()
+          .map(clone),
+    },
+    audit: {
+      async record(event) {
+        auditLog.push({ ...clone(event), id: randomUUID(), at: new Date().toISOString() });
+      },
+      async pageForInstitution(institutionId, { limit, cursor }) {
+        const start = decodeCursor(cursor, (v): v is number => Number.isInteger(v) && (v as number) >= 0) ?? 0;
+        const rows = auditLog.filter((e) => e.institutionId === institutionId).reverse();
+        return {
+          items: rows.slice(start, start + limit).map(clone),
+          nextCursor: rows.length > start + limit ? encodeCursor(start + limit) : null,
+        };
       },
     },
   };

@@ -22,6 +22,7 @@ import MembersTab from "./_components/MembersTab";
 import BatchesTab from "./_components/BatchesTab";
 import InvitesTab from "./_components/InvitesTab";
 import ExamsTab from "./_components/ExamsTab";
+import ArenaTab from "./_components/ArenaTab";
 
 function InstitutionDetail() {
   const { id } = useParams();
@@ -70,6 +71,7 @@ function InstitutionDetail() {
 
   const tabs = [
     { value: "exams", label: "Exams" },
+    { value: "arena", label: "ML Arena" },
     ...(canView(role)
       ? [
           { value: "members", label: "Members" },
@@ -97,6 +99,7 @@ function InstitutionDetail() {
         <Tabs items={tabs} value={tab} onValueChange={setTab} aria-label="Institution sections" />
         <div className="mt-6">
           {tab === "exams" && <ExamsTab institutionId={id} myRole={role} />}
+          {tab === "arena" && <ArenaTab institutionId={id} myRole={role} />}
           {tab === "members" && canView(role) && (
             <MembersTab institutionId={id} myRole={role} myUserId={user.id} />
           )}

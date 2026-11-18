@@ -54,3 +54,71 @@ export function jsonOutputsMatch(
   }
   return jsonValuesMatch(e, a, tol);
 }
+
+/* ── Metrics for dataset challenges ── */
+
+export const METRICS = ["accuracy", "f1", "r2", "rmse", "mae"] as const;
+export type Metric = (typeof METRICS)[number];
+
+/** Error metrics: lower is better. */
+export const LOWER_IS_BETTER: Readonly<Record<Metric, boolean>> = {
+  accuracy: false,
+  f1: false,
+  r2: false,
+  rmse: true,
+  mae: true,
+};
+
+/**
+ * Scores predictions against true values. Returns null when they can't be
+ * compared (wrong length, non-numbers for regression). f1 is binary with
+ * positive class 1.
+ */
+export function metricScore(metric: Metric, truth: unknown[], predicted: unknown): number | null {
+  if (!Array.isArray(predicted) || predicted.length !== truth.length || truth.length === 0) return null;
+  const n = truth.length;
+  if (metric === "accuracy") {
+    let right = 0;
+    for (let i = 0; i < n; i++) if (sameLabel(truth[i], predicted[i])) right++;
+    return right / n;
+  }
+  if (metric === "f1") {
+    let tp = 0;
+    let fp = 0;
+    let fn = 0;
+    for (let i = 0; i < n; i++) {
+      const t = sameLabel(truth[i], 1);
+      const p = sameLabel(predicted[i], 1);
+      if (t && p) tp++;
+      else if (p) fp++;
+      else if (t) fn++;
+    }
+    return tp === 0 ? 0 : (2 * tp) / (2 * tp + fp + fn);
+  }
+  const y = truth.map(Number);
+  const p = predicted.map((v) => (typeof v === "number" ? v : Number.NaN));
+  if (p.some((v) => !Number.isFinite(v))) return null;
+  if (metric === "mae") return y.reduce((s, v, i) => s + Math.abs(v - p[i]!), 0) / n;
+  const sse = y.reduce((s, v, i) => s + (v - p[i]!) ** 2, 0);
+  if (metric === "rmse") return Math.sqrt(sse / n);
+  const mean = y.reduce((s, v) => s + v, 0) / n;
+  const sst = y.reduce((s, v) => s + (v - mean) ** 2, 0);
+  return sst === 0 ? 0 : 1 - sse / sst;
+}
+
+/** Labels compare as numbers when both are numeric (1 == 1.0 == true), else as strings. */
+function sameLabel(a: unknown, b: unknown): boolean {
+  const num = (v: unknown) => (typeof v === "boolean" ? Number(v) : typeof v === "number" ? v : null);
+  const x = num(a);
+  const y = num(b);
+  if (x !== null && y !== null) return x === y;
+  return String(a) === String(b);
+}
+
+export function metricPasses(metric: Metric, score: number | null, threshold: number): boolean {
+  if (score === null || !Number.isFinite(score)) return false;
+  return LOWER_IS_BETTER[metric] ? score <= threshold : score >= threshold;
+}
+
+export const formatScore = (metric: Metric, score: number) =>
+  `${metric} ${metric === "accuracy" || metric === "f1" || metric === "r2" ? score.toFixed(4) : score.toPrecision(5)}`;

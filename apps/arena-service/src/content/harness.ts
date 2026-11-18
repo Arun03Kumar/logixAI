@@ -29,6 +29,9 @@ def __lx_convert(value, kind):
     if kind in ("ndarray", "ndarray_int"):
         import numpy as np
         return np.array(value, dtype=np.float64 if kind == "ndarray" else np.int64)
+    if kind == "dataframe":
+        import pandas as pd
+        return pd.DataFrame(value["data"], columns=value["columns"])
     return value
 
 def __lx_encode(v):
@@ -54,6 +57,17 @@ def __lx_encode(v):
             return __lx_encode(v.item())
     except ImportError:
         pass
+    pd = __lx_sys.modules.get("pandas")
+    if pd is not None:
+        if isinstance(v, pd.DataFrame):
+            # Compared by columns and rows; the index is ignored.
+            return {"columns": [str(c) for c in v.columns], "data": __lx_encode(v.to_numpy(dtype=object).tolist())}
+        if isinstance(v, pd.Series):
+            return {str(k): __lx_encode(x) for k, x in v.items()}
+        if v is pd.NaT or (not isinstance(v, (list, tuple, dict)) and pd.api.types.is_scalar(v) and pd.isna(v)):
+            return "nan"
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
     if hasattr(v, "tolist"):
         return __lx_encode(v.tolist())
     raise TypeError("the return value has type " + type(v).__name__ + ", which can't be checked; return numbers, lists or arrays")
@@ -135,6 +149,9 @@ __lx_out.write(__lx_json.dumps({"generated": __lx_generated, "results": __lx_res
 `;
 }
 
+const isFrame = (v: unknown): v is { columns: unknown[]; data: unknown[][] } =>
+  typeof v === "object" && v !== null && Array.isArray((v as { columns?: unknown }).columns) && Array.isArray((v as { data?: unknown }).data);
+
 /** Python-looking call for showing a sample test, e.g. dot([1, 2], [3, 4]). */
 export function formatCall(name: string, args: unknown[]): string {
   return `${name}(${args.map(pyRepr).join(", ")})`;
@@ -142,6 +159,7 @@ export function formatCall(name: string, args: unknown[]): string {
 
 export function pyRepr(value: unknown): string {
   if (value === null || value === undefined) return "None";
+  if (isFrame(value)) return `<DataFrame: ${value.data.length} rows × ${value.columns.length} columns>`;
   if (value === true) return "True";
   if (value === false) return "False";
   if (typeof value === "string") return JSON.stringify(value);

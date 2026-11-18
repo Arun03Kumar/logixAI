@@ -125,13 +125,56 @@ function Results({ submission, running }) {
 }
 
 /** Code and debug items: an editor, Run (examples) and Submit (all tests). */
-export default function CodePlayer({ item, signedIn, onItemChange }) {
-  const [code, setCode] = useState(() => readDraft(item.id) ?? item.lastAnswer?.code ?? item.starterCode ?? "");
+/** First rows of a dataset challenge's data, so learners can see what they're modelling. */
+function DatasetPreview({ dataset, scoring }) {
+  const cell = (v) => (v === null || v === undefined ? "—" : String(v));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold">Data</h2>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-xs">
+          <thead className="bg-muted">
+            <tr>
+              {dataset.columns.map((c) => (
+                <th key={c} className={cn("px-2 py-1.5 text-left font-medium", c === dataset.target && "text-primary")}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dataset.rows.map((row, i) => (
+              <tr key={i} className="border-t border-border">
+                {row.map((v, j) => (
+                  <td key={j} className="whitespace-nowrap px-2 py-1 font-mono tabular-nums">
+                    {cell(v)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {dataset.rowCount} rows; you train on {dataset.trainRows} and predict {dataset.testRows} held-out rows whose{" "}
+        <span className="font-medium text-primary">{dataset.target}</span> you never see. Missing values show as —.
+        {scoring ? ` Pass mark: ${scoring.metric} ${scoring.metric === "rmse" || scoring.metric === "mae" ? "≤" : "≥"} ${scoring.threshold}.` : ""}
+      </p>
+    </section>
+  );
+}
+
+export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = false }) {
+  // A review starts from scratch: recall it, don't reload it.
+  const [code, setCode] = useState(() =>
+    reviewMode ? (item.starterCode ?? "") : (readDraft(item.id) ?? item.lastAnswer?.code ?? item.starterCode ?? ""),
+  );
+  const [passedNow, setPassedNow] = useState(false);
   const [submission, setSubmission] = useState(null);
   const [running, setRunning] = useState(false);
   const [hints, setHints] = useState(0);
   const alive = useRef(true);
-  const open = item.status === "solved" || item.status === "revealed";
+  const open = (item.status === "solved" || item.status === "revealed") && (!reviewMode || passedNow);
 
   useEffect(() => {
     alive.current = true;
@@ -166,7 +209,8 @@ export default function CodePlayer({ item, signedIn, onItemChange }) {
       if (!done) {
         if (alive.current) toast("Still judging — check back in a moment.");
       } else if (done.mode === "submit" && done.status === "passed") {
-        toast.success(done.xpGained ? `Accepted! +${done.xpGained} XP` : "Accepted!");
+        toast.success(done.xpGained ? `Accepted! +${done.xpGained} XP` : reviewMode ? "Reviewed — see you at the next interval." : "Accepted!");
+        setPassedNow(true);
         onItemChange(await arenaApi.item(item.id));
       }
     } catch (err) {
@@ -203,6 +247,8 @@ export default function CodePlayer({ item, signedIn, onItemChange }) {
           </pre>
         </section>
 
+        {item.dataset ? <DatasetPreview dataset={item.dataset} scoring={item.scoring} /> : null}
+
         <section className="space-y-2">
           <h2 className="text-sm font-semibold">Examples</h2>
           <ul className="space-y-2">
@@ -214,8 +260,9 @@ export default function CodePlayer({ item, signedIn, onItemChange }) {
             ))}
           </ul>
           <p className="text-xs text-muted-foreground">
-            Submit also runs {item.hiddenTestCount} hidden {item.hiddenTestCount === 1 ? "test" : "tests"}. Numbers are
-            compared with a small tolerance; NumPy arrays and lists both work as return values.
+            {item.scoring
+              ? "Run trains on part of the training rows and scores your predictions on a validation split. Submit trains on all of them and scores the held-out rows."
+              : `Submit also runs ${item.hiddenTestCount} hidden ${item.hiddenTestCount === 1 ? "test" : "tests"}. Numbers are compared with a small tolerance; NumPy arrays, lists and DataFrames all work as return values.`}
           </p>
         </section>
 
@@ -253,7 +300,7 @@ export default function CodePlayer({ item, signedIn, onItemChange }) {
               </Button>
             ) : null}
           </section>
-        ) : signedIn ? (
+        ) : signedIn && !reviewMode ? (
           <Button variant="ghost" size="sm" onClick={reveal}>
             Show solution
           </Button>

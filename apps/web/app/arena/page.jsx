@@ -16,6 +16,7 @@ import { useApi } from "@/app/lib/api/useApi";
 import { useSession } from "@/app/lib/auth/useSession";
 import ArenaShell from "./_components/ArenaShell";
 import { MasteryBar, StatusIcon } from "./_components/bits";
+import { Assigned, Recommendations } from "./_components/ForYou";
 import { LABS, TRACK_LEVEL } from "./_components/labels";
 
 function NextUp({ dashboard }) {
@@ -89,6 +90,7 @@ export default function ArenaHomePage() {
   const signedIn = status === "authenticated";
   const tracks = useApi(() => arenaApi.tracks(), [status], { enabled: status !== "loading" });
   const dashboard = useApi(() => arenaApi.dashboard(), [status], { enabled: signedIn });
+  const assigned = useApi(() => arenaApi.myAssignments(), [status], { enabled: signedIn });
 
   return (
     <ArenaShell>
@@ -106,6 +108,13 @@ export default function ArenaHomePage() {
         />
 
         {signedIn && dashboard.data ? <NextUp dashboard={dashboard.data} /> : null}
+        {signedIn ? <Assigned assignments={assigned.data} /> : null}
+        {signedIn && dashboard.data ? (
+          <Recommendations
+            recommendations={dashboard.data.recommendations}
+            reviewDueCount={dashboard.data.reviewDueCount}
+          />
+        ) : null}
 
         <section className="space-y-4">
           <h2 className="text-lg font-semibold">Tracks</h2>

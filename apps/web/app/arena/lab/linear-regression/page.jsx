@@ -5,7 +5,7 @@ import { Pause, Play, Shuffle, Target } from "lucide-react";
 import { Button, Card, Container, PageHeader } from "@logixai/ui";
 import ArenaShell from "../../_components/ArenaShell";
 import { Stat } from "../../_components/bits";
-import { LabNav, LossChart, Slider, mulberry32, normal } from "../LabBits";
+import { LabNav, LossChart, Slider, mulberry32, normal, r2 } from "../LabBits";
 
 const N = 30;
 const TRUE_W = 1.2;
@@ -48,8 +48,8 @@ const H = 300;
 const X_MAX = 10;
 const Y_MIN = -4;
 const Y_MAX = 20;
-const px = (x) => 30 + (x / X_MAX) * (W - 40);
-const py = (y) => H - 24 - ((y - Y_MIN) / (Y_MAX - Y_MIN)) * (H - 34);
+const px = (x) => r2(30 + (x / X_MAX) * (W - 40));
+const py = (y) => r2(H - 24 - ((y - Y_MIN) / (Y_MAX - Y_MIN)) * (H - 34));
 const clampY = (v) => Math.max(-200, Math.min(H + 200, v));
 const round = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "∞");
 

@@ -100,7 +100,7 @@ export interface Store {
      */
     pageForInstitution(
       institutionId: string,
-      query: { limit: number; cursor?: string; role?: InstitutionRole; userIds?: string[] },
+      query: { limit: number; cursor?: string; role?: InstitutionRole; userIds?: string[]; batchId?: string },
     ): Promise<{ items: MembershipRecord[]; nextCursor: string | null }>;
     /** Number of members in each batch (one aggregation, not a full scan in the app). */
     countByBatch(institutionId: string): Promise<Record<string, number>>;

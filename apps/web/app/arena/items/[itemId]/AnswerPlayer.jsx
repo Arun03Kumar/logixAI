@@ -57,12 +57,13 @@ function initialAnswer(item) {
 }
 
 /** Multiple choice, numeric and predict-the-output items: graded instantly. */
-export default function AnswerPlayer({ item, signedIn, onItemChange }) {
-  const [answer, setAnswer] = useState(() => initialAnswer(item));
+export default function AnswerPlayer({ item, signedIn, onItemChange, reviewMode = false }) {
+  // A review starts blank: recall it, don't re-read it.
+  const [answer, setAnswer] = useState(() => (reviewMode ? initialAnswer({}) : initialAnswer(item)));
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [hints, setHints] = useState(0);
-  const open = item.status === "solved" || item.status === "revealed";
+  const open = (item.status === "solved" || item.status === "revealed") && (!reviewMode || Boolean(result?.correct));
 
   const payload = () => {
     if (item.type === "mcq_single" || item.type === "mcq_multi") return { selectedOptionIds: answer.selected };
@@ -81,10 +82,9 @@ export default function AnswerPlayer({ item, signedIn, onItemChange }) {
     try {
       const res = await arenaApi.answer(item.id, payload());
       setResult(res);
-      if (res.correct) {
-        onItemChange(await arenaApi.item(item.id));
-        if (res.xpGained) toast.success(`Correct! +${res.xpGained} XP`);
-      }
+      onItemChange(await arenaApi.item(item.id));
+      if (res.correct && res.xpGained) toast.success(`Correct! +${res.xpGained} XP`);
+      else if (res.reviewed && res.correct) toast.success("Reviewed — see you at the next interval.");
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -172,7 +172,7 @@ export default function AnswerPlayer({ item, signedIn, onItemChange }) {
               {hints ? "Another hint" : "Hint"}
             </Button>
           ) : null}
-          {signedIn && !open ? (
+          {signedIn && !open && !reviewMode ? (
             <Button variant="ghost" onClick={reveal} className="ml-auto">
               Show answer
             </Button>

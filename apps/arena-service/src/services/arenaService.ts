@@ -1,5 +1,9 @@
 import {
+  LOWER_IS_BETTER,
   XP_BY_DIFFICULTY,
+  type Checker,
+  type ReviewQueue,
+  type SkillMap,
   isCodeItem,
   levelForXp,
   type AnswerInput,
@@ -23,13 +27,23 @@ import type { Catalog, CatalogItem, CatalogTopic, CatalogTrack } from "../conten
 import { buildJudgeProgram, formatCall } from "../content/harness.js";
 import { addDays, dayOf, streaks } from "../lib/days.js";
 import type { Page, ProgressRecord, Store, SubmissionRecord } from "../store/types.js";
+import {
+  firstReview,
+  isDue,
+  nextReview,
+  recommendations,
+  reviewQueue,
+  reviewState,
+  skillMap,
+} from "./learning.js";
 
 export interface JudgeRequest {
   submissionId: string;
   userId: string;
   program: string;
   tests: { input: string; output: string }[];
-  tolerance: { abs: number; rel: number };
+  /** json with the item's tolerance, or metric for dataset challenges. */
+  checker: Checker;
 }
 
 export interface JudgeGateway {
@@ -196,14 +210,25 @@ export class ArenaService {
         view.signature = { name: item.function.name, params: item.function.params, returns: item.function.returns };
         view.samples = (item.judge?.sample ?? []).map((t) => ({
           call: formatCall(item.function.name, t.args),
-          expected: t.expected,
+          expected: this.expectedText(item, t.expected),
         }));
         view.hiddenTestCount = item.judge?.hidden.length ?? 0;
+        if (item.scoring) view.scoring = item.scoring;
+        if (item.dataset && item.datasetPreview) view.dataset = { target: item.dataset.target, ...item.datasetPreview };
         if (open) view.solution = item.solution;
         break;
     }
     if (open) view.explanation = item.explanation;
+    const review = reviewState(row?.userId ? row : null, this.now());
+    if (review) view.review = review;
     return view;
+  }
+
+  /** Dataset challenges never show the labels, only what score is needed. */
+  private expectedText(item: CatalogItem, expected: string): string {
+    if (!("scoring" in item) || !item.scoring) return expected;
+    const { metric, threshold } = item.scoring;
+    return `${metric} ${LOWER_IS_BETTER[metric] ? "≤" : "≥"} ${threshold}`;
   }
 
   async getItem(userId: string | null, itemId: string): Promise<ItemView> {
@@ -248,8 +273,16 @@ export class ArenaService {
     const before = await this.deps.store.progress.markSolved(userId, item.id, xp, this.now());
     const firstSolve = before !== "solved";
     const gained = firstSolve ? xpFor(item, before) : 0;
+    if (firstSolve) await this.deps.store.progress.setReview(userId, item.id, firstReview(this.now()));
     await this.deps.store.stats.record(userId, dayOf(this.now()), { xp: gained, solved: firstSolve ? 1 : 0 });
     return gained;
+  }
+
+  /** A solved item answered again while due counts as a review: success spaces it out, a miss starts over. */
+  private async review(row: ProgressRecord | null, success: boolean): Promise<boolean> {
+    if (!row || !isDue(row, this.now())) return false;
+    await this.deps.store.progress.setReview(row.userId, row.itemId, nextReview(row.review!, success, this.now()));
+    return true;
   }
 
   async answer(userId: string, itemId: string, input: AnswerInput): Promise<AnswerResult> {
@@ -258,11 +291,13 @@ export class ArenaService {
     const row = await this.deps.store.progress.recordAttempt(userId, itemId, input, this.now());
     if (!correct) {
       await this.deps.store.stats.record(userId, dayOf(this.now()), { xp: 0, solved: 0 });
+      const reviewed = await this.review(row, false);
       const open = row.status === "solved" || row.status === "revealed";
-      return { correct: false, status: row.status, xpGained: 0, ...(open ? this.answerDetails(item) : {}) };
+      return { correct: false, status: row.status, xpGained: 0, ...(reviewed ? { reviewed } : {}), ...(open ? this.answerDetails(item) : {}) };
     }
+    const reviewed = await this.review(row, true);
     const xpGained = await this.solve(userId, item, row.status);
-    return { correct: true, status: "solved", xpGained, ...this.answerDetails(item) };
+    return { correct: true, status: "solved", xpGained, ...(reviewed ? { reviewed } : {}), ...this.answerDetails(item) };
   }
 
   private answerDetails(item: CatalogItem): Pick<AnswerResult, "explanation" | "answer"> {
@@ -304,7 +339,9 @@ export class ArenaService {
         userId,
         program: buildJudgeProgram(item.function, input.code),
         tests: tests.map((t) => ({ input: JSON.stringify({ args: t.args }), output: t.expected })),
-        tolerance: item.tolerance,
+        checker: item.scoring
+          ? { kind: "metric", metric: item.scoring.metric, threshold: item.scoring.threshold }
+          : { kind: "json", absTol: item.tolerance.abs, relTol: item.tolerance.rel },
       });
     } catch (err) {
       await this.deps.store.submissions.complete(submission.id, {
@@ -348,7 +385,7 @@ export class ArenaService {
         return {
           ...base,
           call: formatCall(fnName, t.args),
-          expected: t.expected,
+          expected: this.expectedText(item!, t.expected),
           ...(ran ? { output: r.output } : { message: r.output }),
         };
       });
@@ -366,8 +403,11 @@ export class ArenaService {
       tests,
       judgedAt: this.now(),
     });
-    if (!done || !item || done.mode !== "submit" || status !== "passed") return;
+    if (!done || !item || done.mode !== "submit") return;
     const row = await this.deps.store.progress.get(done.userId, item.id);
+    // A submit on a solved, due item is its review; judge errors don't count.
+    if (status !== "error") await this.review(row, status === "passed");
+    if (status !== "passed") return;
     const xp = await this.solve(done.userId, item, row?.status ?? null);
     if (xp) await this.deps.store.submissions.setXp(done.id, xp);
   }
@@ -456,6 +496,8 @@ export class ArenaService {
       activity,
       tracks: this.catalog.tracks.map((t) => this.trackSummary(t, progress)),
       weakestTopics: startedTopics,
+      recommendations: recommendations(this.catalog, progress, this.now(), this.continueItem(progress)),
+      reviewDueCount: [...progress.values()].filter((r) => isDue(r, this.now()) && this.catalog.item(r.itemId)).length,
       continueItem: (() => {
         const item = this.continueItem(progress);
         return item ? withTopic(item) : null;
@@ -468,6 +510,14 @@ export class ArenaService {
       })(),
       recentSubmissions: recent.items.map(this.summary),
     };
+  }
+
+  async reviewQueue(userId: string): Promise<ReviewQueue> {
+    return reviewQueue(this.catalog, await this.progressMap(userId), this.now());
+  }
+
+  async skillMap(userId: string | null): Promise<SkillMap> {
+    return skillMap(this.catalog, await this.progressMap(userId));
   }
 
   /** The unfinished item worked on most recently, else the next unsolved one. */

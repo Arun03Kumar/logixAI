@@ -7,6 +7,14 @@ import { buildApp } from "../src/app.js";
 import { loadCatalog, type Catalog } from "../src/content/catalog.js";
 import type { ArenaService, JudgeRequest } from "../src/services/arenaService.js";
 import { createMemoryStore } from "../src/store/memoryStore.js";
+import type { IdentityClient } from "../src/lib/identity.js";
+
+const noInstitutions: IdentityClient = {
+  getMembership: async () => null,
+  myMemberships: async () => [],
+  listBatches: async () => [],
+  listBatchMembers: async () => [],
+};
 
 const CONTENT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "content");
 // The real content, so these tests also prove it loads and its generated tests are current.
@@ -35,6 +43,7 @@ beforeEach(async () => {
     catalog,
     store: createMemoryStore(),
     judge: { submit: async (r) => void judged.push(r) },
+    identity: noInstitutions,
     verifier,
     corsOrigins: [],
     now: () => clock,
@@ -136,7 +145,7 @@ describe("code items", () => {
     const run = await req("asha", "POST", "/items/vec-dot-code/code", { code: "def dot(a, b): return 0", mode: "run" });
     expect(run.status).toBe(202);
     expect(run.data).toMatchObject({ status: "pending", total: item.judge!.sample.length });
-    expect(judged[0]).toMatchObject({ userId: "asha", tolerance: { abs: 1e-6, rel: 1e-6 } });
+    expect(judged[0]).toMatchObject({ userId: "asha", checker: { kind: "json", absTol: 1e-6, relTol: 1e-6 } });
     expect(judged[0]!.tests).toHaveLength(item.judge!.sample.length);
     expect(judged[0]!.program).toContain("solution.py");
 

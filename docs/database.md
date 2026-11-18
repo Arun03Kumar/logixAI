@@ -16,7 +16,7 @@ busy database move to its own cluster later without code changes.
 | problem-service    | `logixai-problems`    | problems, audit_events                                                      |
 | submission-service | `logixai-submissions` | submissions                                                                 |
 | exam-service       | `logixai-exams`       | exams, attempts, audit_events                                               |
-| arena-service      | `logixai-arena`       | item_progress, submissions, user_stats (content is in the repo, not the DB) |
+| arena-service      | `logixai-arena`       | item_progress, submissions, user_stats, track_assignments, audit_events (content is in the repo) |
 
 Every database also has `_migrations` (applied migration ids) and
 `_migrations_lock` (stops two deploys migrating at once).
@@ -76,6 +76,7 @@ Admins and owners can read them:
 
 - `GET /api/v1/institutions/:id/audit` (identity-service: members, batches, invites)
 - `GET /api/v1/institutions/:id/exam-audit` (exam-service: exams)
+- `GET /api/v1/arena/institutions/:id/audit` (arena-service: track assignments)
 
 Audit writes are best effort: a failed write never fails the change itself. The log is append-only; no code updates or deletes events.
 

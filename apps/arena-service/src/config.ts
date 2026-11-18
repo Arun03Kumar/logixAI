@@ -14,6 +14,8 @@ export const config = loadConfig(
       REDIS_PORT: env.redisPort(),
       REDIS_PASSWORD: env.redisPassword(),
       REDIS_TLS: env.flag(false),
+      /** identity-service API, used for institution roles and batches. */
+      IDENTITY_API_URL: env.url().default("http://localhost:3006/api/v1"),
       IDENTITY_JWKS_URL: env
         .url()
         .default("http://localhost:3006/.well-known/jwks.json"),

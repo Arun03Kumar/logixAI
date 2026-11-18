@@ -23,7 +23,7 @@ export function createQueueJudge(connection: Redis): JudgeGateway {
           submissionId: request.submissionId,
           testCases: request.tests,
           replyQueue: QUEUE_NAMES.ARENA_EVALUATION,
-          checker: { kind: "json", absTol: request.tolerance.abs, relTol: request.tolerance.rel },
+          checker: request.checker,
         },
       });
       await queue.add(JOB_NAMES.SUBMISSION, payload, { removeOnComplete: 1000, removeOnFail: 1000 });

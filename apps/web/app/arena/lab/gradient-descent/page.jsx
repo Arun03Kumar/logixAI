@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { Badge, Button, Card, Container, PageHeader } from "@logixai/ui";
 import ArenaShell from "../../_components/ArenaShell";
-import { LabNav, LossChart, Slider } from "../LabBits";
+import { LabNav, LossChart, Slider, r2 } from "../LabBits";
 
 /** f(x, y) = (x² + k·y²) / 2: a bowl stretched k times along y. */
 const loss = (k, [x, y]) => (x * x + k * y * y) / 2;
@@ -26,8 +26,8 @@ function descend({ k, lr, momentum, steps, start }) {
 
 const SIZE = 360;
 const RANGE = 5;
-const toPx = (v) => ((v + RANGE) / (2 * RANGE)) * SIZE;
-const toPy = (v) => SIZE - ((v + RANGE) / (2 * RANGE)) * SIZE;
+const toPx = (v) => r2(((v + RANGE) / (2 * RANGE)) * SIZE);
+const toPy = (v) => r2(SIZE - ((v + RANGE) / (2 * RANGE)) * SIZE);
 const clampPx = (v) => Math.max(-40, Math.min(SIZE + 40, v));
 
 function verdict(path, k) {

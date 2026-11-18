@@ -14,8 +14,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { jsonValuesMatch } from "@logixai/contracts";
-import { GENERATED_FILE, codeItemHash, isCode, readSources } from "../src/content/catalog.js";
+import { formatScore, jsonValuesMatch, metricPasses, metricScore } from "@logixai/contracts";
+import { GENERATED_FILE, codeItemHash, datasetTests, isCode, readSources } from "../src/content/catalog.js";
 import { buildBatchProgram, seedFor } from "../src/content/harness.js";
 import type { CodeItemSource, GeneratedTests, ItemSource } from "../src/content/schema.js";
 import { runPython } from "./docker-python.js";
@@ -77,6 +77,35 @@ async function buildCodeItem(item: CodeItemSource): Promise<GeneratedTests["item
   };
 }
 
+/** Dataset challenge: the reference must reach the score on both splits; the starter must not. */
+async function buildDatasetItem(item: CodeItemSource): Promise<GeneratedTests["items"][string]> {
+  const data = datasetTests(CONTENT_DIR, item);
+  const { metric, threshold } = item.scoring!;
+  const tests = [...data.judge.sample, ...data.judge.hidden];
+  const score = async (code: string, who: string) => {
+    const out = await batch(item, code, tests.map((t) => t.args), false);
+    return out.results.map((r, i) => {
+      if (!r.ok) {
+        if (who === "reference") throw new Error(`reference solution fails on ${i ? "test" : "validation"} rows:
+${r.error}`);
+        return null;
+      }
+      return metricScore(metric, JSON.parse(tests[i]!.expected), r.value);
+    });
+  };
+  const ref = await score(item.solution, "reference");
+  const label = (xs: (number | null)[]) => xs.map((x) => (x === null ? "no score" : formatScore(metric, x))).join(" / ");
+  if (!ref.every((x) => metricPasses(metric, x, threshold))) {
+    throw new Error(`reference scores ${label(ref)} (validation / test); threshold is ${threshold}`);
+  }
+  const starter = await score(item.starter, "starter");
+  if (starter.every((x) => metricPasses(metric, x, threshold))) {
+    throw new Error(`the starter already reaches the threshold (${label(starter)})`);
+  }
+  console.log(`      ${item.id}: reference ${label(ref)}, starter ${label(starter)}, need ${threshold}`);
+  return { hash: codeItemHash(item, data.hash), sample: [], hidden: [] };
+}
+
 async function checkOutputItem(item: Extract<ItemSource, { type: "output" }>) {
   const run = await runPython(item.snippet);
   const printed = normalizeLines(run.stdout);
@@ -96,7 +125,9 @@ async function main() {
   const worker = async () => {
     for (let item = queue.shift(); item; item = queue.shift()) {
       try {
-        if (isCode(item)) generated.items[item.id] = await buildCodeItem(item);
+        if (isCode(item)) {
+          generated.items[item.id] = item.dataset ? await buildDatasetItem(item) : await buildCodeItem(item);
+        }
         else if (item.type === "output") await checkOutputItem(item);
         else continue;
         console.log(`ok    ${item.id}`);

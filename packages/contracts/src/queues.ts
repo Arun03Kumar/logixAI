@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LanguageIdSchema, TestCaseSchema } from "./common";
+import { METRICS } from "./checker";
 import { ExecutionResponseSchema } from "./submission";
 
 /** BullMQ queue names shared by producers and workers. */
@@ -22,8 +23,9 @@ export const JOB_NAMES = {
 /**
  * How the evaluator compares a test's stdout with the expected output.
  *  - lines: exact text, ignoring trailing spaces and blank lines at the end.
- *  - json:  both sides are JSON; numbers match within absTol + relTol * |expected|.
- *           Used by ML Arena, whose harness prints the function's return value as JSON.
+ *  - json:   both sides are JSON; numbers match within absTol + relTol * |expected|.
+ *            Used by ML Arena, whose harness prints the function's return value as JSON.
+ *  - metric: predictions scored against hidden labels (ML Arena dataset challenges).
  */
 export const CheckerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("lines") }),
@@ -31,6 +33,16 @@ export const CheckerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("json"),
     absTol: z.number().nonnegative().default(1e-6),
     relTol: z.number().nonnegative().default(1e-6),
+  }),
+  /**
+   * metric: the program prints predictions as a JSON list; the expected output
+   * is the true labels. Passes when the score reaches the threshold (for
+   * error metrics like rmse, when it is at most the threshold).
+   */
+  z.object({
+    kind: z.literal("metric"),
+    metric: z.enum(METRICS),
+    threshold: z.number(),
   }),
 ]);
 export type Checker = z.infer<typeof CheckerSchema>;

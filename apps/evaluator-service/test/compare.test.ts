@@ -43,3 +43,18 @@ describe("jsonOutputsMatch", () => {
     expect(jsonOutputsMatch("[1]", "", tol)).toBe(false);
   });
 });
+
+describe("metric checker", () => {
+  it("scores predictions and reports only the score", async () => {
+    const { verdictFor } = await import("../src/judge/judge.js");
+    const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false, outputLimited: false, durationMs: 5 });
+    const accuracy = { kind: "metric" as const, metric: "accuracy" as const, threshold: 0.75 };
+    expect(verdictFor(ok("[1, 0, 1, 1]"), "[1, 0, 1, 0]", 1000, accuracy)).toEqual({ status: "SUCCESS", output: "accuracy 0.7500", timeMs: 5 });
+    expect(verdictFor(ok("[0, 0, 0, 0]"), "[1, 0, 1, 0]", 1000, accuracy).status).toBe("WA");
+    expect(verdictFor(ok("[1, 0]"), "[1, 0, 1, 0]", 1000, accuracy).output).toContain("Expected 4");
+    const rmse = { kind: "metric" as const, metric: "rmse" as const, threshold: 1 };
+    expect(verdictFor(ok("[1.5, 2.5]"), "[1, 3]", 1000, rmse).status).toBe("SUCCESS");
+    expect(verdictFor(ok("[3, 5]"), "[1, 3]", 1000, rmse).status).toBe("WA");
+    expect(verdictFor(ok("not json"), "[1, 3]", 1000, rmse).status).toBe("WA");
+  });
+});

@@ -10,6 +10,7 @@ import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { loadCatalog } from "./content/catalog.js";
 import { createQueueJudge, startJudgeResultWorker } from "./judge.js";
+import { createHttpIdentityClient } from "./lib/identity.js";
 import { createMongoStore } from "./store/mongoStore.js";
 
 const logger = createLogger("arena-service");
@@ -37,6 +38,7 @@ async function start() {
       catalog,
       store: createMongoStore(),
       judge: createQueueJudge(redis),
+      identity: createHttpIdentityClient(config.IDENTITY_API_URL),
       verifier: createAccessTokenVerifier({ jwksUrl: config.IDENTITY_JWKS_URL, issuer: config.JWT_ISSUER }),
       corsOrigins: config.CORS_ORIGINS,
       codeRunsPerMinute: config.CODE_RUNS_PER_MINUTE,

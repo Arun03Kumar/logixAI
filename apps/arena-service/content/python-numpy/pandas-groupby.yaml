@@ -1,0 +1,190 @@
+id: pandas-groupby
+title: GroupBy, aggregation and joins
+summary: Split-apply-combine with groupby, aggregating with agg, and combining tables with merge.
+prerequisites: [pandas-basics]
+lesson: |
+  ## Split, apply, combine
+
+  "Average order value per city", "number of users per plan", "latest login per user" — all are the same pattern: **split** rows into groups, **apply** a function to each group, **combine** the results. In Pandas that's `groupby`.
+
+  ```python
+  orders.groupby("city")["amount"].mean()        # Series: city -> mean amount
+  orders.groupby("city")["amount"].agg(["count", "sum", "mean"])
+  orders.groupby(["city", "plan"]).size()         # rows per (city, plan)
+  ```
+
+  The group keys become the **index** of the result. Add `.reset_index()` to turn them back into ordinary columns, or pass `as_index=False`.
+
+  `transform` returns a value for every original row instead of one per group — useful for features like "this order's amount relative to the city average":
+
+  ```python
+  orders["city_avg"] = orders.groupby("city")["amount"].transform("mean")
+  ```
+
+  ## Joining tables
+
+  `pd.merge(left, right, on="customer_id", how=...)` matches rows on a key:
+
+  | how | Keeps |
+  | --- | --- |
+  | `inner` | Only keys found in both tables |
+  | `left` | Every row of `left`; missing matches become `NaN` |
+  | `right` | Every row of `right` |
+  | `outer` | Every key from either table |
+
+  **Watch the row count.** If the key isn't unique in the right table, each left row is repeated once per match. Joining orders to a customers table that accidentally lists a customer twice silently duplicates their orders — and inflates every total computed afterwards. `validate="many_to_one"` makes Pandas raise an error instead.
+
+  ## In interviews
+
+  SQL-style questions often come as Pandas: "top city by revenue", "users with no orders" (a left join, then `isna`). Say which join you're using and why.
+items:
+  - id: pd-groupby-output
+    type: output
+    title: What does groupby return?
+    difficulty: easy
+    tags: [pandas, groupby]
+    prompt: |
+      What does this print?
+    snippet: |
+      import pandas as pd
+      df = pd.DataFrame({"team": ["a", "b", "a", "b", "a"], "score": [3, 5, 4, 1, 8]})
+      g = df.groupby("team")["score"]
+      print(g.sum().to_dict())
+      print(g.max().index.tolist())
+    answer: |
+      {'a': 15, 'b': 6}
+      ['a', 'b']
+    explanation: |
+      Team `a` has 3 + 4 + 8 = 15 and team `b` has 5 + 1 = 6. The group keys form the index of the result, sorted by default.
+
+  - id: pd-merge-rows-numeric
+    type: numeric
+    title: Rows after a join
+    difficulty: medium
+    tags: [pandas, merge, debugging]
+    prompt: |
+      `orders` has 4 rows with `customer_id` values `[1, 1, 2, 3]`.
+      `customers` has 4 rows with `customer_id` values `[1, 2, 2, 4]` (customer 2 was entered twice by mistake).
+
+      How many rows does `orders.merge(customers, on="customer_id", how="left")` have?
+    answer: 5
+    tolerance: 0
+    hints:
+      - Each order row appears once per matching customer row — or once with NaNs if there's no match.
+    explanation: |
+      Orders for customer 1 match once each (2 rows), the order for customer 2 matches twice (2 rows), and customer 3 has no match but `how="left"` keeps it (1 row): 5 rows. The duplicate customer silently created an extra order — `validate="many_to_one"` would have caught it.
+
+  - id: pd-join-mcq
+    type: mcq_single
+    title: Customers with no orders
+    difficulty: medium
+    tags: [pandas, merge]
+    prompt: |
+      You need every customer who has **never** placed an order. Which approach works?
+    options:
+      - { id: a, text: "Inner-join customers to orders and keep rows where the order id is missing." }
+      - { id: b, text: "Left-join customers to orders and keep rows where the order id is missing." }
+      - { id: c, text: "Right-join customers to orders and drop duplicates." }
+      - { id: d, text: "Group orders by customer and keep groups with zero rows." }
+    answer: b
+    explanation: |
+      A left join keeps every customer; those without orders get `NaN` in the order columns, so filtering on `isna()` finds them. An inner join drops exactly the customers you want, and groupby only ever sees customers who have rows.
+
+  - id: pd-mean-by-group-code
+    type: code
+    title: Average per group
+    difficulty: easy
+    tags: [pandas, groupby]
+    prompt: |
+      Implement `mean_by(df, key, value)`: the mean of column `value` for each distinct value of column `key`,
+      returned as a dict `{key: mean}` (a pandas Series indexed by key is fine too).
+    function:
+      name: mean_by
+      params:
+        - { name: df, type: dataframe }
+        - { name: key, type: str }
+        - { name: value, type: str }
+      returns: "dict {key: mean}"
+    starter: |
+      import pandas as pd
+
+      def mean_by(df, key, value):
+          return df[value].mean()
+    solution: |
+      import pandas as pd
+
+      def mean_by(df, key, value):
+          return df.groupby(key)[value].mean()
+    tests:
+      sample:
+        - args:
+            - columns: [city, amount]
+              data: [[Pune, 100], [Delhi, 300], [Pune, 200]]
+            - city
+            - amount
+          expected: { Pune: 150, Delhi: 300 }
+      generate: |
+        import pandas as pd
+        def cases(rng):
+            out = []
+            for n in [12, 200]:
+                df = pd.DataFrame({
+                    "plan": rng.choice(["free", "pro", "team"], n),
+                    "minutes": rng.gamma(2.0, 30.0, n).round(1),
+                })
+                out.append([df, "plan", "minutes"])
+            return out
+    hints:
+      - "`df.groupby(key)[value]` selects the column within each group."
+    explanation: |
+      `groupby(key)[value].mean()` returns a Series indexed by the group keys — exactly a mapping from key to mean. The starter averages the whole column, losing the groups.
+
+  - id: pd-top-city-debug
+    type: debug
+    title: "Fix the inflated revenue"
+    difficulty: hard
+    access: pro
+    tags: [pandas, merge, debugging]
+    prompt: |
+      `top_city(orders, customers)` should return the city with the highest total order `amount`.
+      `orders` has `customer_id` and `amount`; `customers` has `customer_id` and `city`, but the customers table
+      sometimes contains **duplicate rows** for the same customer. The current code picks the wrong city when that happens.
+      Fix it.
+    function:
+      name: top_city
+      params:
+        - { name: orders, type: dataframe }
+        - { name: customers, type: dataframe }
+      returns: str
+    starter: |
+      import pandas as pd
+
+      def top_city(orders, customers):
+          joined = orders.merge(customers, on="customer_id", how="left")
+          return joined.groupby("city")["amount"].sum().idxmax()
+    solution: |
+      import pandas as pd
+
+      def top_city(orders, customers):
+          unique = customers.drop_duplicates(subset="customer_id")
+          joined = orders.merge(unique, on="customer_id", how="left", validate="many_to_one")
+          return joined.groupby("city")["amount"].sum().idxmax()
+    tests:
+      sample:
+        - args:
+            - columns: [customer_id, amount]
+              data: [[1, 800], [2, 300], [3, 300]]
+            - columns: [customer_id, city]
+              data: [[1, Pune], [2, Delhi], [3, Delhi], [3, Delhi], [3, Delhi]]
+          expected: Pune
+      hidden:
+        - args:
+            - columns: [customer_id, amount]
+              data: [[1, 1000], [2, 600]]
+            - columns: [customer_id, city]
+              data: [[1, Mumbai], [2, Jaipur], [2, Jaipur]]
+          expected: Mumbai
+    hints:
+      - Count the rows after the merge. Are there more than there are orders?
+    explanation: |
+      Customer 3 appears three times, so the merge turns their one ₹300 order into three rows: Delhi totals 300 + 900 = 1200 and "beats" Pune's 800, although the real totals are Pune 800, Delhi 600. Dropping duplicate customers first keeps one row per order, and `validate="many_to_one"` makes Pandas raise an error if the right table still isn't unique — far better than a wrong number in a report.

@@ -1,0 +1,252 @@
+id: model-challenges
+title: "Dataset challenges: train a real model"
+summary: End-to-end problems on realistic data — clean it, encode it, train a scikit-learn model and beat a score on rows you never see.
+prerequisites: [pandas-basics, logistic-regression, classification-metrics, regression-metrics]
+lesson: |
+  ## How these challenges work
+
+  Each challenge gives you a function with two DataFrames:
+
+  ```python
+  def train_and_predict(train, test):
+      # train: every feature column plus the target column
+      # test:  the same features, without the target
+      ...
+      return predictions   # one per row of test
+  ```
+
+  **Run** trains on part of the training rows and predicts a validation split, so you can see your score.
+  **Submit** trains on all the training rows and predicts **held-out rows whose labels never leave the server**. You pass when your score on those rows reaches the target. There's no way to peek — only a model that generalises passes.
+
+  Python 3.12 with NumPy, Pandas, SciPy and scikit-learn is available. There's no GPU and no internet, and each run must finish within a few seconds, so prefer small, sensible models.
+
+  ## A dependable recipe
+
+  1. **Look first.** Which columns are numbers, which are categories, where are the gaps, how balanced is the target?
+  2. **Start with a baseline.** Predicting the majority class (or the mean) tells you what "no skill" scores. Your model has to beat it clearly.
+  3. **Preprocess inside a pipeline** so the same steps — learned from training rows only — apply to the test rows:
+
+  ```python
+  from sklearn.compose import ColumnTransformer
+  from sklearn.pipeline import make_pipeline
+  from sklearn.impute import SimpleImputer
+  from sklearn.preprocessing import OneHotEncoder, StandardScaler
+  from sklearn.linear_model import LogisticRegression
+
+  numeric = ["age", "monthly_income_k"]
+  categorical = ["employment"]
+  prep = ColumnTransformer([
+      ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric),
+      ("cat", OneHotEncoder(handle_unknown="ignore"), categorical),
+  ])
+  model = make_pipeline(prep, LogisticRegression(max_iter=1000))
+  model.fit(train[numeric + categorical], train["default"])
+  ```
+
+  4. **Choose the metric's side of the trade-off.** For imbalanced classes, a classifier tuned for accuracy often just predicts the majority. `class_weight="balanced"` or a lower decision threshold raises recall and F1.
+  5. **Transform the target if it's skewed.** Prices are right-skewed; modelling $\log(\text{price})$ and converting back with `np.exp` usually helps — but remember to convert back.
+
+  ## In interviews
+
+  Talk through exactly this order: baseline, leakage-safe preprocessing, a simple model, the metric that matches the business cost, then iterate.
+items:
+  - id: mc-baseline-numeric
+    type: numeric
+    title: What does "no skill" score?
+    difficulty: easy
+    tags: [baselines, accuracy, class-imbalance]
+    prompt: |
+      In a loans dataset, 28% of borrowers default (label 1). A "model" predicts **0 for everyone**.
+      What is its accuracy? Give 2 decimal places.
+    answer: 0.72
+    tolerance: 0.005
+    answerFormat: 2 decimal places
+    explanation: |
+      It's right on every non-defaulter: 72%. Its recall and F1 for defaults are 0, which is why imbalanced problems are scored with F1, recall or AUC rather than accuracy. Any real model must clearly beat this baseline.
+
+  - id: mc-loans-challenge
+    type: code
+    title: Predict loan defaults
+    difficulty: hard
+    tags: [classification, pipelines, class-imbalance, dataset]
+    prompt: |
+      Each row is a loan application: `age`, `employment` (salaried / self_employed / unemployed),
+      `monthly_income_k` (₹ thousands), `credit_score`, `loan_amount_k`, `term_months`, `past_defaults`.
+      Some values are missing.
+
+      Implement `train_and_predict(train, test)`: train on `train` (which includes the `default` column, 1 = defaulted)
+      and return a 0/1 prediction for every row of `test`.
+
+      **Pass mark: F1 score for defaults of at least 0.55** on the held-out rows.
+    function:
+      name: train_and_predict
+      params:
+        - { name: train, type: dataframe }
+        - { name: test, type: dataframe }
+      returns: list of 0/1, one per test row
+    dataset:
+      file: loans.csv
+      target: default
+      seed: 11
+    scoring: { metric: f1, threshold: 0.55 }
+    starter: |
+      import numpy as np
+      import pandas as pd
+
+      def train_and_predict(train, test):
+          # Baseline: nobody defaults. Replace with a real model.
+          return np.zeros(len(test), dtype=int)
+    solution: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.compose import ColumnTransformer
+      from sklearn.impute import SimpleImputer
+      from sklearn.linear_model import LogisticRegression
+      from sklearn.pipeline import make_pipeline
+      from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+      def add_features(df):
+          df = df.copy()
+          df["emi_ratio"] = (df["loan_amount_k"] / df["term_months"]) / df["monthly_income_k"]
+          return df
+
+      def train_and_predict(train, test):
+          train, test = add_features(train), add_features(test)
+          numeric = ["age", "monthly_income_k", "credit_score", "loan_amount_k", "term_months", "past_defaults", "emi_ratio"]
+          prep = ColumnTransformer([
+              ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric),
+              ("cat", OneHotEncoder(handle_unknown="ignore"), ["employment"]),
+          ])
+          model = make_pipeline(prep, LogisticRegression(max_iter=1000, class_weight="balanced"))
+          model.fit(train[numeric + ["employment"]], train["default"])
+          return model.predict(test[numeric + ["employment"]])
+    hints:
+      - Start with `SimpleImputer` for the gaps and `OneHotEncoder` for `employment`, inside a `ColumnTransformer`.
+      - Defaults are the minority. Try `class_weight="balanced"` so the model doesn't just predict 0.
+      - What matters is whether the instalment is affordable. Can you build a feature from the loan amount, term and income?
+    explanation: |
+      A leakage-safe pipeline (imputation and scaling learned on training rows, one-hot encoding for the category) plus logistic regression with balanced class weights is a strong, explainable baseline. The biggest single gain comes from a domain feature — the monthly instalment relative to income — which is how a credit analyst would think about affordability. Tree ensembles like `HistGradientBoostingClassifier` can find such interactions themselves, at the cost of interpretability.
+
+  - id: mc-houses-challenge
+    type: code
+    title: Predict house prices
+    difficulty: hard
+    tags: [regression, feature-engineering, dataset]
+    prompt: |
+      Each row is a flat for sale: `city`, `area_sqft`, `bedrooms`, `bathrooms`, `age_years` (sometimes missing),
+      `distance_km` (to the city centre) and `parking` (0/1). The target is `price_lakh`.
+
+      Implement `train_and_predict(train, test)` returning a predicted price (in lakh) for every row of `test`.
+
+      **Pass mark: R² of at least 0.9** on the held-out rows.
+    function:
+      name: train_and_predict
+      params:
+        - { name: train, type: dataframe }
+        - { name: test, type: dataframe }
+      returns: list of prices, one per test row
+    dataset:
+      file: houses.csv
+      target: price_lakh
+      seed: 7
+    scoring: { metric: r2, threshold: 0.9 }
+    starter: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.linear_model import LinearRegression
+
+      def train_and_predict(train, test):
+          features = ["area_sqft", "bedrooms", "bathrooms"]
+          model = LinearRegression().fit(train[features], train["price_lakh"])
+          return model.predict(test[features])
+    solution: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.compose import ColumnTransformer
+      from sklearn.impute import SimpleImputer
+      from sklearn.linear_model import Ridge
+      from sklearn.pipeline import make_pipeline
+      from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+      def train_and_predict(train, test):
+          numeric = ["area_sqft", "bedrooms", "bathrooms", "age_years", "distance_km", "parking"]
+          def frame(df):
+              out = df[numeric + ["city"]].copy()
+              out["log_area"] = np.log(out["area_sqft"])
+              return out
+          prep = ColumnTransformer([
+              ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), numeric + ["log_area"]),
+              ("cat", OneHotEncoder(handle_unknown="ignore"), ["city"]),
+          ])
+          model = make_pipeline(prep, Ridge(alpha=1.0))
+          model.fit(frame(train), np.log(train["price_lakh"]))
+          return np.exp(model.predict(frame(test)))
+    hints:
+      - The same flat costs very different amounts in Mumbai and Jaipur. Use `city`.
+      - Prices multiply rather than add (city rate × area × discounts). Try predicting `np.log(price)` and converting back with `np.exp`.
+    explanation: |
+      Price is roughly city rate × area × (discounts for age and distance), a multiplicative structure. Taking logs turns it into a sum — exactly what a linear model can fit — and one-hot encoding lets each city have its own rate. Without the city and the log transform, a linear model on area and rooms can't come close.
+
+  - id: mc-log-target-debug
+    type: debug
+    title: "Fix the price predictions"
+    difficulty: medium
+    tags: [regression, debugging, target-transform, dataset]
+    prompt: |
+      This model trains on the log of the price, which is a good idea — but its predictions come out terribly.
+      Find the bug and fix it.
+
+      **Pass mark: R² of at least 0.85** on the held-out rows.
+    function:
+      name: train_and_predict
+      params:
+        - { name: train, type: dataframe }
+        - { name: test, type: dataframe }
+      returns: list of prices, one per test row
+    dataset:
+      file: houses.csv
+      target: price_lakh
+      seed: 3
+    scoring: { metric: r2, threshold: 0.85 }
+    starter: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.compose import ColumnTransformer
+      from sklearn.impute import SimpleImputer
+      from sklearn.linear_model import Ridge
+      from sklearn.pipeline import make_pipeline
+      from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+      NUMERIC = ["area_sqft", "bedrooms", "bathrooms", "age_years", "distance_km", "parking"]
+
+      def train_and_predict(train, test):
+          prep = ColumnTransformer([
+              ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), NUMERIC),
+              ("cat", OneHotEncoder(handle_unknown="ignore"), ["city"]),
+          ])
+          model = make_pipeline(prep, Ridge(alpha=1.0))
+          model.fit(train[NUMERIC + ["city"]], np.log(train["price_lakh"]))
+          return model.predict(test[NUMERIC + ["city"]])
+    solution: |
+      import numpy as np
+      import pandas as pd
+      from sklearn.compose import ColumnTransformer
+      from sklearn.impute import SimpleImputer
+      from sklearn.linear_model import Ridge
+      from sklearn.pipeline import make_pipeline
+      from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+      NUMERIC = ["area_sqft", "bedrooms", "bathrooms", "age_years", "distance_km", "parking"]
+
+      def train_and_predict(train, test):
+          prep = ColumnTransformer([
+              ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), NUMERIC),
+              ("cat", OneHotEncoder(handle_unknown="ignore"), ["city"]),
+          ])
+          model = make_pipeline(prep, Ridge(alpha=1.0))
+          model.fit(train[NUMERIC + ["city"]], np.log(train["price_lakh"]))
+          return np.exp(model.predict(test[NUMERIC + ["city"]]))
+    hints:
+      - What units are the predictions in? What units is the target in?
+    explanation: |
+      The model learned to predict $\log(\text{price})$, so its outputs are logs — around 4 or 5 — compared against prices in the hundreds. Converting back with `np.exp` fixes it. scikit-learn's `TransformedTargetRegressor(func=np.log, inverse_func=np.exp)` does both directions for you, so this can't be forgotten.

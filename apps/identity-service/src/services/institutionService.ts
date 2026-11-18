@@ -131,7 +131,7 @@ export class InstitutionService {
   async listMembers(
     userId: string,
     institutionId: string,
-    query: { limit: number; cursor?: string; role?: InstitutionRole; userIds?: string[] },
+    query: { limit: number; cursor?: string; role?: InstitutionRole; userIds?: string[]; batchId?: string },
   ): Promise<Page<MemberView>> {
     await this.requireRole(userId, institutionId, "instructor");
     const page = await this.store.memberships.pageForInstitution(institutionId, query);

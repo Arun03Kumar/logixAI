@@ -1,0 +1,214 @@
+id: pandas-basics
+title: Pandas DataFrames and missing data
+summary: Selecting rows and columns with loc and iloc, filtering, and handling missing values before modelling.
+prerequisites: [numpy-arrays]
+lesson: |
+  ## Why Pandas
+
+  Real data arrives as tables with named columns, mixed types and gaps. A NumPy array has one type and no labels; a **DataFrame** is a set of named columns (each a **Series**) sharing a row **index**. Almost every ML project starts by loading, cleaning and reshaping a DataFrame.
+
+  ```python
+  import pandas as pd
+  df = pd.read_csv("loans.csv")
+  df.shape          # (rows, columns)
+  df.head()         # first five rows
+  df.dtypes         # type of each column
+  df.describe()     # count, mean, std, quartiles of numeric columns
+  ```
+
+  ## Selecting data
+
+  - `df["income"]` → one column (a Series); `df[["age", "income"]]` → a DataFrame.
+  - `df.loc[rows, cols]` selects by **label**. Label slices include the end: `df.loc[0:2]` gives rows labelled 0, 1 **and 2**.
+  - `df.iloc[rows, cols]` selects by **position**, like Python: `df.iloc[0:2]` gives the first two rows.
+  - Filtering uses boolean masks, combined with `&` and `|` (with parentheses):
+    `df[(df["age"] > 30) & (df["city"] == "Pune")]`.
+  - `df.sort_values("income", ascending=False)` sorts; `.reset_index(drop=True)` renumbers the rows.
+
+  ## Missing values
+
+  Missing numbers are `NaN`. `df.isna().sum()` counts them per column. Options:
+
+  | Approach | Code | When |
+  | --- | --- | --- |
+  | Drop rows | `df.dropna()` | Few gaps, lots of data |
+  | Fill with a constant | `df["x"].fillna(0)` | Missing means "none" |
+  | Fill with median | `df["x"].fillna(df["x"].median())` | Numeric, skewed data |
+  | Fill with most common | `df["c"].fillna(df["c"].mode()[0])` | Categorical |
+
+  The median is preferred to the mean for skewed columns like income, because a few huge values drag the mean up. And as with scaling, compute fill values on the **training** data only.
+
+  ## A trap: `NaN` comparisons
+
+  `NaN == NaN` is `False`, so `df[df["x"] == np.nan]` finds nothing. Use `df["x"].isna()`.
+
+  ## In interviews
+
+  Expect "how would you handle missing values?" — answer with the options above and say that the choice depends on why the data is missing.
+items:
+  - id: pd-loc-iloc-output
+    type: output
+    title: loc versus iloc
+    difficulty: easy
+    tags: [pandas, indexing]
+    prompt: |
+      What does this print?
+    snippet: |
+      import pandas as pd
+      df = pd.DataFrame({"x": [10, 20, 30, 40]}, index=[3, 2, 1, 0])
+      print(df.loc[1:0, "x"].tolist())
+      print(df.iloc[1:3]["x"].tolist())
+    answer: |
+      [30, 40]
+      [20, 30]
+    hints:
+      - "`loc` uses the index labels (3, 2, 1, 0) and includes the end label; `iloc` uses positions."
+    explanation: |
+      `df.loc[1:0]` slices from the row **labelled** 1 to the row labelled 0, inclusive: values 30 and 40. `df.iloc[1:3]` takes **positions** 1 and 2 (end exclusive): 20 and 30. When the index isn't 0, 1, 2… these give very different answers.
+
+  - id: pd-nan-mcq
+    type: mcq_single
+    title: Finding missing values
+    difficulty: easy
+    tags: [pandas, missing-values]
+    prompt: |
+      Which expression gives the rows where `income` is missing?
+    options:
+      - { id: a, text: "`df[df[\"income\"] == np.nan]`" }
+      - { id: b, text: "`df[df[\"income\"].isna()]`" }
+      - { id: c, text: "`df[df[\"income\"] is None]`" }
+      - { id: d, text: "`df.dropna(subset=[\"income\"])`" }
+    answer: b
+    explanation: |
+      `NaN` is never equal to anything, including itself, so (a) selects nothing. `is None` compares the whole Series object with `None` (always `False`). `dropna` returns the rows that are **not** missing. `.isna()` is the right test.
+
+  - id: pd-median-mcq
+    type: mcq_single
+    title: Mean or median?
+    difficulty: medium
+    tags: [missing-values, imputation]
+    prompt: |
+      Monthly income is heavily right-skewed: most people earn ₹20–60k, a few earn ₹10 lakh. 8% of incomes are missing.
+      Which fill value is usually the better default?
+    options:
+      - { id: a, text: "The mean of the column" }
+      - { id: b, text: "The median of the column, computed on the training rows" }
+      - { id: c, text: "Zero" }
+      - { id: d, text: "The median of the whole dataset, including test rows" }
+    answer: b
+    explanation: |
+      The few huge incomes pull the mean far above a typical value; the median isn't affected by them. Zero would claim missing people earn nothing. Computing it on the whole dataset leaks test-set information — fit the fill value on training rows.
+
+  - id: pd-fill-missing-code
+    type: code
+    title: Fill missing numbers with the median
+    difficulty: easy
+    tags: [pandas, missing-values]
+    prompt: |
+      Implement `fill_missing(df)`: return a copy of `df` where missing values in every **numeric** column are
+      replaced with that column's median. Leave non-numeric columns unchanged and keep the column order.
+
+      Your DataFrame is compared by columns and values (the index is ignored).
+    function:
+      name: fill_missing
+      params:
+        - { name: df, type: dataframe }
+      returns: DataFrame
+    starter: |
+      import pandas as pd
+
+      def fill_missing(df):
+          return df.fillna(0)
+    solution: |
+      import pandas as pd
+
+      def fill_missing(df):
+          out = df.copy()
+          for col in out.select_dtypes(include="number").columns:
+              out[col] = out[col].fillna(out[col].median())
+          return out
+    tests:
+      sample:
+        - args:
+            - columns: [city, income, age]
+              data: [[Pune, 30.0, 25], [Delhi, null, 40], [Pune, 50.0, null], [Jaipur, 70.0, 31]]
+          expected:
+            columns: [city, income, age]
+            data: [[Pune, 30.0, 25.0], [Delhi, 50.0, 40.0], [Pune, 50.0, 31.0], [Jaipur, 70.0, 31.0]]
+      hidden:
+        - args:
+            - columns: [a]
+              data: [[1.0], [2.0], [3.0]]
+      generate: |
+        import pandas as pd
+        def cases(rng):
+            out = []
+            for n in [8, 60]:
+                df = pd.DataFrame({
+                    "city": rng.choice(["Pune", "Delhi", "Mumbai"], n),
+                    "income": rng.lognormal(3.5, 0.6, n).round(1),
+                    "age": rng.integers(20, 60, n).astype(float),
+                })
+                df.loc[rng.random(n) < 0.25, "income"] = np.nan
+                df.loc[rng.random(n) < 0.2, "age"] = np.nan
+                out.append([df])
+            return out
+    hints:
+      - "`df.select_dtypes(include=\"number\").columns` lists the numeric columns."
+    explanation: |
+      Looping over numeric columns and calling `fillna(median)` on each fills every gap with a typical value for that column. In a real pipeline the medians come from the training rows and are reused for test rows — scikit-learn's `SimpleImputer(strategy="median")` does exactly that.
+
+  - id: pd-filter-sort-code
+    type: code
+    title: Filter and sort
+    difficulty: medium
+    tags: [pandas, filtering, sorting]
+    prompt: |
+      `orders` has columns `customer`, `city` and `amount`. Implement `big_orders(orders, city, min_amount)`:
+      return the rows from `city` with `amount` **at least** `min_amount`, sorted by `amount` from highest to lowest,
+      with only the columns `customer` and `amount`.
+    function:
+      name: big_orders
+      params:
+        - { name: orders, type: dataframe }
+        - { name: city, type: str }
+        - { name: min_amount, type: float }
+      returns: DataFrame with columns customer, amount
+    starter: |
+      import pandas as pd
+
+      def big_orders(orders, city, min_amount):
+          rows = orders[orders["city"] == city and orders["amount"] >= min_amount]
+          return rows.sort_values("amount")[["customer", "amount"]]
+    solution: |
+      import pandas as pd
+
+      def big_orders(orders, city, min_amount):
+          rows = orders[(orders["city"] == city) & (orders["amount"] >= min_amount)]
+          return rows.sort_values("amount", ascending=False)[["customer", "amount"]]
+    tests:
+      sample:
+        - args:
+            - columns: [customer, city, amount]
+              data: [[Asha, Pune, 1200], [Ravi, Delhi, 900], [Meera, Pune, 300], [Kabir, Pune, 2500]]
+            - Pune
+            - 500
+          expected:
+            columns: [customer, amount]
+            data: [[Kabir, 2500], [Asha, 1200]]
+      generate: |
+        import pandas as pd
+        def cases(rng):
+            out = []
+            for n in [10, 80]:
+                df = pd.DataFrame({
+                    "customer": [f"c{i}" for i in range(n)],
+                    "city": rng.choice(["Pune", "Delhi", "Mumbai"], n),
+                    "amount": rng.permutation(n) * 50 + 100,
+                })
+                out.append([df, "Pune", 1000])
+            return out
+    hints:
+      - "Python's `and` doesn't work element by element. Use `&` with parentheses around each condition."
+    explanation: |
+      Combining masks needs `&` (and `|` for or), with each comparison in parentheses because `&` binds tighter than `==`. `sort_values(..., ascending=False)` puts the biggest first, and selecting `[["customer", "amount"]]` keeps just those columns.

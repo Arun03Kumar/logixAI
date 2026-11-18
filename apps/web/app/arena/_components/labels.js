@@ -30,4 +30,14 @@ export const LABS = [
     title: "Linear regression",
     description: "Fit a line by hand, then by gradient descent, and see how the loss responds.",
   },
+  {
+    href: "/arena/lab/logistic-regression",
+    title: "Decision boundaries",
+    description: "Train logistic regression on 2-D data and see why a straight line can't separate every shape.",
+  },
+  {
+    href: "/arena/lab/k-means",
+    title: "K-means clustering",
+    description: "Step through assign-and-update, try different k, and read the elbow chart.",
+  },
 ];

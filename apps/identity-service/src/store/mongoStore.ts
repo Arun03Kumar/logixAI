@@ -163,11 +163,12 @@ export function createMongoStore(): Store {
       find: async (userId, institutionId) =>
         recOrNull(await Membership.findOne({ userId, institutionId })),
       listForUser: async (userId) => recs(await Membership.find({ userId }).sort({ createdAt: 1 })),
-      pageForInstitution: async (institutionId, { limit, cursor, role, userIds }) => {
+      pageForInstitution: async (institutionId, { limit, cursor, role, userIds, batchId }) => {
         const after = decodeCursor(cursor, isMembershipCursor);
         const filter: Record<string, unknown> = { institutionId };
         if (role) filter.role = role;
         if (userIds) filter.userId = { $in: userIds };
+        if (batchId) filter.batchIds = batchId;
         if (after) {
           const [rank, id] = after;
           filter.$or = [

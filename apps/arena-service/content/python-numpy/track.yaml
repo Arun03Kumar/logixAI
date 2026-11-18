@@ -7,3 +7,5 @@ topics:
   - numpy-arrays
   - broadcasting
   - numpy-stats-linalg
+  - pandas-basics
+  - pandas-groupby

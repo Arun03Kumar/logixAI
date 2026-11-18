@@ -3,6 +3,12 @@ import Link from "next/link";
 import { cn } from "@logixai/ui";
 import { LABS } from "../_components/labels";
 
+/**
+ * Round SVG coordinates so the server render and the browser agree exactly
+ * (floating-point maths can differ in the last digit and break hydration).
+ */
+export const r2 = (v) => Math.round(v * 100) / 100;
+
 /** Small seeded random generator so "new data" is repeatable per seed. */
 export function mulberry32(seed) {
   let a = seed >>> 0;

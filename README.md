@@ -10,7 +10,7 @@ apps/
   web/                 Next.js app: marketing site + coding platform    :3008
   identity-service/    Accounts, sessions, institutions, invites (TS)    :3006
   exam-service/        Institution exams: authoring, attempts, grading   :3007
-  arena-service/       ML Arena: lessons, practice items, progress (TS)  :3009
+  arena-service/       ML Arena: lessons, practice items, progress (TS)  :3010
   problem-service/     Problems CRUD (Express, MongoDB)                  :3001
   submission-service/  Accepts submissions, queues them (Fastify, Mongo) :3000
   evaluator-service/   Runs code in Docker, reports results (TS, BullMQ) :3002

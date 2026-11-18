@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import { AnswerInputSchema, CodeRunInputSchema, PageQuerySchema } from "@logixai/contracts";
+import { AnswerInputSchema, AssignTrackSchema, CodeRunInputSchema, PageQuerySchema } from "@logixai/contracts";
 import {
   BadRequestError,
   UnauthorizedError,
@@ -11,13 +11,16 @@ import {
   z,
 } from "@logixai/service-kit";
 import type { Catalog } from "./content/catalog.js";
+import type { IdentityClient } from "./lib/identity.js";
 import { ArenaService, type JudgeGateway } from "./services/arenaService.js";
+import { InstitutionArenaService, type Caller } from "./services/institutionService.js";
 import type { Store } from "./store/types.js";
 
 export interface AppOptions {
   catalog: Catalog;
   store: Store;
   judge: JudgeGateway;
+  identity: IdentityClient;
   verifier: AccessTokenVerifier;
   corsOrigins: string[];
   codeRunsPerMinute?: number;
@@ -45,8 +48,14 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     judge: options.judge,
     ...(options.now ? { now: options.now } : {}),
   });
+  const institutions = new InstitutionArenaService({
+    catalog: options.catalog,
+    store: options.store,
+    identity: options.identity,
+    ...(options.now ? { now: options.now } : {}),
+  });
 
-  await app.register(cors, { origin: options.corsOrigins, methods: ["GET", "POST"] });
+  await app.register(cors, { origin: options.corsOrigins, methods: ["GET", "POST", "DELETE"] });
   // Runs after onRequest, so code-run limits can be per learner.
   await app.register(rateLimit, { global: false, hook: "preHandler" });
 
@@ -70,6 +79,11 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     if (!request.userId) throw new UnauthorizedError();
     return request.userId;
   };
+  /** Signed-in caller plus their token, forwarded to identity-service. */
+  const caller = (request: FastifyRequest): Caller => ({
+    userId: user(request),
+    authorization: request.headers.authorization!,
+  });
 
   type P<T> = { Params: T };
   const ok = <T>(data: T) => successResponse(data);
@@ -124,6 +138,36 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     ok(await arena.getSubmission(user(req), req.params.id)),
   );
   app.get(`${base}/me/dashboard`, async (req) => ok(await arena.dashboard(user(req))));
+  app.get(`${base}/me/review`, async (req) => ok(await arena.reviewQueue(user(req))));
+  app.get(`${base}/me/assignments`, async (req) => ok(await institutions.mine(caller(req))));
+  // Signed out: the map with no progress.
+  app.get(`${base}/skill-map`, async (req) => ok(await arena.skillMap(req.userId)));
+
+  /* ── Institutions ── */
+  type Inst = { institutionId: string };
+  app.get<P<Inst>>(`${base}/institutions/:institutionId/assignments`, async (req) =>
+    ok(await institutions.list(caller(req), req.params.institutionId)),
+  );
+  app.post<P<Inst>>(`${base}/institutions/:institutionId/assignments`, async (req, reply) =>
+    reply
+      .status(201)
+      .send(ok(await institutions.assign(caller(req), req.params.institutionId, parse(AssignTrackSchema, req.body, "assignment")))),
+  );
+  app.delete<P<Inst & { assignmentId: string }>>(
+    `${base}/institutions/:institutionId/assignments/:assignmentId`,
+    async (req) => {
+      await institutions.unassign(caller(req), req.params.institutionId, req.params.assignmentId);
+      return ok({});
+    },
+  );
+  // ?batchId=&trackId=
+  app.get<P<Inst>>(`${base}/institutions/:institutionId/report`, async (req) => {
+    const q = parse(z.object({ batchId: z.string().min(1).max(100), trackId: z.string().min(1).max(100) }), req.query, "query");
+    return ok(await institutions.report(caller(req), req.params.institutionId, q.batchId, q.trackId));
+  });
+  app.get<P<Inst>>(`${base}/institutions/:institutionId/audit`, async (req) =>
+    ok(await institutions.auditLog(caller(req), req.params.institutionId, parse(PageQuerySchema, req.query, "query"))),
+  );
 
   return { app, arena };
 }

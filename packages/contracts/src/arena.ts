@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Metric } from "./checker";
 
 /**
  * ML Arena: practice for maths, Python/NumPy and machine learning.
@@ -141,6 +142,19 @@ export interface ItemView extends ItemSummary {
   answer?: string[] | string;
   /** The signed-in user's last answer or code, to restore the page. */
   lastAnswer?: unknown;
+  /** Dataset challenges: how predictions are scored. */
+  scoring?: { metric: Metric; threshold: number };
+  /** Dataset challenges: the first rows and split sizes. */
+  dataset?: {
+    target: string;
+    columns: string[];
+    rows: (string | number | null)[][];
+    rowCount: number;
+    trainRows: number;
+    testRows: number;
+  };
+  /** Spaced repetition, once solved. */
+  review?: ReviewState;
   previousItem: TopicRef | null;
   nextItem: TopicRef | null;
 }
@@ -156,6 +170,8 @@ export type AnswerInput = z.infer<typeof AnswerInputSchema>;
 
 export interface AnswerResult {
   correct: boolean;
+  /** This answer counted as a spaced-repetition review. */
+  reviewed?: boolean;
   status: ItemStatus;
   xpGained: number;
   /** Present when correct (or when the item was already revealed). */
@@ -233,4 +249,117 @@ export interface ArenaDashboard {
   continueItem: (TopicRef & { topicTitle: string }) | null;
   dailyItem: (TopicRef & { topicTitle: string; difficulty: ArenaDifficulty; status: ItemStatus | null }) | null;
   recentSubmissions: ArenaSubmissionSummary[];
+  recommendations: Recommendation[];
+  reviewDueCount: number;
+}
+
+/* ── Spaced repetition ── */
+
+/** Days until the next review after each successful one. A miss starts over. */
+export const REVIEW_INTERVALS_DAYS = [1, 3, 7, 16, 35, 90] as const;
+
+export interface ReviewState {
+  due: string;
+  intervalDays: number;
+  isDue: boolean;
+}
+
+export interface ReviewEntry {
+  id: string;
+  title: string;
+  type: ArenaItemType;
+  difficulty: ArenaDifficulty;
+  topicTitle: string;
+  /** Review items: when it became due. Retry items: when last attempted. */
+  at: string;
+}
+
+export interface ReviewQueue {
+  /** Solved items due for review, most overdue first. */
+  due: ReviewEntry[];
+  /** Attempted but never solved, most recent first. */
+  retry: ReviewEntry[];
+  /** Reviews coming up in the next 7 days. */
+  upcomingCount: number;
+}
+
+/* ── Skill map and recommendations ── */
+
+export interface SkillNode extends TopicRef {
+  trackId: string;
+  trackTitle: string;
+  mastery: number;
+  solvedCount: number;
+  itemCount: number;
+  /** Has any progress in the topic. */
+  started: boolean;
+  /** Many failed attempts and low mastery. */
+  struggling: boolean;
+  /** Longest prerequisite chain below this topic (0 = no prerequisites). */
+  depth: number;
+  /** For struggling topics: weak prerequisites (up to two levels down) that likely cause it. */
+  rootCauses: TopicRef[];
+}
+
+export interface SkillMap {
+  topics: SkillNode[];
+  /** prerequisite -> topic */
+  edges: { from: string; to: string }[];
+}
+
+export type RecommendationKind = "review" | "strengthen" | "continue" | "next";
+
+export interface Recommendation {
+  kind: RecommendationKind;
+  reason: string;
+  item: TopicRef & { type: ArenaItemType; difficulty: ArenaDifficulty; topicId: string; topicTitle: string };
+}
+
+/* ── Institutions ── */
+
+export const AssignTrackSchema = z.object({
+  batchId: z.string().min(1).max(100),
+  trackId: z.string().min(1).max(100),
+  dueAt: z.string().datetime().nullable().default(null),
+});
+export type AssignTrackInput = z.infer<typeof AssignTrackSchema>;
+
+export interface TrackAssignment {
+  id: string;
+  institutionId: string;
+  batchId: string;
+  trackId: string;
+  trackTitle: string;
+  dueAt: string | null;
+  assignedBy: string;
+  createdAt: string;
+}
+
+/** A track assigned to one of the learner's batches, with their progress in it. */
+export interface MyAssignment extends TrackAssignment {
+  institutionName: string;
+  solvedCount: number;
+  itemCount: number;
+  mastery: number;
+}
+
+export interface BatchReportRow {
+  userId: string;
+  name: string;
+  email: string;
+  solvedCount: number;
+  mastery: number;
+  /** Mastery per topic, in the order of BatchReport.topics. */
+  topicMastery: number[];
+  xp: number;
+  lastActiveAt: string | null;
+}
+
+export interface BatchReport {
+  batchId: string;
+  track: TopicRef & { itemCount: number };
+  topics: TopicRef[];
+  /** Batch average mastery per topic: where the class needs help. */
+  topicAverages: number[];
+  rows: BatchReportRow[];
 }

@@ -151,11 +151,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     successResponse(await institutions.get(userId(request), request.params.id)),
   );
 
-  // ?limit=&cursor=&role=&userIds=a,b,c (userIds: look up specific people, max 100)
+  // ?limit=&cursor=&role=&batchId=&userIds=a,b,c (userIds: look up specific people, max 100)
   app.get<IdParams>("/api/v1/institutions/:id/members", auth, async (request) => {
     const query = parse(
       PageQuerySchema.extend({
         role: InstitutionRoleSchema.optional(),
+        batchId: z.string().min(1).max(100).optional(),
         userIds: z
           .string()
           .optional()
@@ -164,11 +165,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       request.query,
       "query",
     );
-    const { userIds, role, ...page } = query;
+    const { userIds, role, batchId, ...page } = query;
     return successResponse(
       await institutions.listMembers(userId(request), request.params.id, {
         ...page,
         ...(role ? { role } : {}),
+        ...(batchId ? { batchId } : {}),
         ...(userIds ? { userIds, limit: Math.max(page.limit, userIds.length) } : {}),
       }),
     );

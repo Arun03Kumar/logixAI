@@ -1,7 +1,7 @@
 import type { Checker, ExecutionResponse, LanguageDefinition, TestCase } from "@logixai/contracts";
 import type { ExecResult, SandboxFactory } from "../sandbox/types.js";
+import { formatScore, jsonOutputsMatch, metricPasses, metricScore } from "@logixai/contracts";
 import { outputsMatch } from "./compare.js";
-import { jsonOutputsMatch } from "@logixai/contracts";
 
 export interface JudgeLimits {
   /** Per-test time limit before the language multiplier. */
@@ -77,11 +77,38 @@ export function verdictFor(
     const message = result.stderr.trim() || `Your program exited with code ${result.exitCode}.`;
     return { status: "RE", output: clip(message), timeMs };
   }
+  if (checker.kind === "metric") return scored(checker, expected, result.stdout, timeMs);
   return {
     status: matches(checker, expected, result.stdout) ? "SUCCESS" : "WA",
     output: clip(result.stdout),
     timeMs,
   };
+}
+
+/** Dataset challenges: score the printed predictions against the hidden labels. */
+function scored(
+  checker: Extract<Checker, { kind: "metric" }>,
+  expected: string,
+  stdout: string,
+  timeMs: number,
+): ExecutionResponse {
+  let truth: unknown;
+  let predicted: unknown;
+  try {
+    truth = JSON.parse(expected);
+    predicted = JSON.parse(stdout.trim());
+  } catch {
+    return { status: "WA", output: "Return a list with one prediction per row.", timeMs };
+  }
+  const score = Array.isArray(truth) ? metricScore(checker.metric, truth, predicted) : null;
+  if (score === null) {
+    const got = Array.isArray(predicted) ? `${predicted.length} predictions` : "something that isn't a list";
+    const want = Array.isArray(truth) ? truth.length : 0;
+    return { status: "WA", output: `Expected ${want} numeric predictions, got ${got}.`, timeMs };
+  }
+  const passes = metricPasses(checker.metric, score, checker.threshold);
+  // Only the score goes back, never the labels.
+  return { status: passes ? "SUCCESS" : "WA", output: formatScore(checker.metric, score), timeMs };
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   type TopicFile,
   type TrackFile,
 } from "./schema.js";
+import { loadDataset, splitDataset, type DatasetSplit } from "./datasets.js";
 
 export const GENERATED_FILE = "tests.generated.json";
 
@@ -30,6 +31,8 @@ export type CatalogItem = ItemSource & {
   weight: number;
   /** Code items only: tests with expected outputs from the content build. */
   judge?: { sample: JudgeTest[]; hidden: JudgeTest[] };
+  /** Dataset challenges: the first rows and split sizes, for the item page. */
+  datasetPreview?: DatasetSplit["preview"];
 };
 
 export interface CatalogTopic extends Omit<TopicFile, "items"> {
@@ -42,8 +45,10 @@ export interface CatalogTrack extends Omit<TrackFile, "topics"> {
 }
 
 /** What a code item's expected outputs depend on; a change means rebuild. */
-export function codeItemHash(item: CodeItemSource): string {
-  const basis = JSON.stringify([item.function, item.solution, item.tests, item.tolerance]);
+export function codeItemHash(item: CodeItemSource, datasetHash?: string): string {
+  const parts: unknown[] = [item.function, item.solution, item.tests, item.tolerance];
+  if (item.dataset) parts.push(item.dataset, item.scoring, item.starter, datasetHash);
+  const basis = JSON.stringify(parts);
   return createHash("sha256").update(basis).digest("hex").slice(0, 16);
 }
 
@@ -106,6 +111,21 @@ export function readSources(dir: string): ContentSources {
         const answers = Array.isArray(item.answer) ? item.answer : [item.answer];
         for (const a of answers) if (!ids.has(a)) problems.push(`${where}: answer ${a} is not an option`);
       }
+      if (isCode(item) && item.dataset) {
+        if (!item.scoring) problems.push(`${where}: a dataset item needs scoring`);
+        const p = item.function.params;
+        if (p.length !== 2 || p.some((x) => x.type !== "dataframe")) {
+          problems.push(`${where}: a dataset item takes (train, test) dataframes`);
+        }
+        try {
+          splitDataset(loadDataset(dir, item.dataset.file), item.dataset);
+        } catch (err) {
+          problems.push(`${where}: ${(err as Error).message}`);
+        }
+      } else if (isCode(item) && item.tests.sample.length === 0) {
+        problems.push(`${where}: needs at least one sample test`);
+      }
+      if (isCode(item) && item.scoring && !item.dataset) problems.push(`${where}: scoring needs a dataset`);
       if (isCode(item)) {
         const params = item.function.params.length;
         for (const t of [...item.tests.sample, ...item.tests.hidden]) {
@@ -156,6 +176,7 @@ const weightOf = (d: ArenaDifficulty) => XP_BY_DIFFICULTY[d];
 export function buildCatalog(
   sources: ContentSources,
   generated: GeneratedTests | null,
+  dir: string,
 ): Catalog {
   const stale: string[] = [];
   let order = 0;
@@ -171,11 +192,13 @@ export function buildCatalog(
           items: topic.items.map((item): CatalogItem => {
             const base = { ...item, topicId, trackId: track.id, order: order++, weight: weightOf(item.difficulty) };
             if (!isCode(item)) return base;
+            const data = item.dataset ? datasetTests(dir, item) : null;
             const built = generated?.items[item.id];
-            if (!built || built.hash !== codeItemHash(item)) {
+            if (!built || built.hash !== codeItemHash(item, data?.hash)) {
               stale.push(item.id);
               return base;
             }
+            if (data) return { ...base, judge: data.judge, datasetPreview: data.preview };
             return { ...base, judge: { sample: built.sample, hidden: built.hidden } };
           }),
         };
@@ -189,6 +212,24 @@ export function buildCatalog(
   return new Catalog(tracks);
 }
 
+/**
+ * Dataset challenges get their tests from the dataset split (the expected
+ * output is the true labels); the content build only records that the
+ * reference solution reached the required score.
+ */
+export function datasetTests(dir: string, item: CodeItemSource) {
+  const dataset = loadDataset(dir, item.dataset!.file);
+  const split = splitDataset(dataset, item.dataset!);
+  return {
+    hash: dataset.hash,
+    preview: split.preview,
+    judge: {
+      sample: [{ args: split.sample.args, expected: JSON.stringify(split.sample.labels) }],
+      hidden: [{ args: split.hidden.args, expected: JSON.stringify(split.hidden.labels) }],
+    },
+  };
+}
+
 /** Loads content/ (sources + tests.generated.json) for the running service. */
 export function loadCatalog(dir: string): Catalog {
   const sources = readSources(dir);
@@ -196,5 +237,5 @@ export function loadCatalog(dir: string): Catalog {
   const generated = existsSync(generatedPath)
     ? GeneratedTestsSchema.parse(JSON.parse(readFileSync(generatedPath, "utf8")))
     : { items: {} };
-  return buildCatalog(sources, generated);
+  return buildCatalog(sources, generated, dir);
 }

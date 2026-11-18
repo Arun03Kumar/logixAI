@@ -1,4 +1,4 @@
-import type { ArenaSubmissionStatus, ArenaTestResult, ItemStatus } from "@logixai/contracts";
+import type { ArenaSubmissionStatus, ArenaTestResult, AuditEvent, ItemStatus } from "@logixai/contracts";
 
 export interface ProgressRecord {
   userId: string;
@@ -11,6 +11,23 @@ export interface ProgressRecord {
   solvedAt: Date | null;
   revealedAt: Date | null;
   lastActivityAt: Date;
+  /** Spaced repetition: set on the first solve. */
+  review?: ReviewRecord | null;
+}
+
+export interface ReviewRecord {
+  due: Date;
+  intervalDays: number;
+}
+
+export interface AssignmentRecord {
+  id: string;
+  institutionId: string;
+  batchId: string;
+  trackId: string;
+  dueAt: Date | null;
+  assignedBy: string;
+  createdAt: Date;
 }
 
 export interface SubmissionRecord {
@@ -55,6 +72,9 @@ export interface Store {
     markSolved(userId: string, itemId: string, xp: number, at: Date): Promise<ItemStatus | null>;
     /** Marks revealed unless solved. Returns false if it was already solved. */
     markRevealed(userId: string, itemId: string, at: Date): Promise<boolean>;
+    setReview(userId: string, itemId: string, review: ReviewRecord | null): Promise<void>;
+    /** Batch reports: the given users' rows for the given items. */
+    listForUsers(userIds: string[], itemIds: string[]): Promise<ProgressRecord[]>;
   };
   submissions: {
     create(data: Omit<SubmissionRecord, "id">): Promise<SubmissionRecord>;
@@ -74,5 +94,18 @@ export interface Store {
     get(userId: string): Promise<StatsRecord | null>;
     /** Adds XP / solved items and marks the day as practiced. */
     record(userId: string, day: string, change: { xp: number; solved: number }): Promise<void>;
+    getMany(userIds: string[]): Promise<StatsRecord[]>;
+  };
+  assignments: {
+    /** Throws an error with code 11000 if the track is already assigned to the batch. */
+    create(data: Omit<AssignmentRecord, "id">): Promise<AssignmentRecord>;
+    get(id: string): Promise<AssignmentRecord | null>;
+    delete(id: string): Promise<void>;
+    /** Newest first; optionally only these batches. */
+    listForInstitution(institutionId: string, batchIds?: string[]): Promise<AssignmentRecord[]>;
+  };
+  audit: {
+    record(event: Omit<AuditEvent, "id" | "at">): Promise<void>;
+    pageForInstitution(institutionId: string, query: { limit: number; cursor?: string }): Promise<Page<AuditEvent>>;
   };
 }

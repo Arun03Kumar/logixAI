@@ -3,7 +3,7 @@
  * content/<track>/<topic>.yaml). Everything here, including answers and
  * reference solutions, stays on the server.
  */
-import { ACCESS_LEVELS, ARENA_DIFFICULTIES, TRACK_LEVELS } from "@logixai/contracts";
+import { ACCESS_LEVELS, ARENA_DIFFICULTIES, METRICS, TRACK_LEVELS } from "@logixai/contracts";
 import { z } from "@logixai/service-kit";
 
 const Slug = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "lowercase-words-with-dashes");
@@ -44,9 +44,11 @@ const TestCase = z.object({
 
 /**
  * Parameter types. `ndarray` / `ndarray_int` arguments arrive as NumPy arrays
- * (float64 / int64); everything else as plain Python values.
+ * (float64 / int64), `dataframe` as a pandas DataFrame (written in tests as
+ * {"columns": [...], "data": [[...], ...]}, null for missing values);
+ * everything else as plain Python values.
  */
-export const PARAM_TYPES = ["float", "int", "bool", "str", "list", "dict", "ndarray", "ndarray_int"] as const;
+export const PARAM_TYPES = ["float", "int", "bool", "str", "list", "dict", "ndarray", "ndarray_int", "dataframe"] as const;
 
 const CodeFields = {
   function: z.object({
@@ -59,7 +61,8 @@ const CodeFields = {
   /** Reference solution. Must pass every test; the starter must fail at least one. */
   solution: z.string().min(1),
   tests: z.object({
-    sample: z.array(TestCase).min(1),
+    /** At least one, unless the item uses a dataset (then tests come from its split). */
+    sample: z.array(TestCase).default([]),
     hidden: z.array(TestCase).default([]),
     /**
      * Python defining `cases(rng)` -> list of argument lists, for extra hidden
@@ -67,7 +70,25 @@ const CodeFields = {
      * NumPy is available as `np`.
      */
     generate: z.string().optional(),
-  }),
+  }).default({ sample: [], hidden: [] }),
+  /**
+   * Dataset challenge: the function is called as f(train, test) with two
+   * DataFrames and must return one prediction per test row. Rows are split
+   * deterministically: Run uses a validation split of the training rows, Submit
+   * trains on all training rows and predicts the held-out test rows.
+   */
+  dataset: z
+    .object({
+      /** content/datasets/<file> */
+      file: z.string().regex(/^[a-z0-9-]+.csv$/),
+      target: z.string().min(1),
+      testFraction: z.number().gt(0).lt(0.6).default(0.25),
+      validFraction: z.number().gt(0).lt(0.6).default(0.2),
+      seed: z.number().int().default(1),
+    })
+    .optional(),
+  /** With a dataset: how predictions are scored, and the score needed to pass. */
+  scoring: z.object({ metric: z.enum(METRICS), threshold: z.number() }).optional(),
   tolerance: z.object({ abs: z.number().nonnegative(), rel: z.number().nonnegative() }).default({ abs: 1e-6, rel: 1e-6 }),
 };
 

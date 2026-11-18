@@ -76,7 +76,7 @@ export function createMemoryStore(): Store {
           ),
         ),
       listForUser: async (userId) => all(memberships).filter((m) => m.userId === userId),
-      async pageForInstitution(institutionId, { limit, cursor, role, userIds }) {
+      async pageForInstitution(institutionId, { limit, cursor, role, userIds, batchId }) {
         // Same order as MongoStore: highest role first, then join order.
         const order = [...memberships.keys()];
         const key = (m: { id: string; role: keyof typeof ROLE_RANK }) =>
@@ -90,7 +90,8 @@ export function createMemoryStore(): Store {
             (m) =>
               m.institutionId === institutionId &&
               (!role || m.role === role) &&
-              (!userIds || userIds.includes(m.userId)),
+              (!userIds || userIds.includes(m.userId)) &&
+              (!batchId || m.batchIds.includes(batchId)),
           )
           .sort((a, b) => key(b)[0] - key(a)[0] || key(a)[1] - key(b)[1])
           .filter((m) => {
