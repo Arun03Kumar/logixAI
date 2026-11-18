@@ -42,6 +42,9 @@ export function createAccessTokenVerifier(options: {
         role: role.data,
         name: String(payload.name ?? ""),
         email: String(payload.email ?? ""),
+        // Tokens issued before plans existed count as free.
+        plan: payload.plan === "pro" ? "pro" : "free",
+        planUntil: typeof payload.planUntil === "number" ? payload.planUntil : null,
       };
     } catch {
       throw new UnauthorizedError("Your session has expired. Sign in again.");

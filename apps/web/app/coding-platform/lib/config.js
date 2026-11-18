@@ -19,3 +19,6 @@ export const SOCKET_URL =
 
 export const ARENA_API_URL =
   process.env.NEXT_PUBLIC_ARENA_API_URL || "http://localhost:3010/api/v1";
+
+export const BILLING_API_URL =
+  process.env.NEXT_PUBLIC_BILLING_API_URL || "http://localhost:3011/api/v1";

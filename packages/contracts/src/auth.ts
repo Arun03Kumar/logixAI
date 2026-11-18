@@ -1,3 +1,4 @@
+import type { PlanState, PlanTier } from "./billing";
 import { z } from "zod";
 
 /* ─── Roles ─────────────────────────────────────────────────────────── */
@@ -7,14 +8,19 @@ export const PLATFORM_ROLES = ["user", "admin"] as const;
 export const PlatformRoleSchema = z.enum(PLATFORM_ROLES);
 export type PlatformRole = z.infer<typeof PlatformRoleSchema>;
 
-/** Role inside one institution. */
-export const INSTITUTION_ROLES = ["owner", "admin", "instructor", "student"] as const;
+/**
+ * Role inside one institution, highest first. Department heads act only inside
+ * their departments; instructors and assistants only inside their batches.
+ */
+export const INSTITUTION_ROLES = ["owner", "admin", "dept_head", "instructor", "assistant", "student"] as const;
 export const InstitutionRoleSchema = z.enum(INSTITUTION_ROLES);
 export type InstitutionRole = z.infer<typeof InstitutionRoleSchema>;
 
-/** Roles that can be granted through an invite (ownership is never invited). */
-export const INVITABLE_ROLES = ["admin", "instructor", "student"] as const;
+/** Roles an institution can hand out through an invite. Owner invites come only from LogixAI. */
+export const INVITABLE_ROLES = ["admin", "dept_head", "instructor", "assistant", "student"] as const;
 export const InvitableRoleSchema = z.enum(INVITABLE_ROLES);
+/** Every role an invite record can carry (owner: created by a platform admin). */
+export const INVITE_ROLES = ["owner", ...INVITABLE_ROLES] as const;
 
 export const INSTITUTION_TYPES = [
   "school",
@@ -59,6 +65,8 @@ export interface PublicUser {
   email: string;
   role: PlatformRole;
   createdAt: string;
+  /** Free or Pro right now (personal pass, trial or an institution licence). */
+  plan: PlanState;
 }
 
 export interface AuthSession {
@@ -75,7 +83,15 @@ export interface AccessTokenClaims {
   role: PlatformRole;
   name: string;
   email: string;
+  /** "pro" while a pass or licence is active at issue time; check planUntil too. */
+  plan: PlanTier;
+  /** When Pro ends, as Unix seconds; null on free. */
+  planUntil: number | null;
 }
+
+/** Pro right now? Tokens live 15 minutes, so a pass can end mid-token. */
+export const hasPro = (claims: Pick<AccessTokenClaims, "plan" | "planUntil"> | null | undefined, now = Date.now()) =>
+  claims?.plan === "pro" && claims.planUntil !== null && claims.planUntil * 1000 > now;
 
 /** JWT audience every LogixAI service checks. */
 export const ACCESS_TOKEN_AUDIENCE = "logixai";

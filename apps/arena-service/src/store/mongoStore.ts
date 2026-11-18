@@ -60,6 +60,8 @@ submissionSchema.index({ userId: 1, _id: -1 });
 submissionSchema.index({ userId: 1, itemId: 1, _id: -1 });
 // Dashboard acceptance rate and the "one pending run at a time" check.
 submissionSchema.index({ userId: 1, mode: 1, status: 1 });
+// The free plan's daily run quota.
+submissionSchema.index({ userId: 1, createdAt: -1 });
 const Submission = mongoose.model("ArenaSubmission", submissionSchema);
 
 const statsSchema = new Schema(
@@ -198,6 +200,7 @@ export function createMongoStore(): Store {
         const page = toPage(docs, limit, (last) => String(last._id));
         return { items: page.items.map((d) => sub(d)!), nextCursor: page.nextCursor };
       },
+      countSince: (userId, since) => Submission.countDocuments({ userId, createdAt: { $gte: since } }),
       countPendingSince: (userId, since) =>
         Submission.countDocuments({ userId, status: "pending", createdAt: { $gt: since } }),
       submitStats: async (userId) => {

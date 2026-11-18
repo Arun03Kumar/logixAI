@@ -25,7 +25,7 @@ export default function RequireAuth({ role, children }) {
         <EmptyState
           icon={<ShieldAlert />}
           title="You don't have access to this page"
-          description="Only LogixAI admins can create problems. Ask an admin if you need access."
+          description="This page is for LogixAI platform admins. Ask an admin if you need access."
           action={
             <Button asChild size="sm">
               <Link href="/problems">Back to practice</Link>

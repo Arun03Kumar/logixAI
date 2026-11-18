@@ -12,6 +12,8 @@ export interface UserRecord {
   email: string;
   passwordHash: string;
   role: PlatformRole;
+  /** Personal Pro (bought, trial or granted) lasts until this moment. */
+  proUntil?: Date | null;
   createdAt: Date;
 }
 
@@ -30,6 +32,9 @@ export interface InstitutionRecord {
   slug: string;
   type: (typeof INSTITUTION_TYPES)[number];
   createdBy: string;
+  /** Institution licence: every member has Pro until then. */
+  licenceUntil?: Date | null;
+  licenceSeats?: number | null;
   createdAt: Date;
 }
 
@@ -76,6 +81,12 @@ export interface Store {
     findById(id: string): Promise<UserRecord | null>;
     findByEmail(email: string): Promise<UserRecord | null>;
     findByIds(ids: string[]): Promise<UserRecord[]>;
+    /** Adds days of Pro from max(now, current end), atomically. Returns the new end. */
+    extendPro(userId: string, days: number, now: Date): Promise<Date | null>;
+  };
+  entitlements: {
+    /** Records a grant once per reference. False if that reference was already granted. */
+    recordGrant(grant: { reference: string; userId: string; days: number; source: string; at: Date }): Promise<boolean>;
   };
   refreshTokens: {
     create(data: New<RefreshTokenRecord>): Promise<RefreshTokenRecord>;
@@ -89,11 +100,15 @@ export interface Store {
     findById(id: string): Promise<InstitutionRecord | null>;
     findByIds(ids: string[]): Promise<InstitutionRecord[]>;
     slugExists(slug: string): Promise<boolean>;
+    setLicence(id: string, until: Date | null, seats: number | null): Promise<InstitutionRecord | null>;
+    /** Platform admin: newest first, optionally matching name or slug. */
+    search(query: string | undefined, limit: number): Promise<InstitutionRecord[]>;
   };
   memberships: {
     create(data: New<MembershipRecord>): Promise<MembershipRecord>;
     find(userId: string, institutionId: string): Promise<MembershipRecord | null>;
     listForUser(userId: string): Promise<MembershipRecord[]>;
+    countForInstitutions(institutionIds: string[]): Promise<Record<string, number>>;
     /**
      * Members of an institution, highest role first, then by join order.
      * Keyset-paginated: pass back the returned `nextCursor`.

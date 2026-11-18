@@ -34,6 +34,7 @@ async function start() {
       secureCookies: config.NODE_ENV === "production",
       refreshTokenTtlDays: config.REFRESH_TOKEN_TTL_DAYS,
       adminEmails: config.BOOTSTRAP_ADMIN_EMAILS,
+      ...(config.INTERNAL_API_TOKEN ? { internalToken: config.INTERNAL_API_TOKEN } : {}),
     });
 
     await app.listen({ port: config.PORT, host: "0.0.0.0" });

@@ -138,12 +138,12 @@ Rules for writing items:
 ## Not built yet
 
 Planned for later phases: arena items inside institution exams, CSV export of
-batch reports, Pro/Premium plans and payments, PyTorch and deep-learning
+batch reports, PyTorch and deep-learning
 content, SQL practice, contests and public profiles, and AI features (hints,
 interviewer).
 
-The `access: pro` flag is stored on items and shown in the UI, but isn't
-enforced until plans exist.
+Items with `access: pro` are locked for users without Pro, and free users
+have a daily cap on code runs; see [billing.md](billing.md).
 
 ## Notes
 

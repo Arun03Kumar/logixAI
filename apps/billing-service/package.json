@@ -1,0 +1,28 @@
+{
+  "name": "@logixai/billing-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plans and payments: Pro passes via Razorpay, coupons, free trials, receipts. Grants Pro through identity-service.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
+    "test": "vitest run",
+    "db:migrate": "tsx src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/rate-limit": "^11.2.2",
+    "@logixai/contracts": "*",
+    "@logixai/service-kit": "*",
+    "fastify": "^5.4.0",
+    "mongoose": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.2"
+  }
+}

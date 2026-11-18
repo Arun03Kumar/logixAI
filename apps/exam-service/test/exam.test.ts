@@ -12,7 +12,7 @@ const INST = "inst-1";
 /** Tokens in tests are just "Bearer <userId>". */
 const verifier: AccessTokenVerifier = {
   async verify(token) {
-    return { sub: token, role: "user", name: token, email: `${token}@x.com` };
+    return { sub: token, role: "user", name: token, email: `${token}@x.com`, plan: "free", planUntil: null };
   },
   async verifyHeader(header) {
     const token = String(header ?? "").replace(/^Bearer /, "");

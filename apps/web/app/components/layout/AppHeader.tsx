@@ -5,14 +5,16 @@ import { usePathname } from "next/navigation";
 import { Container, Logo, ThemeToggle, cn } from "@logixai/ui";
 import { useSession } from "@/app/lib/auth/useSession";
 import UserMenu from "./UserMenu";
+import { isPro } from "@/app/lib/billing/plan";
 
-type NavItem = { label: string; href: string; when?: "signedIn" | "admin" };
+type NavItem = { label: string; href: string; when?: "signedIn" | "admin" | "notPro" };
 
 const NAV: NavItem[] = [
   { label: "Practice", href: "/problems" },
   { label: "ML Arena", href: "/arena" },
   { label: "Institutions", href: "/institutions", when: "signedIn" },
   { label: "Create problem", href: "/create-problem", when: "admin" },
+  { label: "Pricing", href: "/pricing", when: "notPro" },
 ];
 
 /** Header for app pages (practice, institutions, authoring). */
@@ -24,7 +26,8 @@ export default function AppHeader() {
     (item) =>
       !item.when ||
       (item.when === "signedIn" && status === "authenticated") ||
-      (item.when === "admin" && user?.role === "admin"),
+      (item.when === "admin" && user?.role === "admin") ||
+      (item.when === "notPro" && status !== "loading" && !isPro(user)),
   );
 
   return (

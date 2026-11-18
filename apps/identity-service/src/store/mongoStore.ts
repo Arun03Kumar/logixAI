@@ -19,6 +19,7 @@ const User = mongoose.model(
       email: { type: String, required: true, unique: true, lowercase: true, trim: true },
       passwordHash: { type: String, required: true },
       role: { type: String, enum: PLATFORM_ROLES, default: "user" },
+      proUntil: { type: Date, default: null },
     },
     opts,
   ),
@@ -46,6 +47,8 @@ const Institution = mongoose.model(
       slug: { type: String, required: true, unique: true },
       type: { type: String, enum: INSTITUTION_TYPES, required: true },
       createdBy: { type: String, required: true },
+      licenceUntil: { type: Date, default: null },
+      licenceSeats: { type: Number, default: null },
     },
     opts,
   ),
@@ -100,6 +103,25 @@ inviteSchema.index({ institutionId: 1, createdAt: -1 });
 const Invite = mongoose.model("Invite", inviteSchema);
 
 /** Append-only record of who changed what (see packages/contracts/src/audit.ts). */
+/** One row per Pro grant (order, trial, admin); the unique reference makes grants idempotent. */
+const EntitlementGrant = mongoose.model(
+  "EntitlementGrant",
+  new Schema(
+    {
+      reference: { type: String, required: true, unique: true },
+      userId: { type: String, required: true, index: true },
+      days: { type: Number, required: true },
+      source: { type: String, required: true },
+      at: { type: Date, required: true },
+    },
+    { collection: "entitlement_grants", versionKey: false },
+  ),
+);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Admin search treats the query as plain text, not a regex. */
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const auditSchema = new Schema(
   {
     at: { type: Date, required: true, default: () => new Date() },
@@ -137,6 +159,27 @@ export function createMongoStore(): Store {
       findById: async (id) => (isId(id) ? recOrNull(await User.findById(id)) : null),
       findByEmail: async (email) => recOrNull(await User.findOne({ email })),
       findByIds: async (ids) => recs(await User.find({ _id: { $in: ids.filter(isId) } })),
+      extendPro: async (userId, days, now) => {
+        if (!isId(userId)) return null;
+        // Pipeline update: new end = max(now, current end) + days, in one atomic write.
+        const doc = await User.findByIdAndUpdate(
+          userId,
+          [{ $set: { proUntil: { $add: [{ $max: [{ $ifNull: ["$proUntil", now] }, now] }, days * DAY_MS] } } }],
+          { new: true },
+        );
+        return (doc?.get("proUntil") as Date | null) ?? null;
+      },
+    },
+    entitlements: {
+      recordGrant: async (grant) => {
+        try {
+          await EntitlementGrant.create(grant);
+          return true;
+        } catch (err) {
+          if ((err as { code?: number }).code === 11000) return false;
+          throw err;
+        }
+      },
     },
     refreshTokens: {
       create: async (data) => rec(await RefreshToken.create(data)),
@@ -157,12 +200,29 @@ export function createMongoStore(): Store {
       findById: async (id) => (isId(id) ? recOrNull(await Institution.findById(id)) : null),
       findByIds: async (ids) => recs(await Institution.find({ _id: { $in: ids.filter(isId) } })),
       slugExists: async (slug) => Boolean(await Institution.exists({ slug })),
+      setLicence: async (id, until, seats) =>
+        isId(id)
+          ? recOrNull(await Institution.findByIdAndUpdate(id, { $set: { licenceUntil: until, licenceSeats: seats } }, { new: true }))
+          : null,
+      search: async (query, limit) => {
+        const filter = query
+          ? { $or: [{ name: new RegExp(escapeRegex(query), "i") }, { slug: new RegExp(escapeRegex(query), "i") }] }
+          : {};
+        return recs(await Institution.find(filter).sort({ createdAt: -1 }).limit(limit));
+      },
     },
     memberships: {
       create: async (data) => rec(await Membership.create({ ...data, roleRank: ROLE_RANK[data.role] })),
       find: async (userId, institutionId) =>
         recOrNull(await Membership.findOne({ userId, institutionId })),
       listForUser: async (userId) => recs(await Membership.find({ userId }).sort({ createdAt: 1 })),
+      countForInstitutions: async (institutionIds) => {
+        const rows = await Membership.aggregate<{ _id: string; n: number }>([
+          { $match: { institutionId: { $in: institutionIds } } },
+          { $group: { _id: "$institutionId", n: { $sum: 1 } } },
+        ]);
+        return Object.fromEntries(rows.map((r) => [r._id, r.n]));
+      },
       pageForInstitution: async (institutionId, { limit, cursor, role, userIds, batchId }) => {
         const after = decodeCursor(cursor, isMembershipCursor);
         const filter: Record<string, unknown> = { institutionId };

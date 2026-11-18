@@ -12,6 +12,7 @@ import { Crumbs, StatusIcon } from "../../_components/bits";
 import { ITEM_TYPE, isCodeItem } from "../../_components/labels";
 import AnswerPlayer from "./AnswerPlayer";
 import CodePlayer from "./CodePlayer";
+import ProLock from "./ProLock";
 
 const dayFmt = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" });
 
@@ -40,7 +41,7 @@ function ItemPage() {
   const signedIn = status === "authenticated";
   const item = useApi(() => arenaApi.item(itemId), [itemId, status], { enabled: status !== "loading" });
   const it = item.data;
-  const code = it && isCodeItem(it.type);
+  const code = it && isCodeItem(it.type) && !it.locked;
   // Review mode only makes sense for something already solved.
   const reviewing = reviewMode && it?.status === "solved";
 
@@ -75,7 +76,9 @@ function ItemPage() {
               </div>
               {signedIn ? <ReviewLine item={it} reviewMode={reviewing} /> : null}
             </div>
-            {code ? (
+            {it.locked ? (
+              <ProLock item={it} signedIn={signedIn} />
+            ) : code ? (
               // key: remount when moving between items so editor state resets.
               <CodePlayer key={it.id} item={it} signedIn={signedIn} onItemChange={item.setData} reviewMode={reviewing} />
             ) : (

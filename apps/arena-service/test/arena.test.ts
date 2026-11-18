@@ -22,7 +22,9 @@ const catalog: Catalog = loadCatalog(CONTENT);
 
 const verifier: AccessTokenVerifier = {
   async verify(token) {
-    return { sub: token, role: "user", name: token, email: `${token}@x.com` };
+    // "pro-..." users have an active Pro pass.
+    const pro = token.startsWith("pro-");
+    return { sub: token, role: "user", name: token, email: `${token}@x.com`, plan: pro ? "pro" : "free", planUntil: pro ? 4_102_444_800 : null };
   },
   async verifyHeader(header) {
     const token = String(header ?? "").replace(/^Bearer /, "");
@@ -46,6 +48,8 @@ beforeEach(async () => {
     identity: noInstitutions,
     verifier,
     corsOrigins: [],
+    // A high per-minute limit, so the daily cap is what these tests hit.
+    codeRunsPerMinute: 1000,
     now: () => clock,
   });
   app = built.app;
@@ -235,5 +239,55 @@ describe("dashboard", () => {
 
     expect((await req(null, "GET", "/me/dashboard")).status).toBe(401);
     expect((await req("bad", "GET", "/tracks")).status).toBe(401);
+  });
+});
+
+describe("plans", () => {
+  it("locks Pro items for free users: preview only, no answers or runs", async () => {
+    const proItem = catalog.items.find((i) => i.access === "pro" && (i.type === "code" || i.type === "debug"))!;
+    const view = (await req("asha", "GET", `/items/${proItem.id}`)).data;
+    expect(view).toMatchObject({ locked: true, access: "pro", hints: [] });
+    expect(view.prompt.length).toBeGreaterThan(0);
+    expect(view).not.toHaveProperty("starterCode");
+    expect(view).not.toHaveProperty("samples");
+    expect(view).not.toHaveProperty("solution");
+
+    const run = await req("asha", "POST", `/items/${proItem.id}/code`, { code: "x", mode: "run" });
+    expect(run.status).toBe(403);
+    expect(run.body.message).toMatch(/Pro problem/);
+    expect((await req("asha", "POST", `/items/${proItem.id}/reveal`)).status).toBe(403);
+    expect(judged).toHaveLength(0);
+
+    const unlocked = (await req("pro-asha", "GET", `/items/${proItem.id}`)).data;
+    expect(unlocked.locked).toBeUndefined();
+    expect(unlocked.starterCode).toBeTruthy();
+    expect((await req("pro-asha", "POST", `/items/${proItem.id}/code`, { code: "x", mode: "run" })).status).toBe(202);
+
+    const proMcq = catalog.items.find((i) => i.access === "pro" && i.type === "mcq_single")!;
+    expect((await req("asha", "POST", `/items/${proMcq.id}/answer`, { selectedOptionIds: ["a"] })).status).toBe(403);
+  });
+
+  it("caps free code runs per day; Pro has no cap", async () => {
+    const item = catalog.item("vec-dot-code")!;
+    const done = async (id: string) =>
+      arena.applyJudgeResult({ submissionId: id, userId: "x", response: item.judge!.sample.map(() => ({ status: "SUCCESS" as const, output: "1" })) });
+    for (let i = 0; i < 30; i++) {
+      const r = await req("asha", "POST", "/items/vec-dot-code/code", { code: "x", mode: "run" });
+      expect(r.status).toBe(202);
+      await done(r.data.id);
+    }
+    const capped = await req("asha", "POST", "/items/vec-dot-code/code", { code: "x", mode: "run" });
+    expect(capped.status).toBe(403);
+    expect(capped.body.message).toMatch(/30 free code runs/);
+
+    // The next India-time day starts fresh (06:00Z + 19h = 06:30 IST next day).
+    clock = new Date(clock.getTime() + 19 * 3_600_000);
+    expect((await req("asha", "POST", "/items/vec-dot-code/code", { code: "x", mode: "run" })).status).toBe(202);
+
+    for (let i = 0; i < 31; i++) {
+      const r = await req("pro-ravi", "POST", "/items/vec-dot-code/code", { code: "x", mode: "run" });
+      expect(r.status).toBe(202);
+      await done(r.data.id);
+    }
   });
 });

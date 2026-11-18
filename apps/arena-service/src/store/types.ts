@@ -87,6 +87,8 @@ export interface Store {
     setXp(id: string, xp: number): Promise<void>;
     pageForUser(userId: string, query: { limit: number; cursor?: string; itemId?: string }): Promise<Page<SubmissionRecord>>;
     countPendingSince(userId: string, since: Date): Promise<number>;
+    /** Code runs (any mode) since a moment: the free plan's daily quota. */
+    countSince(userId: string, since: Date): Promise<number>;
     /** Submissions in "submit" mode and how many passed. */
     submitStats(userId: string): Promise<{ total: number; passed: number }>;
   };

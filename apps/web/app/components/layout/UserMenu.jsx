@@ -2,10 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, LogOut, ShieldCheck } from "lucide-react";
+import { Building2, CreditCard, LogOut, ShieldCheck, Sparkles } from "lucide-react";
 import { Avatar, Badge, Button, Skeleton } from "@logixai/ui";
 import { signOut } from "@/app/lib/auth/session";
 import { useSession } from "@/app/lib/auth/useSession";
+import { isPro } from "@/app/lib/billing/plan";
 
 /** Signed-in: avatar menu. Signed-out: "Sign in". Loading: placeholder. */
 export default function UserMenu() {
@@ -64,8 +65,14 @@ export default function UserMenu() {
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
               <p className="truncate text-sm font-semibold">{user.name}</p>
-              {user.role === "admin" ? (
+              {isPro(user) ? (
                 <Badge tone="brand">
+                  <Sparkles className="size-3" />
+                  Pro
+                </Badge>
+              ) : null}
+              {user.role === "admin" ? (
+                <Badge tone="info">
                   <ShieldCheck className="size-3" />
                   Admin
                 </Badge>
@@ -83,6 +90,26 @@ export default function UserMenu() {
               <Building2 className="size-4 text-muted-foreground" />
               Institutions
             </Link>
+            <Link
+              role="menuitem"
+              href="/account/billing"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
+            >
+              <CreditCard className="size-4 text-muted-foreground" />
+              Plan and billing
+            </Link>
+            {user.role === "admin" ? (
+              <Link
+                role="menuitem"
+                href="/admin/billing"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
+              >
+                <ShieldCheck className="size-4 text-muted-foreground" />
+                Billing admin
+              </Link>
+            ) : null}
             <button
               role="menuitem"
               type="button"

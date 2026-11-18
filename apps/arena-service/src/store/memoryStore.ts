@@ -101,6 +101,7 @@ export function createMemoryStore(): Store {
           nextCursor: rows.length > start + limit ? encodeCursor(start + limit) : null,
         };
       },
+      countSince: async (u, since) => submissions.filter((s) => s.userId === u && s.createdAt >= since).length,
       countPendingSince: async (u, since) =>
         submissions.filter((s) => s.userId === u && s.status === "pending" && s.createdAt > since).length,
       async submitStats(u) {

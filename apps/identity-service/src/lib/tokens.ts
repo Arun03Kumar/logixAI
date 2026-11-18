@@ -52,7 +52,13 @@ export async function createTokenIssuer(options: {
     accessTokenTtlSeconds: options.accessTokenTtlSeconds,
     jwks: () => ({ keys: [publicJwk] }),
     issueAccessToken: (claims) =>
-      new SignJWT({ role: claims.role, name: claims.name, email: claims.email })
+      new SignJWT({
+        role: claims.role,
+        name: claims.name,
+        email: claims.email,
+        plan: claims.plan,
+        planUntil: claims.planUntil,
+      })
         .setProtectedHeader({ alg: ALG, kid: options.keyId })
         .setSubject(claims.sub)
         .setIssuer(options.issuer)

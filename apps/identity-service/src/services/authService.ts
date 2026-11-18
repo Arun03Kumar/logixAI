@@ -1,26 +1,30 @@
-import type {
-  AuthSession,
-  MembershipSummary,
-  PublicUser,
-  SignInInput,
-  SignUpInput,
+import {
+  FREE_PLAN,
+  type AuthSession,
+  type MembershipSummary,
+  type PlanState,
+  type PublicUser,
+  type SignInInput,
+  type SignUpInput,
 } from "@logixai/contracts";
 import { ConflictError, UnauthorizedError } from "@logixai/service-kit";
 import { getDummyHash, hashPassword, verifyPassword } from "../lib/passwords.js";
 import { hashToken, newRefreshToken, type TokenIssuer } from "../lib/tokens.js";
 import type { Store, UserRecord } from "../store/types.js";
 import { toInstitutionSummary } from "./institutionService.js";
+import { planFor } from "./planService.js";
 
 /** A refresh token reused within this window is treated as a concurrent refresh (two tabs), not theft. */
 const REUSE_GRACE_MS = 30_000;
 
-export function toPublicUser(user: UserRecord): PublicUser {
+export function toPublicUser(user: UserRecord, plan: PlanState = FREE_PLAN): PublicUser {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
     createdAt: user.createdAt.toISOString(),
+    plan,
   };
 }
 
@@ -110,7 +114,7 @@ export class AuthService {
     );
     const byId = new Map(institutions.map((i) => [i.id, i]));
     return {
-      user: toPublicUser(user),
+      user: toPublicUser(user, await planFor(this.store, user)),
       memberships: memberships.flatMap((m) => {
         const inst = byId.get(m.institutionId);
         return inst
@@ -138,15 +142,18 @@ export class AuthService {
       expiresAt: refreshExpiresAt,
       revokedAt: null,
     });
+    const plan = await planFor(this.store, user);
     const accessToken = await this.tokens.issueAccessToken({
       sub: user.id,
       role: user.role,
       name: user.name,
       email: user.email,
+      plan: plan.tier,
+      planUntil: plan.until ? Math.floor(new Date(plan.until).getTime() / 1000) : null,
     });
     return {
       session: {
-        user: toPublicUser(user),
+        user: toPublicUser(user, plan),
         accessToken,
         expiresIn: this.tokens.accessTokenTtlSeconds,
       },

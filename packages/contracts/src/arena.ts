@@ -118,6 +118,8 @@ export interface SampleTest {
 }
 
 export interface ItemView extends ItemSummary {
+  /** A Pro item viewed without Pro: only the title and prompt are sent. */
+  locked?: boolean;
   topic: TopicRef;
   trackId: string;
   tags: string[];

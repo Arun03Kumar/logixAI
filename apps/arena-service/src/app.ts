@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import { AnswerInputSchema, AssignTrackSchema, CodeRunInputSchema, PageQuerySchema } from "@logixai/contracts";
+import { AnswerInputSchema, AssignTrackSchema, CodeRunInputSchema, PageQuerySchema, hasPro } from "@logixai/contracts";
 import {
   BadRequestError,
   UnauthorizedError,
@@ -31,6 +31,8 @@ export interface AppOptions {
 declare module "fastify" {
   interface FastifyRequest {
     userId: string | null;
+    /** Pro right now, from the access token. */
+    pro: boolean;
   }
 }
 
@@ -71,9 +73,12 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
 
   // Browsing works signed out; a token, when sent, must be valid.
   app.decorateRequest("userId", null);
+  app.decorateRequest("pro", false);
   app.addHook("onRequest", async (request) => {
     if (!request.headers.authorization) return;
-    request.userId = (await options.verifier.verifyHeader(request.headers.authorization)).sub;
+    const claims = await options.verifier.verifyHeader(request.headers.authorization);
+    request.userId = claims.sub;
+    request.pro = hasPro(claims, (options.now?.() ?? new Date()).getTime());
   });
   const user = (request: FastifyRequest) => {
     if (!request.userId) throw new UnauthorizedError();
@@ -100,15 +105,15 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     ok(await arena.getTopic(req.userId, req.params.topicId)),
   );
   app.get<P<{ itemId: string }>>(`${base}/items/:itemId`, async (req) =>
-    ok(await arena.getItem(req.userId, req.params.itemId)),
+    ok(await arena.getItem(req.userId, req.params.itemId, req.pro)),
   );
 
   /* ── Practice (signed in) ── */
   app.post<P<{ itemId: string }>>(`${base}/items/:itemId/answer`, async (req) =>
-    ok(await arena.answer(user(req), req.params.itemId, parse(AnswerInputSchema, req.body, "answer"))),
+    ok(await arena.answer(user(req), req.params.itemId, parse(AnswerInputSchema, req.body, "answer"), req.pro)),
   );
   app.post<P<{ itemId: string }>>(`${base}/items/:itemId/reveal`, async (req) =>
-    ok(await arena.reveal(user(req), req.params.itemId)),
+    ok(await arena.reveal(user(req), req.params.itemId, req.pro)),
   );
   app.post<P<{ itemId: string }>>(
     `${base}/items/:itemId/code`,
@@ -124,7 +129,7 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     async (req, reply) =>
       reply
         .status(202)
-        .send(ok(await arena.runCode(user(req), req.params.itemId, parse(CodeRunInputSchema, req.body, "code")))),
+        .send(ok(await arena.runCode(user(req), req.params.itemId, parse(CodeRunInputSchema, req.body, "code"), req.pro))),
   );
   app.get(`${base}/submissions`, async (req) =>
     ok(

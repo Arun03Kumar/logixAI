@@ -12,11 +12,12 @@ busy database move to its own cluster later without code changes.
 
 | Service            | Database              | Collections                                                                 |
 | ------------------ | --------------------- | --------------------------------------------------------------------------- |
-| identity-service   | `logixai-identity`    | users, refreshtokens, institutions, memberships, batches, invites, audit_events |
+| identity-service   | `logixai-identity`    | users, refreshtokens, institutions, memberships, batches, invites, entitlement_grants, audit_events |
 | problem-service    | `logixai-problems`    | problems, audit_events                                                      |
 | submission-service | `logixai-submissions` | submissions                                                                 |
 | exam-service       | `logixai-exams`       | exams, attempts, audit_events                                               |
 | arena-service      | `logixai-arena`       | item_progress, submissions, user_stats, track_assignments, audit_events (content is in the repo) |
+| billing-service    | `logixai-billing`     | orders, coupons, trials, counters, audit_events                                 |
 
 Every database also has `_migrations` (applied migration ids) and
 `_migrations_lock` (stops two deploys migrating at once).

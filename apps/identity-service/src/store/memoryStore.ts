@@ -13,6 +13,8 @@ export function createMemoryStore(): Store {
   const batches = table<import("./types.js").BatchRecord>();
   const invites = table<import("./types.js").InviteRecord>();
   const auditLog: AuditEvent[] = [];
+  const grants = new Set<string>();
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
   function insert<T extends { id: string; createdAt: Date }>(
     map: Map<string, T>,
@@ -36,6 +38,20 @@ export function createMemoryStore(): Store {
       findById: async (id) => copy(users.get(id)),
       findByEmail: async (email) => copy([...users.values()].find((u) => u.email === email)),
       findByIds: async (ids) => all(users).filter((u) => ids.includes(u.id)),
+      async extendPro(userId, days, now) {
+        const u = users.get(userId);
+        if (!u) return null;
+        const from = u.proUntil && u.proUntil > now ? u.proUntil : now;
+        u.proUntil = new Date(from.getTime() + days * DAY_MS);
+        return u.proUntil;
+      },
+    },
+    entitlements: {
+      async recordGrant(grant) {
+        if (grants.has(grant.reference)) return false;
+        grants.add(grant.reference);
+        return true;
+      },
     },
     refreshTokens: {
       create: async (data) => insert(tokens, data),
@@ -57,6 +73,17 @@ export function createMemoryStore(): Store {
       findById: async (id) => copy(institutions.get(id)),
       findByIds: async (ids) => all(institutions).filter((i) => ids.includes(i.id)),
       slugExists: async (slug) => [...institutions.values()].some((i) => i.slug === slug),
+      async setLicence(id, until, seats) {
+        const inst = institutions.get(id);
+        if (!inst) return null;
+        Object.assign(inst, { licenceUntil: until, licenceSeats: seats });
+        return { ...inst };
+      },
+      search: async (query, limit) =>
+        all(institutions)
+          .filter((i) => !query || `${i.name} ${i.slug}`.toLowerCase().includes(query.toLowerCase()))
+          .reverse()
+          .slice(0, limit),
     },
     memberships: {
       async create(data) {
@@ -76,6 +103,13 @@ export function createMemoryStore(): Store {
           ),
         ),
       listForUser: async (userId) => all(memberships).filter((m) => m.userId === userId),
+      async countForInstitutions(institutionIds) {
+        const counts: Record<string, number> = {};
+        for (const m of memberships.values()) {
+          if (institutionIds.includes(m.institutionId)) counts[m.institutionId] = (counts[m.institutionId] ?? 0) + 1;
+        }
+        return counts;
+      },
       async pageForInstitution(institutionId, { limit, cursor, role, userIds, batchId }) {
         // Same order as MongoStore: highest role first, then join order.
         const order = [...memberships.keys()];

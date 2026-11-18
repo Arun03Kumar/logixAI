@@ -11,6 +11,7 @@ apps/
   identity-service/    Accounts, sessions, institutions, invites (TS)    :3006
   exam-service/        Institution exams: authoring, attempts, grading   :3007
   arena-service/       ML Arena: lessons, practice items, progress (TS)  :3010
+  billing-service/     Plans and payments: Pro passes, Razorpay (TS)     :3011
   problem-service/     Problems CRUD (Express, MongoDB)                  :3001
   submission-service/  Accepts submissions, queues them (Fastify, Mongo) :3000
   evaluator-service/   Runs code in Docker, reports results (TS, BullMQ) :3002
@@ -156,6 +157,11 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
   `apps/arena-service/content`, written with reference solutions; run
   `npm run content:build` after changing it. Code items use the `PYTHON_ML`
   runtime and are compared as JSON with a float tolerance, outside the sandbox.
+- **Plans** ([docs/billing.md](docs/billing.md)): identity-service decides who
+  has Pro (personal pass or institution licence) and puts `plan`/`planUntil`
+  in the access token; check it with `hasPro(claims)` from
+  `@logixai/contracts`. billing-service sells passes via Razorpay and uses a
+  mock checkout in development when no keys are set.
 - **Data** ([docs/database.md](docs/database.md)): one database per service,
   indexes declared in the models, data changes as migrations in
   `src/db/migrations`, lists paged by cursor (`{ items, nextCursor }`), and

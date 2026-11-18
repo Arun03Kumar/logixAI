@@ -19,10 +19,20 @@ export const config = loadConfig(
       CORS_ORIGINS: env.list(["http://localhost:3008"]),
       /** Accounts created with these emails get the platform `admin` role. */
       BOOTSTRAP_ADMIN_EMAILS: env.list([]),
+      /** Shared secret for /internal routes (billing-service grants Pro). Required in production. */
+      INTERNAL_API_TOKEN: z
+        .string()
+        .optional()
+        .transform((v) => (v ? v : undefined))
+        .refine((v) => !v || v.length >= 16, "Use at least 16 characters"),
     })
     .refine((c) => c.NODE_ENV !== "production" || Boolean(c.JWT_PRIVATE_KEY), {
       message: "JWT_PRIVATE_KEY is required in production",
       path: ["JWT_PRIVATE_KEY"],
+    })
+    .refine((c) => c.NODE_ENV !== "production" || Boolean(c.INTERNAL_API_TOKEN), {
+      message: "INTERNAL_API_TOKEN is required in production",
+      path: ["INTERNAL_API_TOKEN"],
     }),
   { serviceName: "identity-service" },
 );

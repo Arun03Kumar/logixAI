@@ -37,6 +37,11 @@ export const identityApi = {
 
   previewInvite: (code) =>
     fetch(`${IDENTITY_API_URL}/invites/${encodeURIComponent(code)}`).then(readEnvelope),
+  // Platform admins
+  adminInstitutions: (q) => call(`/admin/institutions?${new URLSearchParams(q ? { q } : {})}`),
+  /** { until: ISO | null, seats: number | null } */
+  setInstitutionLicence: (id, input) => call(`/admin/institutions/${id}/licence`, { method: "PUT", body: input }),
+
   acceptInvite: (code) =>
     call(`/invites/${encodeURIComponent(code)}/accept`, { method: "POST" }),
 };

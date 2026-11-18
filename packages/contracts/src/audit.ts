@@ -25,6 +25,10 @@ export const AUDIT_ACTIONS = [
   "problem.deleted",
   "arena.track_assigned",
   "arena.track_unassigned",
+  "institution.licence_changed",
+  "billing.pro_granted",
+  "billing.coupon_created",
+  "billing.coupon_disabled",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -36,7 +40,7 @@ export interface AuditEvent {
   action: AuditAction;
   /** Set for institution-scoped actions, so admins can see their institution's log. */
   institutionId: string | null;
-  targetType: "institution" | "member" | "batch" | "invite" | "exam" | "problem" | "track_assignment";
+  targetType: "institution" | "member" | "batch" | "invite" | "exam" | "problem" | "track_assignment" | "user" | "coupon";
   targetId: string;
   /** Small, non-sensitive details (e.g. old and new role). Never passwords or answers. */
   meta: Record<string, unknown>;

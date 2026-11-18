@@ -7,6 +7,8 @@ import {
   CreateBatchSchema,
   CreateInstitutionSchema,
   CreateInviteSchema,
+  EntitlementGrantSchema,
+  InstitutionLicenceSchema,
   InstitutionRoleSchema,
   PageQuerySchema,
   SignInSchema,
@@ -16,7 +18,11 @@ import {
 } from "@logixai/contracts";
 import {
   BadRequestError,
+  ForbiddenError,
+  UnauthorizedError,
   createAccessTokenVerifier,
+  isInternalRequest,
+  INTERNAL_TOKEN_HEADER,
   errorResponse,
   successResponse,
   z,
@@ -24,6 +30,7 @@ import {
 import type { TokenIssuer } from "./lib/tokens.js";
 import { AuthService, type IssuedSession } from "./services/authService.js";
 import { InstitutionService } from "./services/institutionService.js";
+import { PlanService } from "./services/planService.js";
 import type { Store } from "./store/types.js";
 
 export const REFRESH_COOKIE = "lx_rt";
@@ -40,6 +47,8 @@ export interface AppOptions {
   logger?: boolean;
   /** Requests per minute per IP on sign-in / sign-up. */
   authRateLimit?: number;
+  /** Shared secret for /internal routes; unset = open (development only). */
+  internalToken?: string;
 }
 
 declare module "fastify" {
@@ -61,6 +70,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     adminEmails: options.adminEmails,
   });
   const institutions = new InstitutionService(options.store);
+  const plans = new PlanService(options.store);
   // Verify our own tokens with the same code path other services use.
   const verifier = createAccessTokenVerifier({
     jwksUrl: "http://unused.local",
@@ -235,6 +245,31 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       await institutions.revokeInvite(userId(request), request.params.id, request.params.inviteId);
       return successResponse({}, "Invite revoked");
     },
+  );
+
+  /* ── Platform admin ── */
+  const platformAdmin = async (request: FastifyRequest) => {
+    await authenticate(request);
+    if (request.auth!.role !== "admin") throw new ForbiddenError("Platform admins only.");
+  };
+  app.get<{ Querystring: { q?: string } }>("/api/v1/admin/institutions", { preHandler: platformAdmin }, async (request) =>
+    successResponse(await plans.listInstitutions(typeof request.query.q === "string" ? request.query.q.slice(0, 100) : undefined)),
+  );
+  app.put<IdParams>("/api/v1/admin/institutions/:id/licence", { preHandler: platformAdmin }, async (request) =>
+    successResponse(
+      await plans.setLicence(userId(request), request.params.id, parse(InstitutionLicenceSchema, request.body, "licence")),
+    ),
+  );
+
+  /* ── Internal (other services) ── */
+  const internal = async (request: FastifyRequest) => {
+    if (!isInternalRequest(options.internalToken, request.headers[INTERNAL_TOKEN_HEADER])) throw new UnauthorizedError();
+  };
+  app.post("/internal/entitlements/grant", { preHandler: internal }, async (request) =>
+    successResponse(await plans.grant(parse(EntitlementGrantSchema, request.body, "grant"))),
+  );
+  app.get<{ Querystring: { email?: string } }>("/internal/users/by-email", { preHandler: internal }, async (request) =>
+    successResponse(await plans.userByEmail(String(request.query.email ?? ""))),
   );
 
   /* ── Joining ── */

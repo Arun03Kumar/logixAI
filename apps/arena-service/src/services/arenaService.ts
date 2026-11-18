@@ -1,4 +1,5 @@
 import {
+  FREE_DAILY_CODE_RUNS,
   LOWER_IS_BETTER,
   XP_BY_DIFFICULTY,
   type Checker,
@@ -22,7 +23,7 @@ import {
   type TrackDetail,
   type TrackSummary,
 } from "@logixai/contracts";
-import { BadRequestError, ConflictError, InternalServerError, NotFoundError } from "@logixai/service-kit";
+import { BadRequestError, ConflictError, ForbiddenError, InternalServerError, NotFoundError } from "@logixai/service-kit";
 import type { Catalog, CatalogItem, CatalogTopic, CatalogTrack } from "../content/catalog.js";
 import { buildJudgeProgram, formatCall } from "../content/harness.js";
 import { addDays, dayOf, streaks } from "../lib/days.js";
@@ -231,15 +232,47 @@ export class ArenaService {
     return `${metric} ${LOWER_IS_BETTER[metric] ? "≤" : "≥"} ${threshold}`;
   }
 
-  async getItem(userId: string | null, itemId: string): Promise<ItemView> {
+  /** Pro items need Pro: `pro` comes from the caller's access token. */
+  private isLocked(item: CatalogItem, pro: boolean) {
+    return item.access === "pro" && !pro;
+  }
+
+  private requireAccess(item: CatalogItem, pro: boolean) {
+    if (this.isLocked(item, pro)) throw new ForbiddenError("This is a Pro problem. Upgrade to Pro to solve it.");
+  }
+
+  /** What a free user sees of a Pro item: enough to know what it is, not to solve it. */
+  private lockedView(item: CatalogItem): ItemView {
+    const full = this.itemView(item, null);
+    return {
+      id: full.id,
+      title: full.title,
+      type: full.type,
+      difficulty: full.difficulty,
+      access: full.access,
+      status: null,
+      locked: true,
+      topic: full.topic,
+      trackId: full.trackId,
+      tags: full.tags,
+      prompt: full.prompt,
+      hints: [],
+      previousItem: full.previousItem,
+      nextItem: full.nextItem,
+    };
+  }
+
+  async getItem(userId: string | null, itemId: string, pro = false): Promise<ItemView> {
     const item = this.mustItem(itemId);
+    if (this.isLocked(item, pro)) return this.lockedView(item);
     const row = userId ? await this.deps.store.progress.get(userId, itemId) : null;
     return this.itemView(item, row);
   }
 
   /** Gives up on an item: shows the answer and explanation. Solving it later earns no XP. */
-  async reveal(userId: string, itemId: string): Promise<ItemView> {
+  async reveal(userId: string, itemId: string, pro = false): Promise<ItemView> {
     const item = this.mustItem(itemId);
+    this.requireAccess(item, pro);
     await this.deps.store.progress.markRevealed(userId, itemId, this.now());
     await this.deps.store.stats.record(userId, dayOf(this.now()), { xp: 0, solved: 0 });
     return this.itemView(item, await this.deps.store.progress.get(userId, itemId));
@@ -285,8 +318,9 @@ export class ArenaService {
     return true;
   }
 
-  async answer(userId: string, itemId: string, input: AnswerInput): Promise<AnswerResult> {
+  async answer(userId: string, itemId: string, input: AnswerInput, pro = false): Promise<AnswerResult> {
     const item = this.mustItem(itemId);
+    this.requireAccess(item, pro);
     const correct = this.grade(item, input);
     const row = await this.deps.store.progress.recordAttempt(userId, itemId, input, this.now());
     if (!correct) {
@@ -307,13 +341,23 @@ export class ArenaService {
 
   /* ── Code ── */
 
-  async runCode(userId: string, itemId: string, input: CodeRunInput): Promise<ArenaSubmissionView> {
+  async runCode(userId: string, itemId: string, input: CodeRunInput, pro = false): Promise<ArenaSubmissionView> {
     const item = this.mustItem(itemId);
+    this.requireAccess(item, pro);
     if (!isCodeItem(item.type) || !("function" in item)) {
       throw new BadRequestError("item", { reason: "This item takes an answer, not code." });
     }
     if (!item.judge) throw new InternalServerError({ reason: `Tests for ${item.id} haven't been built` });
     const now = this.now();
+    if (!pro) {
+      // India-time day, like streaks.
+      const dayStart = new Date(`${dayOf(now)}T00:00:00+05:30`);
+      if ((await this.deps.store.submissions.countSince(userId, dayStart)) >= FREE_DAILY_CODE_RUNS) {
+        throw new ForbiddenError(
+          `You've used today's ${FREE_DAILY_CODE_RUNS} free code runs. Pro has no daily limit — or come back tomorrow.`,
+        );
+      }
+    }
     if ((await this.deps.store.submissions.countPendingSince(userId, new Date(now.getTime() - PENDING_WINDOW_MS))) > 0) {
       throw new ConflictError("Your previous run is still being judged. Try again in a moment.");
     }
