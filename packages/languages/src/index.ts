@@ -27,6 +27,10 @@ export interface LanguageDefinition {
   compileCommand: string | null;
   /** Command that runs the program; test input is piped to its stdin. */
   runCommand: string;
+  /** Per-test time limit = base limit × this (slower runtimes get more time). */
+  timeMultiplier: number;
+  /** Memory limit for the sandbox, in MB. */
+  memoryMb: number;
 }
 
 export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
@@ -36,8 +40,10 @@ export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
     monacoId: "java",
     dockerImage: "openjdk:26-slim-bookworm",
     sourceFile: "Main.java",
-    compileCommand: "javac Main.java",
-    runCommand: "java Main",
+    compileCommand: "javac -J-XX:+UseSerialGC -J-XX:TieredStopAtLevel=1 Main.java",
+    runCommand: "java -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss64m Main",
+    timeMultiplier: 2,
+    memoryMb: 512,
   },
   CPP: {
     id: "CPP",
@@ -45,17 +51,21 @@ export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
     monacoId: "cpp",
     dockerImage: "gcc:latest",
     sourceFile: "main.cpp",
-    compileCommand: "g++ main.cpp -o main",
-    runCommand: "stdbuf -oL -eL ./main",
+    compileCommand: "g++ -O2 -std=c++17 -pipe -o main main.cpp",
+    runCommand: "./main",
+    timeMultiplier: 1,
+    memoryMb: 256,
   },
   PYTHON: {
     id: "PYTHON",
     label: "Python",
     monacoId: "python",
     dockerImage: "python:3.9-slim",
-    sourceFile: "test.py",
+    sourceFile: "main.py",
     compileCommand: null,
-    runCommand: "python3 test.py",
+    runCommand: "python3 -B main.py",
+    timeMultiplier: 3,
+    memoryMb: 256,
   },
 };
 

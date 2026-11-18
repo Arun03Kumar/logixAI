@@ -2,7 +2,7 @@ export { cn } from "./lib/cn";
 
 export { Button, buttonVariants } from "./components/button";
 export type { ButtonProps } from "./components/button";
-export { Input, Textarea, Label, Field } from "./components/form";
+export { Input, Textarea, Label, Field, Checkbox } from "./components/form";
 export {
   Select,
   SelectGroup,

@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { Button, Card, Textarea } from "@logixai/ui";
+import { Button, Card, Checkbox, Textarea } from "@logixai/ui";
 
 export default function TestCasesPanel({ testCases, setTestCases }) {
   const updateField = (index, field, value) => {
@@ -11,7 +11,7 @@ export default function TestCasesPanel({ testCases, setTestCases }) {
   };
 
   const addTestCase = () => {
-    setTestCases((prev) => [...prev, { input: "", output: "" }]);
+    setTestCases((prev) => [...prev, { input: "", output: "", sample: false }]);
   };
 
   const removeTestCase = (index) => {
@@ -23,15 +23,22 @@ export default function TestCasesPanel({ testCases, setTestCases }) {
       <div>
         <h2 className="text-base font-semibold">Test cases</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Each submission runs against every case. The first three are shown to
-          students as examples. Rows missing input or output are skipped.
+          Submissions are judged against every case. Cases marked as examples
+          are shown to students and used by Run; the rest stay hidden. Rows
+          with neither input nor output are skipped.
         </p>
       </div>
 
       {testCases.map((tc, idx) => (
         <Card key={idx}>
-          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <div className="flex items-center gap-4 border-b border-border px-4 py-2.5">
             <p className="text-sm font-medium">Case {idx + 1}</p>
+            <Checkbox
+              label="Show as an example"
+              checked={Boolean(tc.sample)}
+              onChange={(e) => updateField(idx, "sample", e.target.checked)}
+              className="ml-auto"
+            />
             <Button
               variant="ghost"
               size="icon-sm"

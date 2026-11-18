@@ -18,7 +18,7 @@ import {
   Spinner,
   ThemeToggle,
 } from "@logixai/ui";
-import { listLanguages } from "@logixai/languages";
+import { LANGUAGES } from "@logixai/languages";
 import { setLanguage } from "@/app/coding-platform/store/problemSlice";
 import {
   runCode,
@@ -74,7 +74,7 @@ export default function ProblemHeader({ problemId }) {
           <SelectValue placeholder="Language" />
         </SelectTrigger>
         <SelectContent>
-          {listLanguages().map((lang) => (
+          {(problem?.codeStubs ?? []).map((s) => LANGUAGES[s.language]).filter(Boolean).map((lang) => (
             <SelectItem key={lang.id} value={lang.id}>
               {lang.label}
             </SelectItem>

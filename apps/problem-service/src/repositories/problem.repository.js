@@ -7,6 +7,7 @@ class ProblemRepository {
       title: problemData.title,
       description: problemData.description,
       codeStubs: problemData.codeStubs,
+      sampleTestCases: problemData.sampleTestCases ?? [],
       testCases: problemData.testCases ?? [],
       difficulty: problemData.difficulty ?? "easy",
       editorial: problemData.editorial,

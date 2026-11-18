@@ -10,6 +10,11 @@ const {
 } = require("@logixai/service-kit");
 const { ProblemService } = require("../services/");
 const { ProblemRepository } = require("../repositories");
+const {
+  toJudgeProblem,
+  toProblemSummary,
+  toPublicProblem,
+} = require("../utils/problemViews");
 
 const problemService = new ProblemService(new ProblemRepository());
 
@@ -46,7 +51,20 @@ async function getProblem(req, res, next) {
     }
     return res
       .status(StatusCodes.OK)
-      .json(successResponse(problem, "Successfully fetched a problem"));
+      .json(successResponse(toPublicProblem(problem), "Successfully fetched a problem"));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Full problem with hidden tests, for the judge pipeline (internal callers / admins). */
+async function getProblemForJudge(req, res, next) {
+  try {
+    const problem = await problemService.getProblem(req.params.id);
+    if (!problem) {
+      throw new NotFoundError("Problem", req.params.id);
+    }
+    return res.status(StatusCodes.OK).json(successResponse(toJudgeProblem(problem)));
   } catch (err) {
     next(err);
   }
@@ -57,7 +75,9 @@ async function getProblems(req, res, next) {
     const allProblems = await problemService.getAllProblems();
     return res
       .status(StatusCodes.OK)
-      .json(successResponse(allProblems, "Successfully fetched all problems"));
+      .json(
+        successResponse(allProblems.map(toProblemSummary), "Successfully fetched all problems"),
+      );
   } catch (err) {
     next(err);
   }
@@ -95,6 +115,7 @@ async function updateProblem(req, res, next) {
 module.exports = {
   addProblem,
   getProblem,
+  getProblemForJudge,
   getProblems,
   deleteProblem,
   updateProblem,

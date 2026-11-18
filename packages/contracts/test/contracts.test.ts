@@ -6,6 +6,7 @@ import {
   SubmissionJobPayloadSchema,
   UpdateProblemSchema,
   deriveSubmissionStatus,
+  splitTests,
 } from "../src";
 
 describe("CreateSubmissionSchema", () => {
@@ -85,6 +86,24 @@ describe("SubmissionJobPayloadSchema", () => {
   });
 });
 
+describe("splitTests", () => {
+  const t = (n: number) => ({ input: String(n), output: String(n * n) });
+
+  it("uses explicit samples when present", () => {
+    expect(splitTests({ sampleTestCases: [t(1)], testCases: [t(2), t(3)] })).toEqual({
+      samples: [t(1)],
+      hidden: [t(2), t(3)],
+    });
+  });
+
+  it("treats the first two tests of legacy problems as samples", () => {
+    expect(splitTests({ testCases: [t(1), t(2), t(3)] })).toEqual({
+      samples: [t(1), t(2)],
+      hidden: [t(3)],
+    });
+  });
+});
+
 describe("deriveSubmissionStatus", () => {
   const ok = { status: "SUCCESS", output: "1" } as const;
 
@@ -94,8 +113,12 @@ describe("deriveSubmissionStatus", () => {
 
   it("reports the first failure", () => {
     expect(deriveSubmissionStatus([ok, { status: "WA", output: "2" }])).toBe("WA");
-    expect(deriveSubmissionStatus([{ status: "ERROR", output: "boom" }])).toBe("RE");
-    expect(deriveSubmissionStatus([{ status: "ERROR", output: "TLE" }])).toBe("TLE");
+    expect(deriveSubmissionStatus([ok, { status: "TLE", output: "" }, { status: "WA", output: "" }])).toBe("TLE");
+    expect(deriveSubmissionStatus([{ status: "MLE", output: "" }])).toBe("MLE");
+    expect(deriveSubmissionStatus([{ status: "CE", output: "error: ';' expected" }])).toBe("CE");
+    expect(deriveSubmissionStatus([{ status: "RE", output: "Traceback" }])).toBe("RE");
+    // A judge failure is never shown as "Accepted".
+    expect(deriveSubmissionStatus([{ status: "ERROR", output: "docker down" }])).toBe("RE");
   });
 
   it("treats an empty result list as a runtime error", () => {

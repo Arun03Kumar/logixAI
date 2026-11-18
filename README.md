@@ -9,6 +9,7 @@ in-browser IDE and a Docker-based judge).
 apps/
   web/                 Next.js app: marketing site + coding platform    :3008
   identity-service/    Accounts, sessions, institutions, invites (TS)    :3006
+  exam-service/        Institution exams: authoring, attempts, grading   :3007
   problem-service/     Problems CRUD (Express, MongoDB)                  :3001
   submission-service/  Accepts submissions, queues them (Fastify, Mongo) :3000
   evaluator-service/   Runs code in Docker, reports results (TS, BullMQ) :3002
@@ -106,7 +107,44 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
     admins manage batches and invite codes; students join with a code at
     `/join/<code>`.
   - In production set `JWT_PRIVATE_KEY` (identity-service) and the same
-    `INTERNAL_API_TOKEN` in submission-service and socket-service.
+    `INTERNAL_API_TOKEN` in problem-service, submission-service and
+    socket-service (they refuse to start without it).
+- **Judge** (evaluator-service):
+  - One container per submission: the code is written once, compiled once,
+    then every test runs in the same container with `docker exec`. Code and
+    test input go in as files, never through shell quoting.
+  - Each sandbox has no network, drops all Linux capabilities, runs as
+    `nobody` on a read-only image with small tmpfs mounts, and is limited in
+    memory (per language), CPU (1 core) and processes (128).
+  - Verdicts: `SUCCESS`, `WA`, `TLE`, `MLE`, `RE`, `CE`, plus `ERROR` when
+    the judge itself failed. Output comparison ignores trailing spaces, blank
+    lines at the end and Windows line endings.
+  - Time limit per test = `BASE_TIME_LIMIT_MS` (2 s) × the language's
+    multiplier (C++ 1, Java 2, Python 3). Throughput scales with
+    `JUDGE_CONCURRENCY` per process and with more evaluator instances.
+  - Sandbox tests against real Docker: `JUDGE_DOCKER_TESTS=1 npx vitest run`
+    in `apps/evaluator-service`.
+- **Practice problems**: tests are either examples (shown, used by Run) or
+  hidden (Submit only). The public problem API never returns hidden tests or
+  the hidden code around the student's code; submission-service reads them
+  from `GET /problems/:id/judge`, which needs `INTERNAL_API_TOKEN` (or a
+  platform admin). Results sent to the browser blank the output of hidden
+  tests.
+- **Exams** (exam-service, database `logixai-exams`):
+  - Instructors and admins create exams with single-choice, multiple-choice
+    and coding questions, assign batches and a time window, then publish.
+    Published exams are locked; unpublish (only before anyone starts) to edit.
+  - Coding questions keep their hidden tests in exam-service; they never
+    reach the browser. The judge is shared with practice: a submission job
+    names its `replyQueue`, so exam results go to `ExamEvaluationQueue` and
+    practice results to `EvaluationQueue`.
+  - Each student gets one attempt with a server-side deadline
+    (`min(start + duration, window close)`). Answers autosave; attempts are
+    auto-submitted when time runs out (also by a 30 s sweep for closed tabs).
+  - Integrity signals (tab switches, leaving fullscreen, copy/paste attempts)
+    are recorded for instructors to review. They are signals, not proof.
+  - exam-service checks institution roles by forwarding the caller's token to
+    identity-service (`GET /institutions/:id`).
 - **Lockfile**: root `optionalDependencies` pin lightningcss's platform
   binaries. npm otherwise drops them from `package-lock.json` (npm bug), which
   breaks `next build`. Bump them together when Tailwind updates lightningcss.

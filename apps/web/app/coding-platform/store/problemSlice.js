@@ -11,11 +11,16 @@ export const fetchProblem = createAsyncThunk(
     const data = await res.json();
     const problemData = data?.data || data?.problem || data;
 
-    // Find code stub for current language
-    const stub = problemData.codeStubs?.find((s) => s.language === language);
-    const userCode = stub?.userSnippet || "";
+    // Start in the requested language if the problem supports it, otherwise
+    // in the first language it has a code stub for.
+    const stubs = problemData.codeStubs ?? [];
+    const stub = stubs.find((s) => s.language === language) ?? stubs[0];
 
-    return { ...problemData, userCode };
+    return {
+      ...problemData,
+      language: stub?.language ?? language,
+      userCode: stub?.userSnippet || "",
+    };
   }
 );
 
@@ -34,15 +39,10 @@ const problemSlice = createSlice({
     },
     setLanguage: (state, action) => {
       state.language = action.payload;
-      // Update user code based on new language
-      if (state.data?.codeStubs) {
-        const stub = state.data.codeStubs.find(
-          (s) => s.language === action.payload
-        );
-        if (stub?.userSnippet) {
-          state.userCode = stub.userSnippet;
-        }
-      }
+      // Load the new language's starter code (even if empty), so code in the
+      // previous language isn't left in the editor.
+      const stub = state.data?.codeStubs?.find((s) => s.language === action.payload);
+      state.userCode = stub?.userSnippet ?? "";
     },
   },
   extraReducers: (builder) => {
@@ -55,6 +55,7 @@ const problemSlice = createSlice({
         state.loading = false;
         state.data = action.payload;
         state.userCode = action.payload.userCode;
+        state.language = action.payload.language;
       })
       .addCase(fetchProblem.rejected, (state, action) => {
         state.loading = false;

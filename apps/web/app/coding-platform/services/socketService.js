@@ -10,13 +10,26 @@ const SOCKET_EVENTS = {
   SUBMISSION_RESULT: "submissionPayloadResponse",
 };
 
-const VERDICT_TOASTS = {
+const SUBMIT_TOASTS = {
   Success: (n) => toast.success(`Accepted. All ${n} tests passed.`),
   WA: () => toast.error("Wrong answer on at least one test."),
   TLE: () => toast.error("Time limit exceeded."),
   MLE: () => toast.error("Memory limit exceeded."),
-  RE: () => toast.error("Your code hit an error. Check the output."),
+  RE: () => toast.error("Your code hit a runtime error. Check the output."),
+  CE: () => toast.error("Your code didn't compile. Check the output."),
 };
+
+function announce(result) {
+  const total = result?.response?.length ?? 0;
+  if (result?.mode === "run") {
+    // Running examples is exploratory: a quiet summary, not a verdict.
+    if (result.status === "CE") return SUBMIT_TOASTS.CE();
+    const passed = result.response.filter((r) => r.status === "SUCCESS").length;
+    const say = passed === total ? toast.success : toast;
+    return say(`${passed} of ${total} examples passed.`);
+  }
+  return SUBMIT_TOASTS[result?.status]?.(total);
+}
 
 let socket = null;
 
@@ -32,7 +45,7 @@ export const initializeSocket = (dispatch) => {
 
     socket.on(SOCKET_EVENTS.SUBMISSION_RESULT, (data) => {
       dispatch(setRunOutput(data));
-      VERDICT_TOASTS[data?.status]?.(data?.response?.length ?? 0);
+      announce(data);
     });
   }
 

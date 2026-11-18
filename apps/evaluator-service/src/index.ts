@@ -1,78 +1,50 @@
 import express from "express";
-import { QUEUE_NAMES } from "@logixai/contracts";
-import { PORT } from "./config/serverConfig.js";
-import apiRouter from "./routes/index.js";
-import redis from "./config/redisConfig.js";
-import sampleQueueProducer from "./producers/sampleQueueProducer.js";
-import sampleWorker from "./workers/sampleWorker.js";
+import { LANGUAGES } from "@logixai/contracts";
+import { createLogger } from "@logixai/service-kit";
+import {
+  BASE_TIME_LIMIT_MS,
+  COMPILE_TIMEOUT_MS,
+  JUDGE_CONCURRENCY,
+  PORT,
+  SUBMISSION_BUDGET_MS,
+} from "./config/serverConfig.js";
+import { DEFAULT_LIMITS } from "./judge/judge.js";
+import { createDockerSandboxFactory, ensureImages } from "./sandbox/dockerSandbox.js";
 import submissionWorker from "./workers/submissionWorkers.js";
-import submissionQueueProducer from "./producers/submissionQueueProducer.js";
 
-const app = express();
+const logger = createLogger("evaluator-service");
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.text());
+async function start() {
+  // Pull judge images before taking jobs, so the first submission isn't slow.
+  await ensureImages(
+    [...new Set(Object.values(LANGUAGES).map((l) => l.dockerImage))],
+    (msg) => logger.info(msg),
+  );
 
-app.use("/api", apiRouter);
+  submissionWorker(
+    {
+      sandboxes: createDockerSandboxFactory(),
+      limits: {
+        ...DEFAULT_LIMITS,
+        baseTimeLimitMs: BASE_TIME_LIMIT_MS,
+        compileTimeoutMs: COMPILE_TIMEOUT_MS,
+        submissionBudgetMs: SUBMISSION_BUDGET_MS,
+      },
+      log: (msg) => logger.warn(msg),
+    },
+    JUDGE_CONCURRENCY,
+  );
 
-app.listen(PORT, async () => {
-  console.log("server is running on port:", PORT);
+  const app = express();
+  app.get("/ping", (_req, res) => {
+    res.json({ message: "evaluator service is alive", concurrency: JUDGE_CONCURRENCY });
+  });
+  app.listen(PORT, () => {
+    logger.info(`evaluator-service listening on port ${PORT} (judging ${JUDGE_CONCURRENCY} at a time)`);
+  });
+}
 
-  //   sampleQueueProducer("SampleJob", {
-  //     name: "Hello",
-  //     comp: "asdfj",
-  //   });
-
-  //   sampleWorker("SampleQueue");
-
-  //   const code = `x = input()
-  // y = input()
-  // print("val x", x)
-  // print("val y",y)`;
-
-  //   const testCase = `100
-  // 200`;
-  //   runPython(code, testCase);
-
-  // const code = `
-  //   import java.util.*;
-  //   public class Main {
-  //     public static void main(String[] args) {
-  //       Scanner scn = new Scanner(System.in);
-  //       int input = scn.nextInt();
-  //       System.out.println("input val" + input);
-  //       for(int i = 0; i < input; i++) {
-  //       System.out.println(i);}
-  //     }
-  //   }
-  // `;
-
-  // const testCase = `10`;
-  // runJava(code, testCase);
-
-  // const code = `
-  //   #include<iostream>
-  //   using namespace std;
-
-  //   int main() {
-  //     int x;
-  //     cin >> x;
-  //     for(int i = 0; i < x; i++) cout << i << endl;
-
-  //     return 0;
-  //   }
-  // `;
-
-  // const testCase = `10`;
-  // // runCpp(code, testCase);
-
-  submissionWorker(QUEUE_NAMES.SUBMISSION);
-  // submissionQueueProducer("SubmissionJob", {
-  //   "123": {
-  //     language: "CPP",
-  //     code,
-  //     inputCase: testCase,
-  //   },
-  // });
+start().catch((err) => {
+  logger.error(`Failed to start evaluator-service: ${(err as Error).message}`);
+  process.exit(1);
 });

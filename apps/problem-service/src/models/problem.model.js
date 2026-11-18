@@ -1,6 +1,15 @@
 const mongoose = require("mongoose");
 const { DIFFICULTIES, LANGUAGE_IDS } = require("@logixai/contracts");
 
+// Expected output may legitimately be empty, so no "required" on the strings.
+const testCaseSchema = new mongoose.Schema(
+  {
+    input: { type: String, default: "" },
+    output: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
 const problemSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -16,18 +25,10 @@ const problemSchema = new mongoose.Schema({
     required: [true, "difficulty can not be empty"],
     default: "easy",
   },
-  testCases: [
-    {
-      input: {
-        type: String,
-        required: true,
-      },
-      output: {
-        type: String,
-        required: true,
-      },
-    },
-  ],
+  /** Shown to students; used by Run and Submit. */
+  sampleTestCases: { type: [testCaseSchema], default: [] },
+  /** Hidden; used by Submit only. Never returned by the public API. */
+  testCases: { type: [testCaseSchema], default: [] },
   codeStubs: [
     {
       language: {

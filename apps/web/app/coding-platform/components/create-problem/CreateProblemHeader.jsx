@@ -42,13 +42,17 @@ export default function CreateProblemHeader() {
   } = useSelector((state) => state.createProblem);
 
   const buildProblemPayload = () => {
-    // Keep only rows where both input and output have content
-    const cleanedTestCases = testCases
+    // Skip rows with neither input nor output; split examples from hidden tests.
+    const cleaned = testCases
       .map((tc) => ({
         input: (tc.input || "").trim(),
         output: (tc.output || "").trim(),
+        sample: Boolean(tc.sample),
       }))
-      .filter((tc) => tc.input && tc.output);
+      .filter((tc) => tc.input || tc.output);
+    const strip = ({ input, output }) => ({ input, output });
+    const sampleTestCases = cleaned.filter((tc) => tc.sample).map(strip);
+    const hiddenTestCases = cleaned.filter((tc) => !tc.sample).map(strip);
 
     // codeStubs object -> array, skipping languages with nothing filled in
     const codeStubsArray = Object.entries(codeStubs || {})
@@ -69,7 +73,8 @@ export default function CreateProblemHeader() {
       // Markdown tab wins when filled, otherwise the rich editor's output
       description: markdownText.trim() || description.trim(),
       difficulty,
-      testCases: cleanedTestCases,
+      sampleTestCases,
+      testCases: hiddenTestCases,
       codeStubs: codeStubsArray,
       editorial: "",
     };
@@ -85,8 +90,12 @@ export default function CreateProblemHeader() {
       toast.error("Write the problem statement before publishing.");
       return;
     }
-    if (payload.testCases.length === 0) {
-      toast.error("Add at least one test case with input and output.");
+    if (payload.sampleTestCases.length + payload.testCases.length === 0) {
+      toast.error("Add at least one test case.");
+      return;
+    }
+    if (payload.sampleTestCases.length === 0) {
+      toast.error("Mark at least one test case as an example so students can run their code.");
       return;
     }
     if (payload.codeStubs.length === 0) {

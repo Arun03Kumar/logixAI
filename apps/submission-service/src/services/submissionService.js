@@ -24,10 +24,12 @@ class SubmissionService {
 
   /**
    * @param submissionPayload validated CreateSubmissionInput
-   *   ({ userId, problemId, code, language } with language upper-cased)
+   *   ({ userId, problemId, code, language, mode } with language upper-cased)
+   *
+   * "run" judges the sample tests only; "submit" judges samples + hidden tests.
    */
   async addSubmission(submissionPayload) {
-    const { problemId, userId, language } = submissionPayload;
+    const { problemId, userId, language, mode } = submissionPayload;
     const problem = (await this.fetchProblemDetails(problemId)).data;
 
     const languageCodeStub = (problem.codeStubs || []).find(
@@ -39,28 +41,35 @@ class SubmissionService {
       });
     }
 
-    const testCases = problem.testCases || [];
+    const samples = problem.sampleTestCases || [];
+    const hidden = problem.hiddenTestCases || [];
+    const testCases = mode === "run" ? samples : [...samples, ...hidden];
     if (testCases.length === 0) {
       throw new BadRequestError("problem", {
-        reason: "Problem has no test cases to judge against",
+        reason:
+          mode === "run"
+            ? "This problem has no sample tests to run. Submit to check against all tests."
+            : "Problem has no test cases to judge against",
       });
     }
 
-    const completeSubmissionCode = [
+    // Only the student's own code is stored; the hidden code around it is
+    // added just for the judge.
+    const submission = await this.submissionRepository.createSubmission({
+      ...submissionPayload,
+      sampleCount: samples.length,
+    });
+
+    const submissionId = String(submission._id);
+    const fullCode = [
       languageCodeStub.startSnippet || "",
       submissionPayload.code,
       languageCodeStub.endSnippet || "",
     ].join("\n\n");
 
-    const submission = await this.submissionRepository.createSubmission({
-      ...submissionPayload,
-      code: completeSubmissionCode,
-    });
-
-    const submissionId = String(submission._id);
     const queueResponse = await this.produceSubmissionJob({
       [submissionId]: {
-        code: submission.code,
+        code: fullCode,
         language: submission.language,
         inputCase: testCases[0].input,
         outputCase: testCases[0].output,
@@ -69,7 +78,17 @@ class SubmissionService {
         testCases,
       },
     });
-    return { queueResponse, submission };
+    return {
+      queueResponse,
+      submission: {
+        _id: submissionId,
+        problemId: submission.problemId,
+        language: submission.language,
+        mode: submission.mode,
+        status: submission.status,
+        testCount: testCases.length,
+      },
+    };
   }
 }
 

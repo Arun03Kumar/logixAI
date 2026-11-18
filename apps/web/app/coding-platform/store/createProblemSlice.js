@@ -42,7 +42,7 @@ const createProblemSlice = createSlice({
     description: "", // markdown content from BlockNote editor
     markdownText: "", // raw markdown text from textarea
     difficulty: "easy",
-    testCases: [{ input: "", output: "" }],
+    testCases: [{ input: "", output: "", sample: true }],
     codeStubs: emptyCodeStubs(), // Pre-initialize supported languages
     currentCodeStubLanguage: DEFAULT_LANGUAGE, // Currently selected language for code stub editing
 
@@ -103,7 +103,7 @@ const createProblemSlice = createSlice({
       state.description = "";
       state.markdownText = "";
       state.difficulty = "easy";
-      state.testCases = [{ input: "", output: "" }];
+      state.testCases = [{ input: "", output: "", sample: true }];
       state.codeStubs = emptyCodeStubs();
       state.currentCodeStubLanguage = DEFAULT_LANGUAGE;
       state.publishSuccess = false;

@@ -57,10 +57,12 @@ export const getServerSnapshot = () => SERVER_SNAPSHOT;
 
 /** Error from an API call, with per-field messages for forms. */
 export class ApiError extends Error {
-  constructor(message, status, fieldErrors = {}) {
+  constructor(message, status, fieldErrors = {}, details = null) {
     super(message);
     this.status = status;
     this.fieldErrors = fieldErrors;
+    /** The response's `error` object, e.g. { reason, problems } */
+    this.details = details;
   }
 }
 
@@ -80,7 +82,7 @@ export async function readEnvelope(res) {
     (issues.length ? "Check the highlighted fields." : null) ||
     body?.message ||
     "Something went wrong. Try again.";
-  throw new ApiError(message, res.status, fieldErrors);
+  throw new ApiError(message, res.status, fieldErrors, body?.error ?? null);
 }
 
 /** Exchanges the refresh cookie for a new access token. Concurrent calls share one request. */

@@ -5,6 +5,7 @@ export * from "./submission";
 export * from "./queues";
 export * from "./socket";
 export * from "./auth";
+export * from "./exam";
 export {
   LANGUAGE_IDS,
   LANGUAGES,

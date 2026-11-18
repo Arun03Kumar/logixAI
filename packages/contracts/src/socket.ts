@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EvaluationJobPayloadSchema } from "./queues";
-import { SubmissionStatusSchema } from "./submission";
+import { SUBMISSION_MODES, SubmissionStatusSchema } from "./submission";
 
 /**
  * socket.io event names shared by socket-service and the web app.
@@ -18,6 +18,12 @@ export const SOCKET_EVENTS = {
  */
 export const SubmissionResultEventSchema = EvaluationJobPayloadSchema.extend({
   status: SubmissionStatusSchema,
+  mode: z.enum(SUBMISSION_MODES).optional(),
+  /**
+   * The first `sampleCount` results are sample tests (shown with output);
+   * the rest are hidden tests, whose output is blanked before sending.
+   */
+  sampleCount: z.number().int().nonnegative().optional(),
 });
 export type SubmissionResultEvent = z.infer<typeof SubmissionResultEventSchema>;
 

@@ -5,7 +5,10 @@ import { ExecutionResponseSchema } from "./submission";
 /** BullMQ queue names shared by producers and workers. */
 export const QUEUE_NAMES = {
   SUBMISSION: "SubmissionQueue",
+  /** Default reply queue: practice submissions (submission-service). */
   EVALUATION: "EvaluationQueue",
+  /** Reply queue for exam answers (exam-service). */
+  EXAM_EVALUATION: "ExamEvaluationQueue",
 } as const;
 
 /** BullMQ job names. */
@@ -26,6 +29,11 @@ export const SubmissionJobItemSchema = z.object({
   userId: z.string(),
   submissionId: z.string(),
   testCases: z.array(TestCaseSchema).default([]),
+  /**
+   * Queue the evaluator publishes the result to. Lets several services share
+   * the judge without consuming each other's results.
+   */
+  replyQueue: z.string().min(1).default("EvaluationQueue"),
 });
 export type SubmissionJobItem = z.infer<typeof SubmissionJobItemSchema>;
 

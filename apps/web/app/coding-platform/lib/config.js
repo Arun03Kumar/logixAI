@@ -11,5 +11,8 @@ export const SUBMISSION_API_URL =
 export const IDENTITY_API_URL =
   process.env.NEXT_PUBLIC_IDENTITY_API_URL || "http://localhost:3006/api/v1";
 
+export const EXAM_API_URL =
+  process.env.NEXT_PUBLIC_EXAM_API_URL || "http://localhost:3007/api/v1";
+
 export const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3005";

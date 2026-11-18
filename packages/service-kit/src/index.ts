@@ -17,4 +17,5 @@ export { connectMongo, disconnectMongo } from "./mongo";
 export { createRedisConnection } from "./redis";
 export type { RedisOptions } from "./redis";
 export { createAccessTokenVerifier, requirePlatformRole } from "./auth";
+export { INTERNAL_TOKEN_HEADER, isInternalRequest, internalHeaders } from "./internal";
 export type { AccessTokenVerifier } from "./auth";

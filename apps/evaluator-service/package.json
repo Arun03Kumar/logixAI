@@ -27,7 +27,6 @@
     "dockerode": "^4.0.7",
     "express": "^5.1.0",
     "ioredis": "^5.7.0",
-    "zod": "^4.0.14",
     "@logixai/contracts": "*",
     "@logixai/service-kit": "*"
   },

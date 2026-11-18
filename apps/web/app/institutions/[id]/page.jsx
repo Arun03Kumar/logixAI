@@ -7,7 +7,6 @@ import { AlertCircle, ChevronLeft } from "lucide-react";
 import {
   Badge,
   Button,
-  Card,
   Container,
   EmptyState,
   Skeleton,
@@ -22,28 +21,14 @@ import { ROLE_LABEL, ROLE_TONE, TYPE_LABEL, canManage, canView } from "../labels
 import MembersTab from "./_components/MembersTab";
 import BatchesTab from "./_components/BatchesTab";
 import InvitesTab from "./_components/InvitesTab";
-
-function StudentOverview({ institution, onLeave }) {
-  return (
-    <Card className="p-6">
-      <h2 className="text-base font-semibold">You&apos;re enrolled as a student</h2>
-      <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-        Tests and courses that {institution.name} assigns to you will appear
-        here.
-      </p>
-      <Button variant="ghost" size="sm" className="mt-5 px-0 text-danger hover:bg-transparent" onClick={onLeave}>
-        Leave institution
-      </Button>
-    </Card>
-  );
-}
+import ExamsTab from "./_components/ExamsTab";
 
 function InstitutionDetail() {
   const { id } = useParams();
   const router = useRouter();
   const { user } = useSession();
   const { data, loading, error } = useApi(() => identityApi.getInstitution(id), [id]);
-  const [tab, setTab] = useState("members");
+  const [tab, setTab] = useState("exams");
 
   if (loading) {
     return (
@@ -84,8 +69,13 @@ function InstitutionDetail() {
   };
 
   const tabs = [
-    { value: "members", label: "Members" },
-    { value: "batches", label: "Batches" },
+    { value: "exams", label: "Exams" },
+    ...(canView(role)
+      ? [
+          { value: "members", label: "Members" },
+          { value: "batches", label: "Batches" },
+        ]
+      : []),
     ...(canManage(role) ? [{ value: "invites", label: "Invites" }] : []),
   ];
 
@@ -104,19 +94,27 @@ function InstitutionDetail() {
       <p className="mt-1 text-sm text-muted-foreground">{TYPE_LABEL[institution.type]}</p>
 
       <div className="mt-8">
-        {canView(role) ? (
-          <>
-            <Tabs items={tabs} value={tab} onValueChange={setTab} aria-label="Institution sections" />
-            <div className="mt-6">
-              {tab === "members" && <MembersTab institutionId={id} myRole={role} myUserId={user.id} />}
-              {tab === "batches" && <BatchesTab institutionId={id} myRole={role} />}
-              {tab === "invites" && canManage(role) && <InvitesTab institutionId={id} myRole={role} />}
-            </div>
-          </>
-        ) : (
-          <StudentOverview institution={institution} onLeave={leave} />
-        )}
+        <Tabs items={tabs} value={tab} onValueChange={setTab} aria-label="Institution sections" />
+        <div className="mt-6">
+          {tab === "exams" && <ExamsTab institutionId={id} myRole={role} />}
+          {tab === "members" && canView(role) && (
+            <MembersTab institutionId={id} myRole={role} myUserId={user.id} />
+          )}
+          {tab === "batches" && canView(role) && <BatchesTab institutionId={id} myRole={role} />}
+          {tab === "invites" && canManage(role) && <InvitesTab institutionId={id} myRole={role} />}
+        </div>
       </div>
+
+      {role === "student" ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-10 px-0 text-danger hover:bg-transparent"
+          onClick={leave}
+        >
+          Leave institution
+        </Button>
+      ) : null}
     </Container>
   );
 }

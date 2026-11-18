@@ -45,6 +45,34 @@ export function Label({
   );
 }
 
+/** Checkbox (or radio, via `type="radio"`) with a label and optional description. */
+export function Checkbox({
+  label,
+  description,
+  className,
+  type = "checkbox",
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "children"> & {
+  label: React.ReactNode;
+  description?: React.ReactNode;
+}) {
+  return (
+    <label className={cn("flex cursor-pointer items-start gap-3", props.disabled && "cursor-not-allowed opacity-60", className)}>
+      <input
+        type={type}
+        className="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed"
+        {...props}
+      />
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-foreground">{label}</span>
+        {description ? (
+          <span className="block text-xs text-muted-foreground">{description}</span>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
 /** Label + control + optional hint/error, stacked. */
 export function Field({
   label,

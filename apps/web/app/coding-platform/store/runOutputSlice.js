@@ -3,21 +3,18 @@ import { SUBMISSION_API_URL } from "@/app/coding-platform/lib/config";
 import { authFetch } from "@/app/lib/auth/session";
 
 // The user is taken from the access token on the server.
-async function postSubmission({ id, userCode, language }) {
+const postSubmission = (mode) => async ({ id, userCode, language }) => {
   const res = await authFetch(`${SUBMISSION_API_URL}/submission/`, {
     method: "POST",
-    body: JSON.stringify({ problemId: id, code: userCode, language }),
+    body: JSON.stringify({ problemId: id, code: userCode, language, mode }),
   });
   return res.json();
-}
+};
 
-// Run and Submit both queue a submission today; the judge result arrives
-// later over the socket (setRunOutput). Phase 2 separates them.
-export const runCode = createAsyncThunk("runOutput/runCode", postSubmission);
-export const submitCode = createAsyncThunk(
-  "runOutput/submitCode",
-  postSubmission,
-);
+// Run = sample tests only; Submit = sample + hidden tests. Either way the
+// verdict arrives later over the socket (setRunOutput).
+export const runCode = createAsyncThunk("runOutput/runCode", postSubmission("run"));
+export const submitCode = createAsyncThunk("runOutput/submitCode", postSubmission("submit"));
 
 function queued(state, action) {
   const body = action.payload;
@@ -25,7 +22,7 @@ function queued(state, action) {
     state.isJudging = true;
     state.submissionId = String(body.data?.submission?._id ?? "");
   } else {
-    state.error = body?.message || "Couldn't submit your code";
+    state.error = body?.error?.reason || body?.message || "Couldn't submit your code";
   }
 }
 
@@ -39,6 +36,8 @@ const runOutputSlice = createSlice({
     /** Queued, waiting for the verdict over the socket. */
     isJudging: false,
     submissionId: null,
+    /** "run" | "submit" for the latest request */
+    mode: null,
     outputTab: "result",
     error: null,
   },
@@ -67,6 +66,7 @@ const runOutputSlice = createSlice({
   extraReducers: (builder) => {
     const start = (flag) => (state) => {
       state[flag] = true;
+      state.mode = flag === "isRunning" ? "run" : "submit";
       state.data = null;
       state.error = null;
       state.isJudging = false;

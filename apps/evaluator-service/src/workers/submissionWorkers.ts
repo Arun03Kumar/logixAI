@@ -1,26 +1,26 @@
-import { Job, Worker } from "bullmq";
-import { JOB_NAMES } from "@logixai/contracts";
+import { Worker } from "bullmq";
+import { JOB_NAMES, QUEUE_NAMES } from "@logixai/contracts";
 import redis from "../config/redisConfig.js";
-import SubmissionJob from "../jobs/SubmissiobJob.js";
+import SubmissionJob, { type SubmissionJobDeps } from "../jobs/SubmissiobJob.js";
 
-export default function submissionWorker(queueName: string) {
+/**
+ * Consumes the shared SubmissionQueue. `concurrency` submissions are judged
+ * in parallel by this process; run more evaluator instances to scale out.
+ */
+export default function submissionWorker(deps: SubmissionJobDeps, concurrency: number) {
   const worker = new Worker(
-    queueName,
-    async (job: Job) => {
-      if (job.name === JOB_NAMES.SUBMISSION) {
-        const submissionJobInstance = new SubmissionJob(job.data);
-        // Awaited so BullMQ only marks the job complete once judging is done,
-        // and records it as failed (with retries possible) if it throws.
-        await submissionJobInstance.handle(job);
-        return true;
-      }
-      return undefined;
+    QUEUE_NAMES.SUBMISSION,
+    async (job) => {
+      if (job.name !== JOB_NAMES.SUBMISSION) return undefined;
+      // Awaited so BullMQ only marks the job complete once judging is done.
+      await new SubmissionJob(job.data, deps).handle();
+      return true;
     },
-    { connection: redis },
+    { connection: redis, concurrency },
   );
 
   worker.on("failed", (job, err) => {
-    console.error(`Submission job ${job?.id} failed:`, err.message);
+    deps.log?.(`Submission job ${job?.id} failed: ${err.message}`);
   });
 
   return worker;
