@@ -1,6 +1,7 @@
-import type { ExecutionResponse, LanguageDefinition, TestCase } from "@logixai/contracts";
+import type { Checker, ExecutionResponse, LanguageDefinition, TestCase } from "@logixai/contracts";
 import type { ExecResult, SandboxFactory } from "../sandbox/types.js";
 import { outputsMatch } from "./compare.js";
+import { jsonOutputsMatch } from "@logixai/contracts";
 
 export interface JudgeLimits {
   /** Per-test time limit before the language multiplier. */
@@ -49,7 +50,18 @@ const withTimeout = (ms: number, command: string) => [
   command,
 ];
 
-export function verdictFor(result: ExecResult, expected: string, timeLimitMs: number): ExecutionResponse {
+const LINES: Checker = { kind: "lines" };
+
+function matches(checker: Checker, expected: string, actual: string): boolean {
+  return checker.kind === "json" ? jsonOutputsMatch(expected, actual, checker) : outputsMatch(expected, actual);
+}
+
+export function verdictFor(
+  result: ExecResult,
+  expected: string,
+  timeLimitMs: number,
+  checker: Checker = LINES,
+): ExecutionResponse {
   const timeMs = result.durationMs;
   if (result.timedOut || result.exitCode === EXIT_TIMEOUT) {
     return { status: "TLE", output: "", timeMs };
@@ -66,7 +78,7 @@ export function verdictFor(result: ExecResult, expected: string, timeLimitMs: nu
     return { status: "RE", output: clip(message), timeMs };
   }
   return {
-    status: outputsMatch(expected, result.stdout) ? "SUCCESS" : "WA",
+    status: matches(checker, expected, result.stdout) ? "SUCCESS" : "WA",
     output: clip(result.stdout),
     timeMs,
   };
@@ -77,7 +89,7 @@ export function verdictFor(result: ExecResult, expected: string, timeLimitMs: nu
  * the same sandbox and returns one verdict per test (or a single CE / ERROR).
  */
 export async function judgeSubmission(
-  input: { language: LanguageDefinition; code: string; testCases: TestCase[] },
+  input: { language: LanguageDefinition; code: string; testCases: TestCase[]; checker?: Checker },
   deps: { sandboxes: SandboxFactory; limits?: JudgeLimits; log?: (msg: string) => void },
 ): Promise<ExecutionResponse[]> {
   const limits = deps.limits ?? DEFAULT_LIMITS;
@@ -124,9 +136,9 @@ export async function judgeSubmission(
         continue;
       }
       // The program reads its input from a file (see DockerSandbox.exec).
-      const input = testCase.input.endsWith("\n") ? testCase.input : `${testCase.input}\n`;
+      const testInput = testCase.input.endsWith("\n") ? testCase.input : `${testCase.input}\n`;
       const written = await sandbox.exec(["sh", "-c", `cat > ${INPUT_FILE}`], {
-        stdin: input,
+        stdin: testInput,
         timeoutMs: 10_000,
         maxOutputBytes: 1024,
       });
@@ -138,7 +150,7 @@ export async function judgeSubmission(
         timeoutMs: timeLimitMs + WATCHDOG_SLACK_MS,
         maxOutputBytes: limits.maxOutputBytes,
       });
-      results.push(verdictFor(run, testCase.output, timeLimitMs));
+      results.push(verdictFor(run, testCase.output, timeLimitMs, input.checker));
     }
     return results;
   } catch (err) {

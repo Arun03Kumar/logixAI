@@ -8,7 +8,11 @@ const logger = createLogger("identity-service");
 
 async function start() {
   try {
-    await connectMongo(config.DB_CONNECTION_STRING, logger);
+    await connectMongo(config.DB_CONNECTION_STRING, logger, {
+      // Production indexes are built by `npm run db:migrate`, not at startup.
+      autoIndex: config.NODE_ENV !== "production",
+      appName: "identity-service",
+    });
 
     if (!config.JWT_PRIVATE_KEY) {
       logger.warn(

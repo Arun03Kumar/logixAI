@@ -1,0 +1,32 @@
+{
+  "name": "@logixai/arena-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ML Arena: tracks, lessons and practice items for maths, Python/NumPy and ML; grading, progress and streaks.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
+    "test": "vitest run",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "content:build": "tsx scripts/build-content.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/rate-limit": "^11.2.2",
+    "@logixai/contracts": "*",
+    "@logixai/service-kit": "*",
+    "bullmq": "^5.56.9",
+    "fastify": "^5.4.0",
+    "ioredis": "^5.7.0",
+    "mongoose": "^8.17.0",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.2"
+  }
+}

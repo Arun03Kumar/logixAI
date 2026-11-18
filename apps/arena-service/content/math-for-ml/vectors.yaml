@@ -1,0 +1,179 @@
+id: vectors
+title: Vectors and the dot product
+summary: What a vector is in ML, how to measure its length, and how the dot product measures similarity.
+lesson: |
+  ## Why vectors matter
+
+  Almost everything a model sees is a vector: a house becomes `[area, rooms, age]`, a word becomes a 768-number embedding, an image becomes its pixel values. Learning to think in vectors is learning to read ML code.
+
+  ## The idea
+
+  A vector $\mathbf{x} \in \mathbb{R}^n$ is an ordered list of $n$ numbers. Two operations show up everywhere:
+
+  - **Adding / scaling**: $\mathbf{x} + \mathbf{y}$ adds element by element; $c\,\mathbf{x}$ multiplies every element by $c$.
+  - **Dot product**: multiply matching elements and add them up.
+
+  $$\mathbf{x} \cdot \mathbf{y} = \sum_{i=1}^{n} x_i y_i$$
+
+  ## Length (norms)
+
+  The **L2 norm** is the straight-line length: $\lVert \mathbf{x} \rVert_2 = \sqrt{\sum_i x_i^2} = \sqrt{\mathbf{x} \cdot \mathbf{x}}$.
+  The **L1 norm** adds absolute values: $\lVert \mathbf{x} \rVert_1 = \sum_i |x_i|$. Regularisation (Ridge = L2, Lasso = L1) is built on these.
+
+  ## Similarity
+
+  The dot product also equals $\lVert \mathbf{x} \rVert \lVert \mathbf{y} \rVert \cos\theta$, so dividing by the lengths leaves only the angle:
+
+  $$\text{cosine}(\mathbf{x}, \mathbf{y}) = \frac{\mathbf{x} \cdot \mathbf{y}}{\lVert \mathbf{x} \rVert \, \lVert \mathbf{y} \rVert}$$
+
+  It is 1 when vectors point the same way, 0 when they are perpendicular, −1 when opposite. Search engines and RAG systems rank documents by the cosine similarity of their embeddings.
+
+  ## Worked example
+
+  $\mathbf{x} = [1, 2, 2]$, $\mathbf{y} = [2, 0, 1]$:
+  dot $= 1\cdot2 + 2\cdot0 + 2\cdot1 = 4$; $\lVert\mathbf{x}\rVert = 3$; $\lVert\mathbf{y}\rVert = \sqrt5$; cosine $= 4 / (3\sqrt5) \approx 0.596$.
+
+  ## In interviews
+
+  Expect "why cosine rather than Euclidean distance for embeddings?" — cosine ignores length, so a long and a short document about the same thing still match.
+items:
+  - id: vec-dot-numeric
+    type: numeric
+    title: Compute a dot product
+    difficulty: easy
+    tags: [dot-product]
+    prompt: |
+      Compute $\mathbf{a} \cdot \mathbf{b}$ for $\mathbf{a} = [3, -1, 4]$ and $\mathbf{b} = [2, 5, -1]$.
+    answer: -3
+    tolerance: 0
+    hints:
+      - Multiply matching positions, then add the three products.
+    explanation: |
+      $3\cdot2 + (-1)\cdot5 + 4\cdot(-1) = 6 - 5 - 4 = -3$. A negative dot product means the vectors point in broadly opposite directions (angle over 90°).
+
+  - id: vec-l2-norm-numeric
+    type: numeric
+    title: Length of a vector
+    difficulty: easy
+    tags: [norms]
+    prompt: |
+      What is the L2 norm $\lVert \mathbf{v} \rVert_2$ of $\mathbf{v} = [6, -2, 3]$?
+    answer: 7
+    tolerance: 0.001
+    hints:
+      - Square each element, add them, take the square root.
+    explanation: |
+      $\sqrt{36 + 4 + 9} = \sqrt{49} = 7$.
+
+  - id: vec-cosine-mcq
+    type: mcq_single
+    title: When cosine similarity is zero
+    difficulty: easy
+    tags: [cosine-similarity]
+    prompt: |
+      Two embedding vectors have cosine similarity **0**. What does that tell you?
+    options:
+      - id: a
+        text: The vectors are identical.
+      - id: b
+        text: The vectors are perpendicular — the dot product is zero.
+      - id: c
+        text: One of the vectors must be all zeros.
+      - id: d
+        text: The vectors point in opposite directions.
+    answer: b
+    explanation: |
+      Cosine is the dot product divided by the lengths, so it's 0 exactly when the dot product is 0: the vectors are orthogonal. Opposite directions give −1; a zero vector makes cosine undefined, not 0.
+
+  - id: vec-dot-code
+    type: code
+    title: Dot product without NumPy
+    difficulty: easy
+    tags: [dot-product, from-scratch]
+    prompt: |
+      Implement `dot(a, b)` for two Python lists of the same length, **without** NumPy.
+
+      ```
+      dot([1, 2, 3], [4, 5, 6])  ->  32
+      ```
+    function:
+      name: dot
+      params:
+        - { name: a, type: list }
+        - { name: b, type: list }
+      returns: float
+    starter: |
+      def dot(a, b):
+          # Multiply matching elements and add them up.
+          pass
+    solution: |
+      def dot(a, b):
+          return sum(x * y for x, y in zip(a, b))
+    tests:
+      sample:
+        - args: [[1, 2, 3], [4, 5, 6]]
+          expected: 32
+        - args: [[3, -1, 4], [2, 5, -1]]
+          expected: -3
+      hidden:
+        - args: [[0.5], [4]]
+        - args: [[0, 0, 0], [1, 2, 3]]
+      generate: |
+        def cases(rng):
+            out = []
+            for n in [5, 50, 1000]:
+                out.append([rng.normal(size=n).round(3).tolist(), rng.normal(size=n).round(3).tolist()])
+            return out
+    hints:
+      - "`zip(a, b)` walks both lists together."
+    explanation: |
+      `sum(x * y for x, y in zip(a, b))` is the definition written as code. In practice you'd call `np.dot` or `a @ b`, which runs the same loop in optimised C.
+
+  - id: vec-cosine-code
+    type: code
+    title: Cosine similarity
+    difficulty: medium
+    tags: [cosine-similarity, numpy]
+    prompt: |
+      Implement `cosine_similarity(a, b)` for two 1-D NumPy arrays. If either vector has length zero, return `0.0`.
+
+      $$\text{cosine}(\mathbf{a}, \mathbf{b}) = \frac{\mathbf{a} \cdot \mathbf{b}}{\lVert \mathbf{a} \rVert \, \lVert \mathbf{b} \rVert}$$
+    function:
+      name: cosine_similarity
+      params:
+        - { name: a, type: ndarray }
+        - { name: b, type: ndarray }
+      returns: float
+    starter: |
+      import numpy as np
+
+      def cosine_similarity(a, b):
+          pass
+    solution: |
+      import numpy as np
+
+      def cosine_similarity(a, b):
+          na, nb = np.linalg.norm(a), np.linalg.norm(b)
+          if na == 0 or nb == 0:
+              return 0.0
+          return float(a @ b / (na * nb))
+    tests:
+      sample:
+        - args: [[1, 2, 2], [2, 0, 1]]
+        - args: [[1, 0], [0, 1]]
+          expected: 0
+        - args: [[1, 1], [-2, -2]]
+          expected: -1
+      hidden:
+        - args: [[0, 0, 0], [1, 2, 3]]
+          expected: 0
+        - args: [[3, 4], [3, 4]]
+          expected: 1
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=n), rng.normal(size=n)] for n in [2, 10, 300]]
+    hints:
+      - "`np.linalg.norm(a)` gives the L2 length."
+      - Check for a zero length before dividing.
+    explanation: |
+      Divide the dot product by the product of the norms. Guarding against zero-length vectors matters in real systems: an empty document can embed to all zeros, and dividing by zero would give `nan`, which silently breaks ranking.

@@ -1,0 +1,222 @@
+id: linear-regression
+title: Linear regression from scratch
+summary: The model, the squared-error loss, the closed-form solution and gradient descent — built with NumPy only.
+prerequisites: [gradients, regression-metrics, broadcasting]
+lesson: |
+  ## The model
+
+  Linear regression predicts a number as a weighted sum of the features plus a bias:
+
+  $$\hat{y} = \mathbf{w}^\top \mathbf{x} + b \qquad \text{or, for a whole dataset,} \qquad \hat{\mathbf{y}} = X\mathbf{w} + b$$
+
+  ## The loss
+
+  We choose $\mathbf{w}, b$ to minimise the mean squared error:
+
+  $$L(\mathbf{w}, b) = \frac{1}{n}\lVert X\mathbf{w} + b - \mathbf{y} \rVert^2$$
+
+  ## Gradients
+
+  With residuals $\mathbf{r} = X\mathbf{w} + b - \mathbf{y}$:
+
+  $$\nabla_{\mathbf{w}} L = \frac{2}{n} X^\top \mathbf{r}, \qquad \frac{\partial L}{\partial b} = \frac{2}{n}\sum_i r_i$$
+
+  Each step of gradient descent nudges the weights against these gradients. Try it in the **Linear regression lab**.
+
+  ## The closed form (normal equation)
+
+  Fold the bias in by adding a column of ones to $X$. Setting the gradient to zero gives
+
+  $$\mathbf{w}^* = (X^\top X)^{-1} X^\top \mathbf{y}$$
+
+  In code, solve $X^\top X \mathbf{w} = X^\top \mathbf{y}$ with `np.linalg.solve` (or use `np.linalg.lstsq`) rather than forming the inverse. The closed form costs about $O(nd^2 + d^3)$ — fine for hundreds of features, too slow for millions, where gradient descent wins.
+
+  ## Regularisation
+
+  **Ridge** regression adds $\lambda \lVert \mathbf{w} \rVert^2$ to the loss, giving $\mathbf{w}^* = (X^\top X + \lambda I)^{-1} X^\top \mathbf{y}$. It shrinks weights, helps when features are correlated, and makes $X^\top X + \lambda I$ always invertible. (The bias is usually not penalised.)
+
+  ## Assumptions worth knowing
+
+  A linear relationship, independent errors with constant variance, and no perfectly collinear features. Violations don't stop the code running — they make the coefficients unreliable to interpret.
+
+  ## In interviews
+
+  Derive the gradient of the MSE, explain when you'd use the normal equation versus gradient descent, and what Ridge does to the weights.
+items:
+  - id: linreg-gradient-mcq
+    type: mcq_single
+    title: Gradient of the MSE
+    difficulty: medium
+    tags: [gradients, derivation]
+    prompt: |
+      For $L(\mathbf{w}) = \frac{1}{n}\lVert X\mathbf{w} - \mathbf{y} \rVert^2$ with $X$ of shape $(n, d)$, which is $\nabla_{\mathbf{w}} L$?
+    options:
+      - { id: a, text: "$\\frac{2}{n} X^\\top (X\\mathbf{w} - \\mathbf{y})$" }
+      - { id: b, text: "$\\frac{2}{n} X (X\\mathbf{w} - \\mathbf{y})$" }
+      - { id: c, text: "$\\frac{2}{n} (X\\mathbf{w} - \\mathbf{y})^\\top X^\\top$" }
+      - { id: d, text: "$\\frac{1}{n} X^\\top X \\mathbf{w}$" }
+    answer: a
+    explanation: |
+      Chain rule: the derivative of $\lVert \mathbf{r} \rVert^2$ is $2\mathbf{r}$, and $\mathbf{r} = X\mathbf{w} - \mathbf{y}$ contributes $X^\top$. Shapes confirm it: $X^\top$ is $(d, n)$ and the residual is $(n,)$, giving a $(d,)$ gradient — one entry per weight. Option (b) isn't even defined for $n \ne d$.
+
+  - id: linreg-ridge-mcq
+    type: mcq_single
+    title: What Ridge does
+    difficulty: easy
+    tags: [regularisation, ridge]
+    prompt: |
+      What happens to the learned weights as the Ridge penalty $\lambda$ grows very large?
+    options:
+      - { id: a, text: "They shrink towards zero." }
+      - { id: b, text: "They grow without bound." }
+      - { id: c, text: "Exactly the least important ones become zero, the rest are unchanged." }
+      - { id: d, text: "Nothing — Ridge only changes the bias." }
+    answer: a
+    explanation: |
+      The penalty $\lambda \lVert \mathbf{w} \rVert^2$ makes large weights expensive, so all weights shrink smoothly towards zero (but rarely exactly to zero). Exact zeros — feature selection — are the hallmark of Lasso's L1 penalty.
+
+  - id: linreg-closed-form-code
+    type: code
+    title: Fit with the normal equation
+    difficulty: medium
+    tags: [linear-regression, closed-form, from-scratch]
+    prompt: |
+      Implement `fit_linear(X, y)` returning `[w, b]`: the weights (an array with one entry per column of `X`)
+      and the bias that minimise the mean squared error. Use the normal equation with a column of ones for the bias.
+      Don't use scikit-learn. Answers are checked to within `1e-6` (relative).
+    function:
+      name: fit_linear
+      params:
+        - { name: X, type: ndarray }
+        - { name: y, type: ndarray }
+      returns: "[w, b]"
+    starter: |
+      import numpy as np
+
+      def fit_linear(X, y):
+          # 1. Add a column of ones to X for the bias.
+          # 2. Solve (Xb^T Xb) theta = Xb^T y.
+          # 3. Split theta into w and b.
+          pass
+    solution: |
+      import numpy as np
+
+      def fit_linear(X, y):
+          Xb = np.hstack([X, np.ones((X.shape[0], 1))])
+          theta = np.linalg.solve(Xb.T @ Xb, Xb.T @ y)
+          return [theta[:-1], float(theta[-1])]
+    tolerance: { abs: 1.0e-6, rel: 1.0e-6 }
+    tests:
+      sample:
+        - args: [[[1.0], [2.0], [3.0]], [5.0, 7.0, 9.0]]
+          expected: [[2.0], 3.0]
+        - args: [[[0.0, 1.0], [1.0, 0.0], [1.0, 1.0], [2.0, 1.0]], [3.0, 2.0, 4.0, 5.0]]
+      generate: |
+        def cases(rng):
+            out = []
+            for n, d in [(30, 2), (200, 5)]:
+                X = rng.normal(size=(n, d))
+                w = rng.normal(size=d) * 3
+                out.append([X, X @ w + 1.5 + rng.normal(size=n) * 0.1])
+            return out
+    hints:
+      - "`np.hstack([X, np.ones((n, 1))])` adds the bias column."
+      - "`np.linalg.solve(A, b)` solves `A @ theta = b`."
+    explanation: |
+      Appending ones turns the bias into an ordinary weight, so a single solve gives both. Solving the normal equations rather than inverting is faster and more stable; for badly conditioned data, `np.linalg.lstsq` (which uses the SVD) is safer still.
+
+  - id: linreg-gd-code
+    type: code
+    title: Train with gradient descent
+    difficulty: hard
+    tags: [linear-regression, gradient-descent, from-scratch]
+    prompt: |
+      Implement `train_linear_gd(X, y, lr, epochs)`. Start from `w = 0` (one per feature) and `b = 0`.
+      Each epoch, compute the full-batch MSE gradients
+
+      $$\nabla_{\mathbf{w}} = \frac{2}{n} X^\top \mathbf{r}, \qquad \partial_b = \frac{2}{n} \sum_i r_i, \qquad \mathbf{r} = X\mathbf{w} + b - \mathbf{y}$$
+
+      then update both with learning rate `lr`. Return `[w, b]` after `epochs` updates.
+    function:
+      name: train_linear_gd
+      params:
+        - { name: X, type: ndarray }
+        - { name: y, type: ndarray }
+        - { name: lr, type: float }
+        - { name: epochs, type: int }
+      returns: "[w, b]"
+    starter: |
+      import numpy as np
+
+      def train_linear_gd(X, y, lr, epochs):
+          n, d = X.shape
+          w = np.zeros(d)
+          b = 0.0
+          for _ in range(epochs):
+              pass
+          return [w, b]
+    solution: |
+      import numpy as np
+
+      def train_linear_gd(X, y, lr, epochs):
+          n, d = X.shape
+          w = np.zeros(d)
+          b = 0.0
+          for _ in range(epochs):
+              r = X @ w + b - y
+              w = w - lr * (2 / n) * (X.T @ r)
+              b = b - lr * (2 / n) * float(np.sum(r))
+          return [w, float(b)]
+    tests:
+      sample:
+        - args: [[[1.0], [2.0], [3.0]], [5.0, 7.0, 9.0], 0.1, 1]
+        - args: [[[1.0], [2.0], [3.0]], [5.0, 7.0, 9.0], 0.05, 2000]
+      generate: |
+        def cases(rng):
+            out = []
+            for n, d, lr, ep in [(20, 2, 0.05, 50), (100, 4, 0.1, 300)]:
+                X = rng.normal(size=(n, d))
+                out.append([X, X @ rng.normal(size=d) + 2.0, lr, ep])
+            return out
+    hints:
+      - Compute the residual once per epoch and use it for both gradients.
+      - Update `w` and `b` from the same residual — don't recompute it between the two updates.
+    explanation: |
+      After enough epochs the result matches the closed form (the second sample converges to $w = 2$, $b = 3$). The same three lines — residual, gradient, update — are the training loop of every gradient-based model; frameworks just compute the gradient for you.
+
+  - id: linreg-bias-debug
+    type: debug
+    title: "Fix the predictions"
+    difficulty: easy
+    tags: [linear-regression, debugging, broadcasting]
+    prompt: |
+      `predict(X, w, b)` should return $X\mathbf{w} + b$ — one prediction per row of `X`.
+      It returns the wrong shape. Fix it.
+    function:
+      name: predict
+      params:
+        - { name: X, type: ndarray }
+        - { name: w, type: ndarray }
+        - { name: b, type: float }
+      returns: ndarray of shape (n,)
+    starter: |
+      import numpy as np
+
+      def predict(X, w, b):
+          return X * w + b
+    solution: |
+      import numpy as np
+
+      def predict(X, w, b):
+          return X @ w + b
+    tests:
+      sample:
+        - args: [[[1.0, 2.0], [3.0, 4.0]], [0.5, -1.0], 2.0]
+          expected: [0.5, -0.5]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, d)), rng.normal(size=d), float(rng.normal())] for n, d in [(5, 3), (40, 6)]]
+    hints:
+      - "`*` broadcasts `w` across each row instead of taking dot products."
+    explanation: |
+      `X * w` multiplies each column by its weight but never sums across features, leaving an $(n, d)$ matrix. `X @ w` takes each row's dot product with `w`, giving $(n,)$. Shape checks on model outputs catch this immediately.

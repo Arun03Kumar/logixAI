@@ -1,0 +1,156 @@
+id: numpy-stats-linalg
+title: Reductions, axes and linear algebra
+summary: Summing and averaging along axes, argmax, softmax done safely, and solving linear systems with NumPy.
+prerequisites: [broadcasting, matrices]
+lesson: |
+  ## Reductions and the axis argument
+
+  `sum`, `mean`, `std`, `max`, `argmax` and friends **reduce** an axis away:
+
+  - `X.sum(axis=0)` collapses the rows → one value per column.
+  - `X.sum(axis=1)` collapses the columns → one value per row.
+  - `keepdims=True` keeps the reduced axis with size 1, so the result broadcasts back against `X`.
+
+  A useful way to remember it: the axis you name is the one that disappears.
+
+  ## argmax: from scores to predictions
+
+  A classifier outputs a score per class for each example, shape `(n, n_classes)`. `scores.argmax(axis=1)` gives the predicted class per example.
+
+  ## Softmax, done safely
+
+  $$\operatorname{softmax}(\mathbf{z})_i = \frac{e^{z_i}}{\sum_j e^{z_j}}$$
+
+  `np.exp(1000)` overflows to `inf`. Because softmax doesn't change when you subtract the same constant from every score, subtract the row maximum first:
+
+  ```python
+  z = z - z.max(axis=1, keepdims=True)
+  p = np.exp(z) / np.exp(z).sum(axis=1, keepdims=True)
+  ```
+
+  ## Linear algebra
+
+  - `A @ B` — matrix product; `A.T` — transpose.
+  - `np.linalg.solve(A, b)` — solves $A\mathbf{x} = \mathbf{b}$. Prefer it to `np.linalg.inv(A) @ b`: it's faster and more accurate.
+  - `np.linalg.norm(x)` — L2 length; `np.linalg.eig`, `np.linalg.svd` — decompositions used by PCA.
+
+  ## In interviews
+
+  "Why subtract the max in softmax?" and "why not invert the matrix?" both come up. The answer to each is numerical stability.
+items:
+  - id: np-axis-output
+    type: output
+    title: Which axis disappears?
+    difficulty: easy
+    tags: [axes, reductions]
+    prompt: |
+      What does this print?
+    snippet: |
+      import numpy as np
+      X = np.array([[1, 2, 3], [4, 5, 6]])
+      print(X.sum(axis=0).tolist())
+      print(X.sum(axis=1).tolist())
+      print(X.sum(axis=1, keepdims=True).shape)
+    answer: |
+      [5, 7, 9]
+      [6, 15]
+      (2, 1)
+    explanation: |
+      `axis=0` collapses the 2 rows, leaving one sum per column. `axis=1` collapses the 3 columns, leaving one sum per row. With `keepdims=True` the reduced axis stays as size 1, giving `(2, 1)`.
+
+  - id: np-solve-mcq
+    type: mcq_single
+    title: Solving Ax = b
+    difficulty: medium
+    tags: [linear-algebra, numerical-stability]
+    prompt: |
+      You need $\mathbf{x}$ with $A\mathbf{x} = \mathbf{b}$ for a large square matrix $A$. Which is the better choice, and why?
+    options:
+      - { id: a, text: "`np.linalg.inv(A) @ b`, because inverting is the definition." }
+      - { id: b, text: "`np.linalg.solve(A, b)`, because it factorises A once and is faster and more numerically accurate." }
+      - { id: c, text: "`A / b`, because NumPy divides elementwise." }
+      - { id: d, text: "They are identical in speed and accuracy." }
+    answer: b
+    explanation: |
+      `solve` uses an LU factorisation and substitution; forming the full inverse does more work and amplifies rounding error, especially when $A$ is nearly singular. `A / b` is elementwise division, which is a different operation entirely.
+
+  - id: np-softmax-code
+    type: code
+    title: Numerically stable softmax
+    difficulty: medium
+    tags: [softmax, numerical-stability]
+    prompt: |
+      Implement `softmax(Z)` for a 2-D array of scores: one row per example. Return the row-wise softmax.
+      It must not overflow for scores in the thousands.
+    function:
+      name: softmax
+      params:
+        - { name: Z, type: ndarray }
+      returns: ndarray (rows sum to 1)
+    starter: |
+      import numpy as np
+
+      def softmax(Z):
+          e = np.exp(Z)
+          return e / e.sum(axis=1, keepdims=True)
+    solution: |
+      import numpy as np
+
+      def softmax(Z):
+          shifted = Z - Z.max(axis=1, keepdims=True)
+          e = np.exp(shifted)
+          return e / e.sum(axis=1, keepdims=True)
+    tests:
+      sample:
+        - args: [[[1.0, 2.0, 3.0]]]
+        - args: [[[0.0, 0.0], [1.0, 1.0]]]
+          expected: [[0.5, 0.5], [0.5, 0.5]]
+      hidden:
+        - args: [[[1000.0, 1001.0, 1002.0], [-1000.0, -1000.0, -999.0]]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(scale=s, size=(n, k))] for n, k, s in [(4, 3, 1.0), (50, 10, 20.0), (5, 6, 800.0)]]
+    hints:
+      - Subtracting the same number from every score in a row doesn't change its softmax.
+    explanation: |
+      Subtracting each row's maximum makes the largest exponent $e^0 = 1$, so nothing overflows, and the result is mathematically identical. Every deep-learning library does this inside its softmax and cross-entropy.
+
+  - id: np-accuracy-code
+    type: code
+    title: Accuracy from class scores
+    difficulty: easy
+    tags: [argmax, reductions]
+    prompt: |
+      `scores` has shape `(n, n_classes)`; `labels` holds the true class index of each example.
+      Implement `accuracy(scores, labels)`: the fraction of examples whose highest-scoring class is the true one.
+    function:
+      name: accuracy
+      params:
+        - { name: scores, type: ndarray }
+        - { name: labels, type: ndarray_int }
+      returns: float
+    starter: |
+      import numpy as np
+
+      def accuracy(scores, labels):
+          predictions = scores.argmax(axis=0)
+          return float(np.mean(predictions == labels))
+    solution: |
+      import numpy as np
+
+      def accuracy(scores, labels):
+          predictions = scores.argmax(axis=1)
+          return float(np.mean(predictions == labels))
+    tests:
+      sample:
+        - args: [[[0.1, 0.9], [0.8, 0.2], [0.3, 0.7]], [1, 0, 0]]
+      hidden:
+        - args: [[[1, 2, 3]], [2]]
+          expected: 1
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, k)), rng.integers(0, k, size=n)] for n, k in [(10, 3), (200, 5)]]
+    hints:
+      - The starter takes the argmax over the wrong axis. Which axis holds the classes?
+    explanation: |
+      Classes run along `axis=1`, so `argmax(axis=1)` gives one prediction per example. `argmax(axis=0)` instead returns, for each class, the example that scores it highest — a different array that only compares without error when the sizes happen to line up.

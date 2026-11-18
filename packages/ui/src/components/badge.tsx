@@ -34,6 +34,7 @@ const DIFFICULTY: Record<string, { label: string; tone: Tone }> = {
   easy: { label: "Easy", tone: "success" },
   medium: { label: "Medium", tone: "warning" },
   hard: { label: "Hard", tone: "danger" },
+  expert: { label: "Expert", tone: "brand" },
 };
 
 export function DifficultyBadge({

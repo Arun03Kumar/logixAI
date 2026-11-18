@@ -1,0 +1,183 @@
+id: numpy-arrays
+title: Arrays, shapes and indexing
+summary: Creating NumPy arrays, reading their shape, and selecting data with slices, boolean masks and fancy indexing.
+lesson: |
+  ## Why NumPy
+
+  Python lists are flexible but slow for numbers: every element is a separate object. A NumPy array stores numbers in one block of memory with one type (`dtype`), and its operations run in compiled code. Pandas, scikit-learn and PyTorch are all built on this model.
+
+  ## Shape, ndim, dtype
+
+  ```python
+  import numpy as np
+  X = np.array([[1, 2, 3], [4, 5, 6]])
+  X.shape   # (2, 3)  -> 2 rows, 3 columns
+  X.ndim    # 2
+  X.dtype   # int64
+  ```
+
+  `np.zeros((3, 4))`, `np.ones(5)`, `np.arange(0, 10, 2)` and `np.linspace(0, 1, 5)` create arrays directly. `X.reshape(3, 2)` re-views the same numbers in a new shape (the total size must match; `-1` means "work it out").
+
+  ## Indexing and slicing
+
+  - `X[1, 2]` — row 1, column 2 → `6`
+  - `X[:, 0]` — every row, column 0 → `[1, 4]`
+  - `X[0, 1:]` — row 0, from column 1 → `[2, 3]`
+  - `X[::-1]` — rows in reverse order
+
+  **Slices are views**: `row = X[0]; row[0] = 99` changes `X` too. Call `.copy()` when you need independent data.
+
+  ## Boolean masks
+
+  `X[X > 2]` returns `[3, 4, 5, 6]` — the elements where the condition holds, flattened. Masks are how you filter rows: `X[X[:, 0] > 1]` keeps rows whose first column exceeds 1.
+
+  ## Fancy indexing
+
+  An array of indices picks those positions: `X[[1, 0]]` swaps the rows, and `np.argsort(scores)[::-1][:k]` gives the indices of the top-$k$ scores. Fancy indexing always **copies**.
+
+  ## In interviews
+
+  Know the view-versus-copy rule; "I changed a slice and my original data changed" is a classic debugging question.
+items:
+  - id: np-shape-mcq
+    type: mcq_single
+    title: Shape after slicing
+    difficulty: easy
+    tags: [shapes, slicing]
+    prompt: |
+      `X = np.zeros((10, 4))`. What is `X[2:5, :].shape`?
+    options:
+      - { id: a, text: "(3, 4)" }
+      - { id: b, text: "(4, 4)" }
+      - { id: c, text: "(3,)" }
+      - { id: d, text: "(10, 3)" }
+    answer: a
+    explanation: |
+      `2:5` selects rows 2, 3 and 4 (the end is exclusive), and `:` keeps all 4 columns. Indexing with a single integer, like `X[2]`, would instead drop that axis and give shape `(4,)`.
+
+  - id: np-view-output
+    type: output
+    title: Views versus copies
+    difficulty: medium
+    tags: [views, debugging]
+    prompt: |
+      What does this print?
+    snippet: |
+      import numpy as np
+      a = np.arange(5)
+      b = a[1:4]
+      b[0] = 100
+      c = a[[0, 1]]
+      c[0] = -1
+      print(a.tolist())
+    answer: |
+      [0, 100, 2, 3, 4]
+    hints:
+      - Is `b` a view or a copy? What about `c`?
+    explanation: |
+      `b` is a slice, so it views `a`'s memory: setting `b[0]` changes `a[1]`. `c` uses fancy indexing (a list of indices), which copies, so `c[0] = -1` leaves `a` alone.
+
+  - id: np-mask-output
+    type: output
+    title: Boolean masks
+    difficulty: easy
+    tags: [boolean-masks]
+    prompt: |
+      What does this print?
+    snippet: |
+      import numpy as np
+      scores = np.array([72, 45, 90, 38, 65])
+      print(scores[scores >= 60].tolist())
+      print(int((scores < 50).sum()))
+    answer: |
+      [72, 90, 65]
+      2
+    explanation: |
+      The mask `scores >= 60` is `[True, False, True, False, True]`, which selects 72, 90 and 65. `True` counts as 1 when summed, so `(scores < 50).sum()` counts the failing scores: 45 and 38.
+
+  - id: np-top-k-code
+    type: code
+    title: Indices of the top-k scores
+    difficulty: medium
+    tags: [argsort, fancy-indexing]
+    prompt: |
+      A recommender scores every item. Implement `top_k(scores, k)`: return the **indices** of the `k`
+      highest scores, highest first, as a list. Scores are all distinct.
+
+      ```
+      top_k([0.1, 0.9, 0.4, 0.7], 2)  ->  [1, 3]
+      ```
+    function:
+      name: top_k
+      params:
+        - { name: scores, type: ndarray }
+        - { name: k, type: int }
+      returns: list of int
+    starter: |
+      import numpy as np
+
+      def top_k(scores, k):
+          return np.sort(scores)[::-1][:k].tolist()
+    solution: |
+      import numpy as np
+
+      def top_k(scores, k):
+          return np.argsort(scores)[::-1][:k].tolist()
+    tests:
+      sample:
+        - args: [[0.1, 0.9, 0.4, 0.7], 2]
+          expected: [1, 3]
+        - args: [[5, 3, 8], 1]
+          expected: [2]
+      hidden:
+        - args: [[1, 2, 3], 3]
+          expected: [2, 1, 0]
+      generate: |
+        def cases(rng):
+            return [[rng.permutation(n) + rng.random(n) * 0.5, int(k)] for n, k in [(10, 3), (200, 10), (50, 50)]]
+    hints:
+      - "`np.sort` returns values; you need positions."
+    explanation: |
+      `np.argsort` returns the indices that would sort the array; reversing and slicing gives the top $k$. For very large arrays, `np.argpartition(scores, -k)[-k:]` finds the top $k$ in linear time, then you sort just those.
+
+  - id: np-filter-rows-code
+    type: code
+    title: Filter rows with a mask
+    difficulty: easy
+    tags: [boolean-masks]
+    prompt: |
+      `X` is a 2-D array of samples (rows) and features (columns). Implement `rows_above(X, col, threshold)`
+      returning the rows whose value in column `col` is **strictly greater** than `threshold`, as a 2-D array.
+    function:
+      name: rows_above
+      params:
+        - { name: X, type: ndarray }
+        - { name: col, type: int }
+        - { name: threshold, type: float }
+      returns: 2-D ndarray
+    starter: |
+      import numpy as np
+
+      def rows_above(X, col, threshold):
+          pass
+    solution: |
+      import numpy as np
+
+      def rows_above(X, col, threshold):
+          return X[X[:, col] > threshold]
+    tests:
+      sample:
+        - args: [[[1, 5], [3, 2], [4, 9]], 0, 2]
+          expected: [[3, 2], [4, 9]]
+        - args: [[[1, 5], [3, 2], [4, 9]], 1, 5]
+          expected: [[4, 9]]
+      hidden:
+        - args: [[[1, 1]], 0, 1]
+          expected: []
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, 4)).round(2), int(rng.integers(0, 4)), 0.0] for n in [5, 40]]
+    hints:
+      - "`X[:, col] > threshold` is a mask with one entry per row."
+    explanation: |
+      Indexing the rows of `X` with a boolean mask keeps the rows where it is `True`. This is exactly what `df[df["age"] > 30]` does in Pandas.

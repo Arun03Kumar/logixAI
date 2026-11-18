@@ -17,7 +17,11 @@
     "lint": "turbo run lint",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "db:migrate": "turbo run db:migrate",
+    "judge:images": "docker build -t logixai/python-ml:1 judge-images/python-ml",
+    "content:build": "npm run content:build -w @logixai/arena-service",
+    "content:check": "npm run content:build -w @logixai/arena-service -- --check"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",

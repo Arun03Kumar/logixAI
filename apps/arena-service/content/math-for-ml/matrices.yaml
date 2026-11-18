@@ -1,0 +1,151 @@
+id: matrices
+title: Matrices and matrix multiplication
+summary: Shapes, transposes and matrix multiplication — the operation behind every neural-network layer.
+prerequisites: [vectors]
+lesson: |
+  ## Why matrices matter
+
+  A dataset is a matrix: one row per example, one column per feature. A neural-network layer is a matrix multiplication followed by a non-linearity. If you can track shapes through matrix products, you can debug most model code.
+
+  ## Shapes
+
+  An $m \times n$ matrix has $m$ rows and $n$ columns. In NumPy that's `A.shape == (m, n)`.
+  The **transpose** $A^\top$ swaps rows and columns: an $m \times n$ matrix becomes $n \times m$, and $(A^\top)_{ij} = A_{ji}$.
+
+  ## Matrix multiplication
+
+  $C = AB$ is defined when the inner sizes match: $(m \times k)(k \times n) \to (m \times n)$. Each entry is a dot product of a row of $A$ with a column of $B$:
+
+  $$C_{ij} = \sum_{t=1}^{k} A_{it} B_{tj}$$
+
+  Matrix multiplication is **not commutative**: $AB \ne BA$ in general (often $BA$ isn't even defined). It is associative, $(AB)C = A(BC)$, and $(AB)^\top = B^\top A^\top$.
+
+  ## A layer is a matrix product
+
+  For a batch $X$ of shape $(\text{batch}, d_{in})$ and weights $W$ of shape $(d_{in}, d_{out})$, the layer output is $XW + \mathbf{b}$ with shape $(\text{batch}, d_{out})$. Every example in the batch is processed in one product, which is why GPUs are fast at deep learning.
+
+  ## Worked example
+
+  $$\begin{bmatrix}1 & 2\\ 3 & 4\end{bmatrix}\begin{bmatrix}5\\ 6\end{bmatrix} = \begin{bmatrix}1\cdot5 + 2\cdot6\\ 3\cdot5 + 4\cdot6\end{bmatrix} = \begin{bmatrix}17\\ 39\end{bmatrix}$$
+
+  ## The identity and the inverse
+
+  The identity $I$ has ones on the diagonal: $AI = IA = A$. A square matrix $A$ is invertible when some $A^{-1}$ gives $AA^{-1} = I$; that happens exactly when $\det A \ne 0$ (its columns are linearly independent). Linear regression's closed-form solution uses an inverse.
+
+  ## In interviews
+
+  "What shape is the output?" is the most common warm-up. Say the rule out loud: inner dimensions must match, outer ones survive.
+items:
+  - id: mat-shape-mcq
+    type: mcq_single
+    title: Shape of a product
+    difficulty: easy
+    tags: [shapes]
+    prompt: |
+      $A$ has shape $(32, 128)$ and $B$ has shape $(128, 10)$. What is the shape of $AB$?
+    options:
+      - { id: a, text: "(128, 128)" }
+      - { id: b, text: "(32, 10)" }
+      - { id: c, text: "(10, 32)" }
+      - { id: d, text: "It isn't defined." }
+    answer: b
+    explanation: |
+      Inner sizes (128 and 128) match and cancel; the outer sizes remain: $(32, 128)(128, 10) \to (32, 10)$. This is exactly a batch of 32 examples going through a layer with 128 inputs and 10 outputs.
+
+  - id: mat-entry-numeric
+    type: numeric
+    title: One entry of a product
+    difficulty: easy
+    tags: [matrix-multiplication]
+    prompt: |
+      $$A = \begin{bmatrix}2 & 0 & 1\\ -1 & 3 & 2\end{bmatrix}, \quad B = \begin{bmatrix}1 & 4\\ 2 & 0\\ 5 & -1\end{bmatrix}$$
+
+      What is the entry in row 2, column 1 of $AB$?
+    answer: 15
+    tolerance: 0
+    hints:
+      - Take row 2 of $A$ and column 1 of $B$, then their dot product.
+    explanation: |
+      Row 2 of $A$ is $[-1, 3, 2]$, column 1 of $B$ is $[1, 2, 5]$: $-1 + 6 + 10 = 15$.
+
+  - id: mat-properties-multi
+    type: mcq_multi
+    title: Which rules always hold?
+    difficulty: medium
+    tags: [matrix-properties]
+    prompt: |
+      For matrices whose shapes make every product defined, which statements are **always** true? Select all that apply.
+    options:
+      - { id: a, text: "$AB = BA$" }
+      - { id: b, text: "$(AB)C = A(BC)$" }
+      - { id: c, text: "$(AB)^\\top = B^\\top A^\\top$" }
+      - { id: d, text: "$(AB)^\\top = A^\\top B^\\top$" }
+    answer: [b, c]
+    explanation: |
+      Matrix multiplication is associative but not commutative. Transposing a product reverses the order: $(AB)^\top = B^\top A^\top$ — the shapes force it, since $A^\top B^\top$ usually isn't even defined.
+
+  - id: mat-numpy-output
+    type: output
+    title: Elementwise or matrix product?
+    difficulty: medium
+    tags: [numpy, matrix-multiplication]
+    prompt: |
+      What does this print? Write both lines exactly as NumPy prints them.
+    snippet: |
+      import numpy as np
+      A = np.array([[1, 2], [3, 4]])
+      B = np.array([[1, 0], [0, 2]])
+      print((A * B).tolist())
+      print((A @ B).tolist())
+    answer: |
+      [[1, 0], [0, 8]]
+      [[1, 4], [3, 8]]
+    hints:
+      - "`*` multiplies matching positions; `@` is matrix multiplication."
+    explanation: |
+      `A * B` is elementwise: `[[1·1, 2·0], [3·0, 4·2]]`. `A @ B` multiplies rows by columns; multiplying by a diagonal matrix on the right scales the columns: column 2 of `A` doubles. Mixing these up is one of the most common NumPy bugs.
+
+  - id: mat-matmul-code
+    type: code
+    title: Matrix multiplication from scratch
+    difficulty: medium
+    tags: [matrix-multiplication, from-scratch]
+    prompt: |
+      Implement `matmul(A, B)` for matrices given as lists of rows (lists of lists), **without** NumPy. Return the product as a list of rows. You can assume the shapes are compatible.
+
+      ```
+      matmul([[1, 2], [3, 4]], [[5], [6]])  ->  [[17], [39]]
+      ```
+    function:
+      name: matmul
+      params:
+        - { name: A, type: list }
+        - { name: B, type: list }
+      returns: list of lists
+    starter: |
+      def matmul(A, B):
+          # C[i][j] = sum over t of A[i][t] * B[t][j]
+          pass
+    solution: |
+      def matmul(A, B):
+          m, k, n = len(A), len(B), len(B[0])
+          return [[sum(A[i][t] * B[t][j] for t in range(k)) for j in range(n)] for i in range(m)]
+    tests:
+      sample:
+        - args: [[[1, 2], [3, 4]], [[5], [6]]]
+          expected: [[17], [39]]
+        - args: [[[2, 0, 1], [-1, 3, 2]], [[1, 4], [2, 0], [5, -1]]]
+      hidden:
+        - args: [[[1]], [[7]]]
+        - args: [[[1, 2, 3]], [[1], [1], [1]]]
+      generate: |
+        def cases(rng):
+            out = []
+            for m, k, n in [(3, 4, 2), (5, 1, 5), (8, 8, 8)]:
+                out.append([rng.integers(-5, 6, size=(m, k)).tolist(), rng.integers(-5, 6, size=(k, n)).tolist()])
+            return out
+    hints:
+      - The result has `len(A)` rows and `len(B[0])` columns.
+      - Each entry is the dot product of a row of `A` and a column of `B`.
+    explanation: |
+      Three nested loops: rows of `A`, columns of `B`, and the shared inner dimension. This is $O(mkn)$ work — which is why the size of a layer's weight matrix sets its cost.

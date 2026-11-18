@@ -22,19 +22,26 @@ const verifier: AccessTokenVerifier = {
 };
 
 const PEOPLE: Record<string, { role: InstitutionRole; batchIds: string[] }> = {
+  principal: { role: "admin", batchIds: [] },
   teacher: { role: "instructor", batchIds: [] },
   asha: { role: "student", batchIds: ["cse"] },
   ravi: { role: "student", batchIds: ["cse"] },
   meera: { role: "student", batchIds: ["ece"] },
 };
 
+/** Sizes of each member lookup, to check results only fetch the people on the page. */
+const lookups: number[] = [];
+
 const identity: IdentityClient = {
   async getMembership(authorization, institutionId) {
     const user = authorization.replace(/^Bearer /, "");
     return institutionId === INST ? (PEOPLE[user] ?? null) : null;
   },
-  async listMembers(): Promise<MemberView[]> {
-    return Object.entries(PEOPLE).map(([userId, p]) => ({
+  async lookupMembers(_auth, _institutionId, userIds): Promise<MemberView[]> {
+    lookups.push(userIds.length);
+    return Object.entries(PEOPLE)
+      .filter(([userId]) => userIds.includes(userId))
+      .map(([userId, p]) => ({
       userId,
       name: userId[0]!.toUpperCase() + userId.slice(1),
       email: `${userId}@x.com`,
@@ -315,12 +322,74 @@ describe("results and proctoring", () => {
 
     expect((await req("asha", "GET", `/api/v1/exams/${id}/results`)).status).toBe(403);
     const results = await req("teacher", "GET", `/api/v1/exams/${id}/results`);
-    expect(results.body.data.rows).toEqual([
+    expect(results.body.data.items).toEqual([
       expect.objectContaining({ name: "Asha", status: "submitted", score: 2, maxScore: 11, proctorEventCount: 2 }),
     ]);
+    expect(results.body.data.nextCursor).toBeNull();
 
     const review = await req("teacher", "GET", `/api/v1/exams/${id}/attempts/${attemptId}`);
     expect(review.body.data.proctorEvents.map((e: { type: string }) => e.type)).toEqual(["tab_hidden", "paste"]);
     expect(review.body.data.questions[0]).toMatchObject({ correctOptionIds: ["b"], score: 2 });
+  });
+
+  it("pages results best-first with a whole-exam summary and a CSV export", async () => {
+    await setup();
+    const id = await publishedExam();
+    const take = async (user: string, option: string) => {
+      const attemptId = (await req(user, "POST", `/api/v1/exams/${id}/attempts`)).body.data.id;
+      await req(user, "PUT", `/api/v1/attempts/${attemptId}/answers/q1`, { selectedOptionIds: [option] });
+      await req(user, "POST", `/api/v1/attempts/${attemptId}/submit`);
+    };
+    await take("ravi", "a"); // wrong: 0
+    await take("asha", "b"); // right: 2
+
+    lookups.length = 0;
+    const first = (await req("teacher", "GET", `/api/v1/exams/${id}/results?limit=1`)).body.data;
+    expect(first.items.map((r: { name: string }) => r.name)).toEqual(["Asha"]);
+    expect(first.summary).toEqual({
+      attempts: 2,
+      submitted: 2,
+      inProgress: 0,
+      flagged: 0,
+      averageScore: 1,
+      highestScore: 2,
+      lowestScore: 0,
+    });
+    const second = (
+      await req("teacher", "GET", `/api/v1/exams/${id}/results?limit=1&cursor=${first.nextCursor}`)
+    ).body.data;
+    expect(second.items.map((r: { name: string }) => r.name)).toEqual(["Ravi"]);
+    expect(second.nextCursor).toBeNull();
+    // Names are looked up only for the people on each page.
+    expect(lookups).toEqual([1, 1]);
+
+    expect((await req("teacher", "GET", `/api/v1/exams/${id}/results?limit=1000`)).status).toBe(400);
+    expect((await req("teacher", "GET", `/api/v1/exams/${id}/results?cursor=junk`)).status).toBe(400);
+
+    const csv = await app.inject({ url: `/api/v1/exams/${id}/results/export`, headers: as("teacher") });
+    expect(csv.headers["content-type"]).toContain("text/csv");
+    expect(csv.headers["content-disposition"]).toBe('attachment; filename="data-structures-mid-term-results.csv"');
+    expect(csv.body.trim().split("\r\n")).toEqual([
+      "Rank,Name,Email,Status,Score,Max score,Started at,Submitted at,Proctoring events",
+      expect.stringMatching(/^1,Asha,asha@x\.com,submitted,2,11,/),
+      expect.stringMatching(/^2,Ravi,ravi@x\.com,submitted,0,11,/),
+    ]);
+    expect((await app.inject({ url: `/api/v1/exams/${id}/results/export`, headers: as("asha") })).statusCode).toBe(403);
+  });
+
+  it("keeps an audit log of exam changes for admins", async () => {
+    await setup();
+    const id = await publishedExam();
+    await req("teacher", "POST", `/api/v1/exams/${id}/unpublish`);
+
+    expect((await req("teacher", "GET", `/api/v1/institutions/${INST}/exam-audit`)).status).toBe(403);
+    const log = (await req("principal", "GET", `/api/v1/institutions/${INST}/exam-audit`)).body.data;
+    expect(log.items.map((e: { action: string }) => e.action)).toEqual([
+      "exam.unpublished",
+      "exam.published",
+      "exam.updated",
+      "exam.created",
+    ]);
+    expect(log.items[0]).toMatchObject({ actorId: "teacher", targetType: "exam", targetId: id });
   });
 });

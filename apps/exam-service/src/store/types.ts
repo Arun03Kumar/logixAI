@@ -1,10 +1,12 @@
 import type {
   AttemptStatus,
+  AuditEvent,
   ExamQuestion,
   ExamSettings,
   ExamStatus,
   LanguageId,
   ProctorEventType,
+  ResultSummary,
 } from "@logixai/contracts";
 
 export interface ExamRecord {
@@ -66,6 +68,23 @@ export interface AttemptRecord {
   createdAt: Date;
 }
 
+/** The slice of an attempt the results table needs (no answers or code). */
+export interface AttemptRow {
+  id: string;
+  userId: string;
+  status: AttemptStatus;
+  startedAt: Date;
+  submittedAt: Date | null;
+  score: number | null;
+  maxScore: number;
+  proctorEventCount: number;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
 type New<T> = Omit<T, "id" | "createdAt">;
 
 export interface Store {
@@ -81,7 +100,9 @@ export interface Store {
     create(data: New<AttemptRecord>): Promise<AttemptRecord>;
     findById(id: string): Promise<AttemptRecord | null>;
     find(examId: string, userId: string): Promise<AttemptRecord | null>;
-    listForExam(examId: string): Promise<AttemptRecord[]>;
+    /** Best score first (unscored last), then oldest attempt first. */
+    pageForExam(examId: string, query: { limit: number; cursor?: string }): Promise<Page<AttemptRow>>;
+    summarizeExam(examId: string): Promise<ResultSummary>;
     listForUser(userId: string, examIds: string[]): Promise<AttemptRecord[]>;
     countForExam(examId: string): Promise<number>;
     /**
@@ -105,5 +126,9 @@ export interface Store {
     /** Updates scores of an already-final attempt (late judge results). */
     setScores(id: string, scores: Record<string, number | null>, score: number | null): Promise<void>;
     listExpiredInProgress(now: Date): Promise<AttemptRecord[]>;
+  };
+  audit: {
+    record(event: Omit<AuditEvent, "id" | "at">): Promise<void>;
+    pageForInstitution(institutionId: string, query: { limit: number; cursor?: string }): Promise<Page<AuditEvent>>;
   };
 }

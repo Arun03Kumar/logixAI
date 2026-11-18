@@ -8,7 +8,7 @@
  * This module is pure data, so it is safe to import in the browser.
  */
 
-export const LANGUAGE_IDS = ["JAVA", "CPP", "PYTHON"] as const;
+export const LANGUAGE_IDS = ["JAVA", "CPP", "PYTHON", "PYTHON_ML"] as const;
 
 export type LanguageId = (typeof LANGUAGE_IDS)[number];
 
@@ -31,7 +31,14 @@ export interface LanguageDefinition {
   timeMultiplier: number;
   /** Memory limit for the sandbox, in MB. */
   memoryMb: number;
+  /**
+   * Where the runtime is offered: "dsa" for practice problems and exams,
+   * "arena" for ML Arena (Python with NumPy, Pandas and scikit-learn).
+   */
+  purpose: LanguagePurpose;
 }
+
+export type LanguagePurpose = "dsa" | "arena";
 
 export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
   JAVA: {
@@ -44,6 +51,7 @@ export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
     runCommand: "java -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss64m Main",
     timeMultiplier: 2,
     memoryMb: 512,
+    purpose: "dsa",
   },
   CPP: {
     id: "CPP",
@@ -55,6 +63,7 @@ export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
     runCommand: "./main",
     timeMultiplier: 1,
     memoryMb: 256,
+    purpose: "dsa",
   },
   PYTHON: {
     id: "PYTHON",
@@ -66,6 +75,21 @@ export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
     runCommand: "python3 -B main.py",
     timeMultiplier: 3,
     memoryMb: 256,
+    purpose: "dsa",
+  },
+  PYTHON_ML: {
+    id: "PYTHON_ML",
+    label: "Python (ML)",
+    monacoId: "python",
+    // Built from judge-images/python-ml (npm run judge:images).
+    dockerImage: "logixai/python-ml:1",
+    sourceFile: "main.py",
+    compileCommand: null,
+    runCommand: "python3 -B main.py",
+    // Importing NumPy / scikit-learn alone takes most of a second.
+    timeMultiplier: 3,
+    memoryMb: 512,
+    purpose: "arena",
   },
 };
 
@@ -84,6 +108,7 @@ export function findLanguage(value: string): LanguageDefinition | undefined {
   return isLanguageId(id) ? LANGUAGES[id] : undefined;
 }
 
-export function listLanguages(): LanguageDefinition[] {
-  return LANGUAGE_IDS.map((id) => LANGUAGES[id]);
+/** Languages offered for a purpose (practice problems and exams by default). */
+export function listLanguages(purpose: LanguagePurpose = "dsa"): LanguageDefinition[] {
+  return LANGUAGE_IDS.map((id) => LANGUAGES[id]).filter((l) => l.purpose === purpose);
 }

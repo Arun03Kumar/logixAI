@@ -1,0 +1,129 @@
+id: probability-basics
+title: Probability, Bayes and expectation
+summary: Conditional probability, Bayes' theorem, and expectation and variance — the language of uncertainty in ML.
+lesson: |
+  ## Why probability matters
+
+  Classifiers output probabilities, losses like cross-entropy are probabilistic, and evaluating a model means reasoning about rare events (fraud, disease). Bayes' theorem in particular explains why a "99% accurate" test can still be wrong most of the time.
+
+  ## Conditional probability
+
+  $$P(A \mid B) = \frac{P(A \cap B)}{P(B)}$$
+
+  "The probability of $A$ given that $B$ happened." $A$ and $B$ are **independent** when $P(A \mid B) = P(A)$, equivalently $P(A \cap B) = P(A)P(B)$.
+
+  ## Bayes' theorem
+
+  $$P(A \mid B) = \frac{P(B \mid A)\,P(A)}{P(B)}, \qquad P(B) = P(B \mid A)P(A) + P(B \mid \neg A)P(\neg A)$$
+
+  ## Worked example: the rare-disease test
+
+  1% of people have a disease. The test catches 99% of cases and wrongly flags 5% of healthy people. If you test positive:
+
+  $$P(\text{sick} \mid +) = \frac{0.99 \cdot 0.01}{0.99 \cdot 0.01 + 0.05 \cdot 0.99} = \frac{0.0099}{0.0594} \approx 0.167$$
+
+  Only about 17%: healthy people are so common that their false positives outnumber the true ones. This is the **base-rate** effect, and it's why accuracy alone is misleading on imbalanced data.
+
+  ## Expectation and variance
+
+  For a discrete random variable, $\mathbb{E}[X] = \sum_x x\,P(X = x)$ — the long-run average.
+  $\operatorname{Var}(X) = \mathbb{E}[(X - \mathbb{E}[X])^2] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$ measures spread.
+  Expectation is linear: $\mathbb{E}[aX + bY] = a\mathbb{E}[X] + b\mathbb{E}[Y]$, always — even when $X$ and $Y$ are dependent.
+
+  ## In interviews
+
+  Bayes questions are classics. Write the formula, fill in the numbers, and comment on the base rate.
+items:
+  - id: prob-bayes-numeric
+    type: numeric
+    title: A spam filter's posterior
+    difficulty: medium
+    tags: [bayes]
+    prompt: |
+      20% of emails are spam. The word "offer" appears in 40% of spam emails and in 5% of non-spam emails.
+      An email contains "offer". What is the probability it is spam? Give 3 decimal places.
+    answer: 0.667
+    tolerance: 0.001
+    answerFormat: 3 decimal places
+    hints:
+      - "P(offer) = P(offer | spam)P(spam) + P(offer | not spam)P(not spam)."
+    explanation: |
+      $P(\text{spam} \mid \text{offer}) = \frac{0.4 \cdot 0.2}{0.4 \cdot 0.2 + 0.05 \cdot 0.8} = \frac{0.08}{0.12} \approx 0.667$. This calculation, over many words, is the Naive Bayes classifier.
+
+  - id: prob-expectation-numeric
+    type: numeric
+    title: Expected value of a die
+    difficulty: easy
+    tags: [expectation]
+    prompt: |
+      A fair six-sided die is rolled. What is $\mathbb{E}[X^2]$, the expected value of the square of the result? Give 2 decimal places.
+    answer: 15.17
+    tolerance: 0.01
+    answerFormat: 2 decimal places
+    explanation: |
+      $\mathbb{E}[X^2] = \frac{1 + 4 + 9 + 16 + 25 + 36}{6} = \frac{91}{6} \approx 15.17$. Since $\mathbb{E}[X] = 3.5$, the variance is $15.17 - 12.25 \approx 2.92$.
+
+  - id: prob-independence-mcq
+    type: mcq_single
+    title: Independent or not?
+    difficulty: easy
+    tags: [independence]
+    prompt: |
+      $P(A) = 0.5$, $P(B) = 0.4$ and $P(A \cap B) = 0.2$. Which is true?
+    options:
+      - { id: a, text: "A and B are independent." }
+      - { id: b, text: "A and B are mutually exclusive." }
+      - { id: c, text: "P(A | B) = 0.8" }
+      - { id: d, text: "There's not enough information to say." }
+    answer: a
+    explanation: |
+      $P(A)P(B) = 0.5 \cdot 0.4 = 0.2 = P(A \cap B)$, so they're independent, and $P(A \mid B) = 0.2 / 0.4 = 0.5 = P(A)$. Mutually exclusive events would have $P(A \cap B) = 0$.
+
+  - id: prob-variance-code
+    type: code
+    title: Mean and variance of a distribution
+    difficulty: easy
+    tags: [expectation, variance]
+    prompt: |
+      A discrete random variable takes `values[i]` with probability `probs[i]` (the probabilities sum to 1).
+      Implement `mean_and_variance(values, probs)` returning `[mean, variance]`, where the variance is
+      $\mathbb{E}[(X - \mathbb{E}[X])^2]$.
+    function:
+      name: mean_and_variance
+      params:
+        - { name: values, type: ndarray }
+        - { name: probs, type: ndarray }
+      returns: "[mean, variance]"
+    starter: |
+      import numpy as np
+
+      def mean_and_variance(values, probs):
+          mean = np.mean(values)
+          variance = np.var(values)
+          return [mean, variance]
+    solution: |
+      import numpy as np
+
+      def mean_and_variance(values, probs):
+          mean = float(np.sum(values * probs))
+          variance = float(np.sum(probs * (values - mean) ** 2))
+          return [mean, variance]
+    tests:
+      sample:
+        - args: [[1, 2, 3, 4, 5, 6], [0.16666666666666666, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666, 0.16666666666666666]]
+        - args: [[0, 10], [0.9, 0.1]]
+          expected: [1.0, 9.0]
+      hidden:
+        - args: [[7], [1.0]]
+          expected: [7.0, 0.0]
+      generate: |
+        def cases(rng):
+            out = []
+            for n in [3, 10]:
+                p = rng.random(n)
+                out.append([rng.normal(size=n) * 5, p / p.sum()])
+            return out
+    hints:
+      - "`np.mean` assumes every value is equally likely. Weight each value by its probability."
+    explanation: |
+      $\mathbb{E}[X] = \sum x_i p_i$ and $\operatorname{Var}(X) = \sum p_i (x_i - \mathbb{E}[X])^2$. The starter's `np.mean`/`np.var` only match when the distribution is uniform — on the die example it happens to be right, which is why the second sample is there.

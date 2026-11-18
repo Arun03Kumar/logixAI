@@ -50,7 +50,10 @@ const problemSchema = new mongoose.Schema({
   editorial: {
     type: String,
   },
-});
+}, { timestamps: true });
+
+// Public list: newest first, optionally filtered by difficulty (keyset on _id).
+problemSchema.index({ difficulty: 1, _id: -1 });
 
 const Problem = mongoose.model("Problem", problemSchema);
 

@@ -7,6 +7,8 @@ import {
   CreateBatchSchema,
   CreateInstitutionSchema,
   CreateInviteSchema,
+  InstitutionRoleSchema,
+  PageQuerySchema,
   SignInSchema,
   SignUpSchema,
   UpdateMemberSchema,
@@ -17,7 +19,7 @@ import {
   createAccessTokenVerifier,
   errorResponse,
   successResponse,
-  type z,
+  z,
 } from "@logixai/service-kit";
 import type { TokenIssuer } from "./lib/tokens.js";
 import { AuthService, type IssuedSession } from "./services/authService.js";
@@ -149,8 +151,37 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     successResponse(await institutions.get(userId(request), request.params.id)),
   );
 
-  app.get<IdParams>("/api/v1/institutions/:id/members", auth, async (request) =>
-    successResponse(await institutions.listMembers(userId(request), request.params.id)),
+  // ?limit=&cursor=&role=&userIds=a,b,c (userIds: look up specific people, max 100)
+  app.get<IdParams>("/api/v1/institutions/:id/members", auth, async (request) => {
+    const query = parse(
+      PageQuerySchema.extend({
+        role: InstitutionRoleSchema.optional(),
+        userIds: z
+          .string()
+          .optional()
+          .transform((v) => (v ? v.split(",").filter(Boolean).slice(0, 100) : undefined)),
+      }),
+      request.query,
+      "query",
+    );
+    const { userIds, role, ...page } = query;
+    return successResponse(
+      await institutions.listMembers(userId(request), request.params.id, {
+        ...page,
+        ...(role ? { role } : {}),
+        ...(userIds ? { userIds, limit: Math.max(page.limit, userIds.length) } : {}),
+      }),
+    );
+  });
+
+  app.get<IdParams>("/api/v1/institutions/:id/audit", auth, async (request) =>
+    successResponse(
+      await institutions.listAudit(
+        userId(request),
+        request.params.id,
+        parse(PageQuerySchema, request.query, "query"),
+      ),
+    ),
   );
 
   app.patch<{ Params: { id: string; userId: string } }>(

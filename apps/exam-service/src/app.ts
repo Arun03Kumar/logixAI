@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import {
   CreateExamSchema,
   ExamDraftSchema,
+  PageQuerySchema,
   ProctorEventSchema,
   SaveAnswerSchema,
 } from "@logixai/contracts";
@@ -45,6 +46,7 @@ export async function buildApp(
   await app.register(cors, {
     origin: options.corsOrigins,
     methods: ["GET", "POST", "PUT", "DELETE"],
+    exposedHeaders: ["content-disposition"],
   });
 
   app.setErrorHandler((err: Error & { statusCode?: number }, request, reply) => {
@@ -100,8 +102,20 @@ export async function buildApp(
   app.post<P<{ examId: string }>>("/api/v1/exams/:examId/unpublish", async (req) =>
     ok(await exams.unpublish(caller(req), req.params.examId)),
   );
+  // ?limit=&cursor= (best scores first)
   app.get<P<{ examId: string }>>("/api/v1/exams/:examId/results", async (req) =>
-    ok(await exams.results(caller(req), req.params.examId)),
+    ok(await exams.results(caller(req), req.params.examId, parse(PageQuerySchema, req.query, "query"))),
+  );
+  app.get<P<{ examId: string }>>("/api/v1/exams/:examId/results/export", async (req, reply) => {
+    const { filename, csv } = await exams.resultsCsv(caller(req), req.params.examId);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="${filename}"`)
+      .header("cache-control", "no-store")
+      .send(csv);
+  });
+  app.get<P<{ institutionId: string }>>("/api/v1/institutions/:institutionId/exam-audit", async (req) =>
+    ok(await exams.auditLog(caller(req), req.params.institutionId, parse(PageQuerySchema, req.query, "query"))),
   );
   app.get<P<{ examId: string; attemptId: string }>>(
     "/api/v1/exams/:examId/attempts/:attemptId",

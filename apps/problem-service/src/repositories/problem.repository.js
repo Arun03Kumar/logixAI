@@ -1,5 +1,8 @@
-const { NotFoundError } = require("@logixai/service-kit");
-const { Problem } = require("../models");
+const mongoose = require("mongoose");
+const { NotFoundError, decodeCursor, toPage } = require("@logixai/service-kit");
+const { Problem, AuditEvent } = require("../models");
+
+const isCursor = (v) => typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
 
 class ProblemRepository {
   async createProblem(problemData) {
@@ -18,8 +21,21 @@ class ProblemRepository {
     return Problem.findById(id);
   }
 
-  async getAllProblems() {
-    return Problem.find({});
+  /**
+   * Newest first, `limit` per page. Keyset pagination on _id stays fast at
+   * any depth (no skip). Only list fields are loaded, never the tests.
+   */
+  async listProblems({ limit, cursor, difficulty }) {
+    const after = decodeCursor(cursor, isCursor);
+    const filter = {
+      ...(difficulty ? { difficulty } : {}),
+      ...(after ? { _id: { $lt: new mongoose.Types.ObjectId(after) } } : {}),
+    };
+    const rows = await Problem.find(filter, { title: 1, description: 1, difficulty: 1 })
+      .sort({ _id: -1 })
+      .limit(limit + 1)
+      .lean();
+    return toPage(rows, limit, (last) => String(last._id));
   }
 
   async deleteProblem(id) {
@@ -35,6 +51,10 @@ class ProblemRepository {
       new: true,
       runValidators: true,
     });
+  }
+
+  async recordAudit(event) {
+    await AuditEvent.create(event);
   }
 }
 

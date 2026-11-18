@@ -10,6 +10,7 @@ type NavItem = { label: string; href: string; when?: "signedIn" | "admin" };
 
 const NAV: NavItem[] = [
   { label: "Practice", href: "/problems" },
+  { label: "ML Arena", href: "/arena" },
   { label: "Institutions", href: "/institutions", when: "signedIn" },
   { label: "Create problem", href: "/create-problem", when: "admin" },
 ];
@@ -41,7 +42,7 @@ export default function AppHeader() {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "rounded-md px-3 py-1.5 transition-colors",
+                  "whitespace-nowrap rounded-md px-3 py-1.5 transition-colors",
                   active
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:text-foreground",

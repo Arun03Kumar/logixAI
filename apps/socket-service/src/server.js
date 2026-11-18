@@ -10,6 +10,8 @@ const {
   PORT,
   REDIS_HOST,
   REDIS_PORT,
+  REDIS_PASSWORD,
+  REDIS_TLS,
   CORS_ORIGINS,
   IDENTITY_JWKS_URL,
   JWT_ISSUER,
@@ -33,7 +35,12 @@ app.use(
   }),
 );
 
-const redisCache = createRedisConnection({ host: REDIS_HOST, port: REDIS_PORT });
+const redisCache = createRedisConnection({
+  host: REDIS_HOST,
+  port: REDIS_PORT,
+  password: REDIS_PASSWORD,
+  tls: REDIS_TLS,
+});
 const verifier = createAccessTokenVerifier({
   jwksUrl: IDENTITY_JWKS_URL,
   issuer: JWT_ISSUER,

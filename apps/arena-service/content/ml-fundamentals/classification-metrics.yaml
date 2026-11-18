@@ -1,0 +1,139 @@
+id: classification-metrics
+title: Classification metrics
+summary: Confusion matrices, precision, recall and F1 — and why accuracy misleads on imbalanced data.
+prerequisites: [probability-basics]
+lesson: |
+  ## Why accuracy isn't enough
+
+  If 1% of transactions are fraud, a model that always says "not fraud" is 99% accurate and completely useless. You need metrics that look at each kind of mistake.
+
+  ## The confusion matrix
+
+  | | Predicted positive | Predicted negative |
+  | --- | --- | --- |
+  | **Actually positive** | TP (true positive) | FN (false negative) |
+  | **Actually negative** | FP (false positive) | TN (true negative) |
+
+  ## The metrics
+
+  $$\text{Precision} = \frac{TP}{TP + FP} \qquad \text{Recall} = \frac{TP}{TP + FN} \qquad F_1 = \frac{2 \cdot P \cdot R}{P + R}$$
+
+  - **Precision**: of everything flagged, how much was right? Matters when false alarms are expensive (blocking a genuine card payment).
+  - **Recall** (sensitivity): of all real positives, how many did we catch? Matters when misses are expensive (cancer screening).
+  - **F1**: the harmonic mean, high only when both are high.
+
+  ## Thresholds trade one for the other
+
+  A classifier outputs a probability; you choose the threshold. Lowering it flags more cases: recall rises, precision usually falls. The **ROC curve** plots recall against the false-positive rate over all thresholds, and **ROC-AUC** summarises it. On heavily imbalanced data, the **precision–recall curve** is more informative.
+
+  ## Worked example
+
+  100 emails, 10 spam. The filter flags 8, of which 6 are spam. TP = 6, FP = 2, FN = 4.
+  Precision $= 6/8 = 0.75$, recall $= 6/10 = 0.6$, $F_1 = 2 \cdot 0.75 \cdot 0.6 / 1.35 \approx 0.667$.
+
+  ## In interviews
+
+  Always ask "what does a false positive cost, and what does a false negative cost?" before choosing a metric.
+items:
+  - id: cm-precision-numeric
+    type: numeric
+    title: Precision from counts
+    difficulty: easy
+    tags: [precision]
+    prompt: |
+      A fraud model flags 50 transactions. 40 really are fraud. There were 80 fraudulent transactions in total.
+      What is the model's **precision**? Give 2 decimal places.
+    answer: 0.8
+    tolerance: 0.005
+    answerFormat: 2 decimal places
+    explanation: |
+      Precision = TP / (TP + FP) = 40 / 50 = 0.80. Its recall is 40 / 80 = 0.50: it's usually right when it flags something, but misses half the fraud.
+
+  - id: cm-f1-numeric
+    type: numeric
+    title: F1 score
+    difficulty: easy
+    tags: [f1]
+    prompt: |
+      A model has precision 0.9 and recall 0.6. What is its F1 score? Give 2 decimal places.
+    answer: 0.72
+    tolerance: 0.005
+    answerFormat: 2 decimal places
+    explanation: |
+      $F_1 = \frac{2 \cdot 0.9 \cdot 0.6}{0.9 + 0.6} = \frac{1.08}{1.5} = 0.72$ — closer to the weaker of the two than the arithmetic mean (0.75) would be.
+
+  - id: cm-which-metric-mcq
+    type: mcq_single
+    title: Which metric for cancer screening?
+    difficulty: medium
+    tags: [recall, metric-choice]
+    prompt: |
+      A first-stage cancer screening test sends flagged patients for a more accurate (but costlier) follow-up.
+      Which metric should you prioritise when choosing the screening threshold?
+    options:
+      - { id: a, text: "Precision — avoid unnecessary follow-ups." }
+      - { id: b, text: "Recall — avoid missing patients who have cancer." }
+      - { id: c, text: "Accuracy — it balances everything." }
+      - { id: d, text: "Specificity — avoid flagging healthy patients." }
+    answer: b
+    explanation: |
+      A missed cancer (false negative) is far more costly than an extra follow-up (false positive), and the follow-up catches the false positives. So you favour recall, accepting lower precision. Accuracy would be dominated by the many healthy patients.
+
+  - id: cm-confusion-code
+    type: code
+    title: Precision, recall and F1 from scratch
+    difficulty: medium
+    tags: [precision, recall, f1, from-scratch]
+    prompt: |
+      Implement `precision_recall_f1(y_true, y_pred)` for binary labels (0 or 1). Return
+      `[precision, recall, f1]`. When a denominator is zero, that metric is `0.0`.
+    function:
+      name: precision_recall_f1
+      params:
+        - { name: y_true, type: ndarray_int }
+        - { name: y_pred, type: ndarray_int }
+      returns: "[precision, recall, f1]"
+    starter: |
+      import numpy as np
+
+      def precision_recall_f1(y_true, y_pred):
+          tp = np.sum((y_true == 1) & (y_pred == 1))
+          fp = np.sum((y_true == 0) & (y_pred == 1))
+          fn = np.sum((y_true == 1) & (y_pred == 0))
+          precision = tp / (tp + fn)
+          recall = tp / (tp + fp)
+          f1 = 2 * precision * recall / (precision + recall)
+          return [precision, recall, f1]
+    solution: |
+      import numpy as np
+
+      def precision_recall_f1(y_true, y_pred):
+          tp = int(np.sum((y_true == 1) & (y_pred == 1)))
+          fp = int(np.sum((y_true == 0) & (y_pred == 1)))
+          fn = int(np.sum((y_true == 1) & (y_pred == 0)))
+          precision = tp / (tp + fp) if tp + fp else 0.0
+          recall = tp / (tp + fn) if tp + fn else 0.0
+          f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+          return [precision, recall, f1]
+    tests:
+      sample:
+        - args: [[1, 1, 1, 0, 0, 0], [1, 1, 0, 1, 0, 0]]
+        - args: [[1, 0, 1, 1], [1, 1, 1, 1]]
+      hidden:
+        - args: [[0, 0, 0], [0, 0, 0]]
+          expected: [0.0, 0.0, 0.0]
+        - args: [[1, 1], [0, 0]]
+          expected: [0.0, 0.0, 0.0]
+      generate: |
+        def cases(rng):
+            out = []
+            for n, p in [(50, 0.3), (500, 0.05)]:
+                y = (rng.random(n) < p).astype(int)
+                pred = np.where(rng.random(n) < 0.8, y, 1 - y)
+                out.append([y, pred])
+            return out
+    hints:
+      - Check which count belongs in each denominator.
+      - Guard against dividing by zero.
+    explanation: |
+      Precision divides by everything predicted positive (TP + FP); recall by everything actually positive (TP + FN). The starter swaps them — an easy slip that changes conclusions. Libraries return 0 with a warning when a denominator is zero, as here.

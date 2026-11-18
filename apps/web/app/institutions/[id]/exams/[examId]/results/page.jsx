@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -19,8 +20,9 @@ import {
 } from "@logixai/ui";
 import AppHeader from "@/app/components/layout/AppHeader";
 import RequireAuth from "@/app/components/layout/RequireAuth";
+import LoadMore from "@/app/components/LoadMore";
 import { examApi } from "@/app/lib/api/exams";
-import { useApi } from "@/app/lib/api/useApi";
+import { usePagedApi } from "@/app/lib/api/usePagedApi";
 import {
   ATTEMPT_STATUS,
   PHASE,
@@ -38,29 +40,19 @@ function Stat({ label, value }) {
   );
 }
 
-/** CSV of the results table, opened in Excel / Google Sheets. */
-function downloadCsv(exam, rows) {
-  const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = ["Name", "Email", "Status", "Score", "Max score", "Started", "Submitted", "Integrity events"];
-  const lines = rows.map((r) =>
-    [r.name, r.email, ATTEMPT_STATUS[r.status].label, r.score ?? "", r.maxScore, r.startedAt, r.submittedAt ?? "", r.proctorEventCount]
-      .map(escape)
-      .join(","),
-  );
-  const blob = new Blob([[header.map(escape).join(","), ...lines].join("\n")], { type: "text/csv" });
+/** Downloads every result (not just the loaded pages) as CSV, built by exam-service. */
+async function downloadCsv(examId) {
+  const { blob, filename } = await examApi.exportResults(examId);
   const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement("a"), {
-    href: url,
-    download: `${exam.title.replace(/[^\w-]+/g, "-")}-results.csv`,
-  });
-  a.click();
+  Object.assign(document.createElement("a"), { href: url, download: filename }).click();
   URL.revokeObjectURL(url);
 }
 
 function Results() {
   const { id: institutionId, examId } = useParams();
   const router = useRouter();
-  const results = useApi(() => examApi.results(examId), [examId]);
+  const results = usePagedApi((cursor) => examApi.results(examId, { cursor }), [examId]);
+  const [exporting, setExporting] = useState(false);
 
   if (results.loading) {
     return (
@@ -78,11 +70,18 @@ function Results() {
     );
   }
 
-  const { exam, rows } = results.data;
-  const scored = rows.filter((r) => r.score !== null);
-  const average = scored.length ? (scored.reduce((s, r) => s + r.score, 0) / scored.length).toFixed(1) : "—";
-  const highest = scored.length ? Math.max(...scored.map((r) => r.score)) : "—";
-  const flagged = rows.filter((r) => r.proctorEventCount > 0).length;
+  const { exam, summary } = results.data;
+  const rows = results.items;
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      await downloadCsv(examId);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const unpublish = async () => {
     if (!window.confirm("Unpublish this exam? Students won't see it until you publish it again.")) return;
@@ -114,19 +113,24 @@ function Results() {
           </p>
         </div>
         <div className="flex gap-2">
-          {rows.length === 0 && exam.phase !== "ended" ? <Button onClick={unpublish}>Unpublish to edit</Button> : null}
-          <Button onClick={() => downloadCsv(exam, rows)} disabled={rows.length === 0}>
+          {summary.attempts === 0 && exam.phase !== "ended" ? (
+            <Button onClick={unpublish}>Unpublish to edit</Button>
+          ) : null}
+          <Button onClick={exportCsv} disabled={summary.attempts === 0 || exporting}>
             <Download />
-            Export CSV
+            {exporting ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <Stat label="Attempts" value={rows.length} />
-        <Stat label="Average score" value={average} />
-        <Stat label="Highest score" value={highest} />
-        <Stat label="With integrity events" value={flagged} />
+        <Stat
+          label="Attempts"
+          value={summary.inProgress ? `${summary.attempts} (${summary.inProgress} in progress)` : summary.attempts}
+        />
+        <Stat label="Average score" value={summary.averageScore ?? "—"} />
+        <Stat label="Highest score" value={summary.highestScore ?? "—"} />
+        <Stat label="With integrity events" value={summary.flagged} />
       </div>
 
       <Card className="overflow-hidden">
@@ -186,6 +190,7 @@ function Results() {
             </TableBody>
           </Table>
         )}
+        <LoadMore list={results} label="Show more students" />
       </Card>
     </Container>
   );

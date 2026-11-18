@@ -18,4 +18,8 @@ export { createRedisConnection } from "./redis";
 export type { RedisOptions } from "./redis";
 export { createAccessTokenVerifier, requirePlatformRole } from "./auth";
 export { INTERNAL_TOKEN_HEADER, isInternalRequest, internalHeaders } from "./internal";
+export { runMigrations } from "./migrations";
+export type { Migration } from "./migrations";
+export { encodeCursor, decodeCursor, toPage } from "./pagination";
+export type { MongoOptions } from "./mongo";
 export type { AccessTokenVerifier } from "./auth";

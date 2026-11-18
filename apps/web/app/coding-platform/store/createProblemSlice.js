@@ -1,12 +1,12 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
-import { DEFAULT_LANGUAGE, LANGUAGE_IDS } from "@logixai/languages";
+import { DEFAULT_LANGUAGE, listLanguages } from "@logixai/languages";
 import { PROBLEM_API_URL } from "@/app/coding-platform/lib/config";
 import { authFetch, readEnvelope } from "@/app/lib/auth/session";
 
 // One empty stub per supported language (from the shared language registry).
 const emptyCodeStubs = () =>
   Object.fromEntries(
-    LANGUAGE_IDS.map((id) => [
+    listLanguages().map(({ id }) => [
       id,
       { startSnippet: "", endSnippet: "", userSnippet: "" },
     ]),

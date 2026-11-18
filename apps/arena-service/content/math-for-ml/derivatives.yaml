@@ -1,0 +1,177 @@
+id: derivatives
+title: Derivatives and the chain rule
+summary: Rates of change, the rules for computing them, and the chain rule that makes backpropagation work.
+lesson: |
+  ## Why derivatives matter
+
+  Training a model means adjusting its parameters so the loss goes down. The derivative tells you which direction is "down" and how steep it is. Backpropagation is nothing more than the chain rule applied carefully.
+
+  ## The idea
+
+  The derivative of $f$ at $x$ is the slope of the tangent line:
+
+  $$f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}$$
+
+  ## Rules you'll use constantly
+
+  | Function | Derivative |
+  | --- | --- |
+  | $x^n$ | $n x^{n-1}$ |
+  | $e^x$ | $e^x$ |
+  | $\ln x$ | $1/x$ |
+  | $\sigma(x) = \frac{1}{1+e^{-x}}$ | $\sigma(x)\,(1-\sigma(x))$ |
+  | $f + g$ | $f' + g'$ |
+  | $f \cdot g$ | $f'g + fg'$ |
+
+  ## The chain rule
+
+  For a composition $y = f(g(x))$:
+
+  $$\frac{dy}{dx} = f'(g(x)) \cdot g'(x)$$
+
+  Read it as "outer derivative, evaluated at the inner function, times the inner derivative". A neural network is a long chain of functions, and backpropagation multiplies these local derivatives from the loss back to each weight.
+
+  ## Worked example
+
+  $y = (3x + 1)^2$. Outer: $u^2 \to 2u$. Inner: $3x + 1 \to 3$. So $y' = 2(3x+1)\cdot 3 = 6(3x+1)$; at $x = 1$, $y' = 24$.
+
+  ## Checking derivatives numerically
+
+  You can always check an analytic derivative with the **central difference**:
+
+  $$f'(x) \approx \frac{f(x+h) - f(x-h)}{2h}, \quad h \approx 10^{-5}$$
+
+  Its error shrinks like $h^2$, much faster than the one-sided version. "Gradient checking" with this formula is how people catch bugs in hand-written backprop.
+
+  ## In interviews
+
+  Be ready to derive the sigmoid's derivative and explain why $\sigma'(x) \le 0.25$ contributes to vanishing gradients in deep sigmoid networks.
+items:
+  - id: deriv-power-numeric
+    type: numeric
+    title: Slope of a polynomial
+    difficulty: easy
+    tags: [derivative-rules]
+    prompt: |
+      $f(x) = 4x^3 - 2x + 7$. What is $f'(2)$?
+    answer: 46
+    tolerance: 0
+    hints:
+      - Differentiate term by term; constants disappear.
+    explanation: |
+      $f'(x) = 12x^2 - 2$, so $f'(2) = 48 - 2 = 46$.
+
+  - id: deriv-chain-numeric
+    type: numeric
+    title: Chain rule
+    difficulty: medium
+    tags: [chain-rule]
+    prompt: |
+      $y = e^{2x^2}$. What is $\dfrac{dy}{dx}$ at $x = 0.5$? Give 3 decimal places.
+    answer: 3.297
+    tolerance: 0.002
+    answerFormat: 3 decimal places
+    hints:
+      - The outer function is $e^u$, the inner one $u = 2x^2$.
+    explanation: |
+      $\frac{dy}{dx} = e^{2x^2} \cdot 4x$. At $x = 0.5$: $e^{0.5} \cdot 2 \approx 1.6487 \cdot 2 = 3.297$.
+
+  - id: deriv-sigmoid-mcq
+    type: mcq_single
+    title: The sigmoid's derivative
+    difficulty: medium
+    tags: [sigmoid, vanishing-gradients]
+    prompt: |
+      For $\sigma(x) = \dfrac{1}{1 + e^{-x}}$, which is $\sigma'(x)$, and what is its largest possible value?
+    options:
+      - { id: a, text: "$\\sigma(x)(1-\\sigma(x))$, at most 0.25" }
+      - { id: b, text: "$\\sigma(x)^2$, at most 1" }
+      - { id: c, text: "$1 - \\sigma(x)^2$, at most 1" }
+      - { id: d, text: "$e^{-x}$, unbounded" }
+    answer: a
+    explanation: |
+      $\sigma'(x) = \sigma(x)(1-\sigma(x))$, which peaks at $x = 0$ where $\sigma = 0.5$: $0.5 \cdot 0.5 = 0.25$. Multiplying many factors ≤ 0.25 through a deep network shrinks gradients towards zero — the vanishing-gradient problem. ($1 - \tanh^2$ is the tanh derivative.)
+
+  - id: deriv-numerical-code
+    type: code
+    title: Numerical derivative
+    difficulty: medium
+    tags: [numerical-differentiation, gradient-checking]
+    prompt: |
+      Implement `numerical_derivative(coeffs, x, h)` using the **central difference**
+      $\dfrac{f(x+h) - f(x-h)}{2h}$, where $f$ is the polynomial with the given coefficients,
+      lowest power first: `coeffs = [c0, c1, c2]` means $f(x) = c_0 + c_1 x + c_2 x^2$.
+
+      Answers are checked to within `1e-4`.
+    function:
+      name: numerical_derivative
+      params:
+        - { name: coeffs, type: list }
+        - { name: x, type: float }
+        - { name: h, type: float }
+      returns: float
+    starter: |
+      def numerical_derivative(coeffs, x, h):
+          def f(t):
+              return sum(c * t ** i for i, c in enumerate(coeffs))
+          # Use the central difference.
+          return (f(x + h) - f(x)) / h
+    solution: |
+      def numerical_derivative(coeffs, x, h):
+          def f(t):
+              return sum(c * t ** i for i, c in enumerate(coeffs))
+          return (f(x + h) - f(x - h)) / (2 * h)
+    tolerance: { abs: 1.0e-4, rel: 1.0e-6 }
+    tests:
+      sample:
+        - args: [[7, -2, 0, 4], 2.0, 0.001]
+        - args: [[0, 0, 1], 3.0, 0.01]
+      hidden:
+        - args: [[5], 1.0, 0.001]
+        - args: [[1, 1, 1, 1, 1], -1.5, 0.001]
+      generate: |
+        def cases(rng):
+            return [[rng.integers(-3, 4, size=5).tolist(), float(rng.uniform(-2, 2)), 0.01] for _ in range(4)]
+    hints:
+      - The starter uses the one-sided (forward) difference. Step both ways from `x`.
+    explanation: |
+      The central difference cancels the second-order error term, so its error is $O(h^2)$ instead of $O(h)$. With $h = 0.01$, the forward difference on $x^2$ at 3 gives 6.01 while the central difference gives exactly 6.
+
+  - id: deriv-sigmoid-code
+    type: code
+    title: Sigmoid and its gradient
+    difficulty: easy
+    tags: [sigmoid, numpy]
+    prompt: |
+      Implement `sigmoid_grad(x)` for a NumPy array `x`: return $\sigma'(x)$ elementwise, where
+      $\sigma(x) = 1/(1 + e^{-x})$ and $\sigma'(x) = \sigma(x)(1 - \sigma(x))$.
+    function:
+      name: sigmoid_grad
+      params:
+        - { name: x, type: ndarray }
+      returns: ndarray
+    starter: |
+      import numpy as np
+
+      def sigmoid_grad(x):
+          pass
+    solution: |
+      import numpy as np
+
+      def sigmoid_grad(x):
+          s = 1.0 / (1.0 + np.exp(-x))
+          return s * (1.0 - s)
+    tests:
+      sample:
+        - args: [[0.0]]
+          expected: [0.25]
+        - args: [[-2.0, 0.0, 2.0]]
+      hidden:
+        - args: [[10.0, -10.0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(scale=3, size=n)] for n in [5, 100]]
+    hints:
+      - Compute $\sigma(x)$ once and reuse it.
+    explanation: |
+      Reusing the forward value is exactly what frameworks do: the sigmoid's backward pass needs only its own output, so nothing else has to be stored.

@@ -94,3 +94,16 @@ section[id] {
   background: var(--color-muted);
   font-weight: 600;
 }
+
+/* Maths in lessons (KaTeX): wide equations scroll instead of overflowing on phones. */
+.prose-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+.prose-content .katex {
+  font-size: 1.05em;
+}
+.prose-content > :first-child {
+  margin-top: 0;
+}

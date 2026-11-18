@@ -1,0 +1,181 @@
+id: train-test-split
+title: Splitting data and avoiding leakage
+summary: Train, validation and test sets, cross-validation, and the data-leakage mistakes that make models look better than they are.
+prerequisites: [numpy-arrays]
+lesson: |
+  ## Why split at all
+
+  A model is useful only if it works on data it hasn't seen. If you measure it on its own training data, a model that memorised everything scores perfectly and tells you nothing. So you hold data back.
+
+  ## Three sets
+
+  - **Training set** — the model learns from it.
+  - **Validation set** — you compare models and tune hyperparameters on it.
+  - **Test set** — touched once, at the end, for the number you report.
+
+  If you tune against the test set, it quietly becomes a validation set and your reported score becomes optimistic.
+
+  ## Cross-validation
+
+  With little data, $k$-fold cross-validation splits the training data into $k$ folds, trains $k$ times (each time holding out a different fold), and averages the scores. It uses every example for both training and validation, at $k$ times the cost.
+
+  ## Data leakage
+
+  Leakage is any way information from the evaluation data reaches training. The model looks great offline and disappoints in production. Common forms:
+
+  1. **Preprocessing before splitting** — fitting a scaler, imputer or feature selector on all the data, then splitting. The training data now "knows" the test set's mean and spread. Fit preprocessing on the training set only, then apply it to the others.
+  2. **Duplicate or related rows across sets** — the same patient's scans in train and test; split by patient (a *group* split).
+  3. **Time travel** — for time series, a random split lets the model train on the future. Split by time instead.
+  4. **Target leakage** — a feature that's only known after the outcome (e.g. "refund_issued" when predicting fraud).
+
+  ## Stratification
+
+  With imbalanced classes (1% fraud), a random split might put almost no positives in the test set. A **stratified** split keeps the class proportions the same in each set.
+
+  ## In interviews
+
+  "Your model has 99% validation accuracy but fails in production" is an invitation to talk about leakage and distribution shift.
+items:
+  - id: split-leakage-mcq
+    type: mcq_single
+    title: Where's the leak?
+    difficulty: easy
+    tags: [data-leakage]
+    prompt: |
+      Which workflow leaks information from the test set into training?
+    options:
+      - { id: a, text: "Split the data, fit a StandardScaler on the training set, transform both sets." }
+      - { id: b, text: "Fit a StandardScaler on the full dataset, transform it, then split into train and test." }
+      - { id: c, text: "Split the data, then tune hyperparameters with cross-validation on the training set only." }
+      - { id: d, text: "Split by customer so no customer appears in both sets." }
+    answer: b
+    explanation: |
+      Fitting the scaler on everything uses the test set's mean and standard deviation to transform the training data. The fix is (a): fit on train, apply to test — which is what a scikit-learn `Pipeline` does for you inside cross-validation.
+
+  - id: split-timeseries-mcq
+    type: mcq_single
+    title: Splitting a time series
+    difficulty: medium
+    tags: [data-leakage, time-series]
+    prompt: |
+      You're forecasting next week's sales from 3 years of daily data. How should you split it for evaluation?
+    options:
+      - { id: a, text: "A random 80/20 split of the days." }
+      - { id: b, text: "Train on the earlier period and test on the most recent period." }
+      - { id: c, text: "Stratify by day of the week." }
+      - { id: d, text: "Use the most recent period for training and the oldest for testing." }
+    answer: b
+    explanation: |
+      In production you always predict the future from the past. A random split lets the model learn from days after the ones it's tested on, so it scores better than it ever will in real use. Walk-forward (rolling) validation extends the same idea.
+
+  - id: split-leakage-multi
+    type: mcq_multi
+    title: Spot every leak
+    difficulty: hard
+    tags: [data-leakage]
+    prompt: |
+      A team predicts whether a loan will default. Which of these are leakage? Select all that apply.
+    options:
+      - { id: a, text: "Including the feature `collections_calls_count`, recorded after loans go overdue." }
+      - { id: b, text: "Filling missing incomes with the median computed on the full dataset before splitting." }
+      - { id: c, text: "Using the applicant's income at application time." }
+      - { id: d, text: "Several loans from the same applicant end up in both train and test." }
+    answer: [a, b, d]
+    explanation: |
+      (a) is target leakage — the feature only exists because of the outcome. (b) leaks test-set statistics through imputation. (d) lets the model recognise applicants rather than learn general patterns; split by applicant. (c) is known when the decision is made, so it's fair.
+
+  - id: split-standardize-debug
+    type: debug
+    title: "Fix the leaky scaler"
+    difficulty: medium
+    tags: [data-leakage, preprocessing, debugging]
+    prompt: |
+      `scale_train_test(X_train, X_test)` should standardise both sets **using only the training set's
+      statistics** (per-column mean and population standard deviation), and return `[X_train_scaled, X_test_scaled]`.
+
+      The code below runs, but it leaks. Find and fix the bug.
+    function:
+      name: scale_train_test
+      params:
+        - { name: X_train, type: ndarray }
+        - { name: X_test, type: ndarray }
+      returns: "[X_train_scaled, X_test_scaled]"
+    starter: |
+      import numpy as np
+
+      def scale_train_test(X_train, X_test):
+          X_all = np.vstack([X_train, X_test])
+          mu = X_all.mean(axis=0)
+          sigma = X_all.std(axis=0)
+          return [(X_train - mu) / sigma, (X_test - mu) / sigma]
+    solution: |
+      import numpy as np
+
+      def scale_train_test(X_train, X_test):
+          mu = X_train.mean(axis=0)
+          sigma = X_train.std(axis=0)
+          return [(X_train - mu) / sigma, (X_test - mu) / sigma]
+    tests:
+      sample:
+        - args: [[[1.0], [3.0]], [[5.0]]]
+          expected: [[[-1.0], [1.0]], [[3.0]]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, 3)) * 4 + 2, rng.normal(size=(m, 3)) * 4 + 3] for n, m in [(20, 5), (100, 30)]]
+    hints:
+      - Which rows should the mean and standard deviation come from?
+    explanation: |
+      The statistics must come from `X_train` alone; the test set is then transformed with them, exactly as new production data would be. Notice the fixed version gives the test point a value of 3 — far outside the training range — which is honest information the leaky version hid.
+
+  - id: split-indices-code
+    type: code
+    title: A stratified split
+    difficulty: hard
+    access: pro
+    tags: [stratification, splitting]
+    prompt: |
+      Implement `stratified_test_indices(labels, test_fraction)`: for **each class**, take the first
+      `round(count * test_fraction)` indices of that class (in their original order) for the test set.
+      Return all test indices sorted ascending, as a list.
+
+      ```
+      labels = [0, 0, 0, 0, 1, 1]
+      stratified_test_indices(labels, 0.5)  ->  [0, 1, 4]
+      ```
+    function:
+      name: stratified_test_indices
+      params:
+        - { name: labels, type: ndarray_int }
+        - { name: test_fraction, type: float }
+      returns: list of int
+    starter: |
+      import numpy as np
+
+      def stratified_test_indices(labels, test_fraction):
+          n_test = round(len(labels) * test_fraction)
+          return list(range(n_test))
+    solution: |
+      import numpy as np
+
+      def stratified_test_indices(labels, test_fraction):
+          test = []
+          for c in np.unique(labels):
+              idx = np.flatnonzero(labels == c)
+              test.extend(idx[: round(len(idx) * test_fraction)].tolist())
+          return sorted(test)
+    tests:
+      sample:
+        - args: [[0, 0, 0, 0, 1, 1], 0.5]
+          expected: [0, 1, 4]
+        - args: [[1, 0, 1, 0, 1, 0, 1, 0, 1, 0], 0.2]
+          expected: [0, 1]
+      hidden:
+        - args: [[2, 2, 2], 0.0]
+          expected: []
+      generate: |
+        def cases(rng):
+            return [[rng.choice(k, size=n, p=p), f] for n, k, p, f in [(50, 2, [0.9, 0.1], 0.2), (200, 3, [0.6, 0.3, 0.1], 0.25)]]
+    hints:
+      - "`np.flatnonzero(labels == c)` lists the positions of class `c`."
+    explanation: |
+      Taking the same fraction from each class keeps the class balance identical in train and test. The starter's "first 20%" ignores classes, so rare classes can vanish from the test set entirely. Real splitters (`train_test_split(..., stratify=y)`) also shuffle within each class.

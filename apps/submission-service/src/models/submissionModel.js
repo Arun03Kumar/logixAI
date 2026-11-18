@@ -45,5 +45,10 @@ const submissionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// "My submissions" (per user, optionally per problem), newest first.
+submissionSchema.index({ userId: 1, problemId: 1, createdAt: -1 });
+// Per-problem statistics such as acceptance rate.
+submissionSchema.index({ problemId: 1, status: 1 });
+
 const Submission = mongoose.model("Submission", submissionSchema);
 module.exports = Submission;

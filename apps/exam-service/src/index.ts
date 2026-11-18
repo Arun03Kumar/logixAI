@@ -15,8 +15,17 @@ const SWEEP_EVERY_MS = 30_000;
 
 async function start() {
   try {
-    await connectMongo(config.DB_CONNECTION_STRING, logger);
-    const redis = createRedisConnection({ host: config.REDIS_HOST, port: config.REDIS_PORT });
+    await connectMongo(config.DB_CONNECTION_STRING, logger, {
+      // Production indexes are built by `npm run db:migrate`, not at startup.
+      autoIndex: config.NODE_ENV !== "production",
+      appName: "exam-service",
+    });
+    const redis = createRedisConnection({
+      host: config.REDIS_HOST,
+      port: config.REDIS_PORT,
+      ...(config.REDIS_PASSWORD ? { password: config.REDIS_PASSWORD } : {}),
+      tls: config.REDIS_TLS,
+    });
 
     const { app, attempts } = await buildApp({
       store: createMongoStore(),

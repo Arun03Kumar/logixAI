@@ -1,0 +1,11 @@
+id: math-for-ml
+title: Math for machine learning
+summary: Vectors, matrices, derivatives, gradients and probability — the maths every model is built from, practised by calculating and by coding it.
+level: foundations
+order: 1
+topics:
+  - vectors
+  - matrices
+  - derivatives
+  - gradients
+  - probability-basics

@@ -1,0 +1,160 @@
+id: broadcasting
+title: Broadcasting and vectorisation
+summary: How NumPy combines arrays of different shapes, and how to replace Python loops with whole-array operations.
+prerequisites: [numpy-arrays]
+lesson: |
+  ## Why vectorise
+
+  A Python loop over a million numbers takes about a second; the same NumPy expression takes milliseconds. ML code is written as whole-array operations — "vectorised" — both for speed and because it reads like the maths.
+
+  ## Broadcasting rules
+
+  When two arrays have different shapes, NumPy compares their shapes **from the right**. Two sizes are compatible when they are equal or one of them is 1. A missing dimension counts as 1. Size-1 dimensions are stretched (without copying) to match.
+
+  | A | B | Result |
+  | --- | --- | --- |
+  | (3, 4) | (4,) | (3, 4) — B is added to every row |
+  | (3, 4) | (3, 1) | (3, 4) — B is added to every column |
+  | (3, 1) | (1, 4) | (3, 4) — an "outer" combination |
+  | (3, 4) | (3,) | error — 4 vs 3 |
+
+  ## Worked example: standardising features
+
+  ```python
+  mu = X.mean(axis=0)        # shape (n_features,)
+  sigma = X.std(axis=0)      # shape (n_features,)
+  Z = (X - mu) / sigma       # (n, d) with (d,) broadcasts per column
+  ```
+
+  No loop over features or rows is needed.
+
+  ## Pairwise distances without loops
+
+  For points $A$ of shape $(n, d)$ and $B$ of shape $(m, d)$, `A[:, None, :] - B[None, :, :]` has shape $(n, m, d)$: every pair's difference. Summing squares over the last axis gives all $n \times m$ squared distances — the core of k-nearest neighbours and k-means.
+
+  ## Watch out
+
+  Broadcasting can silently do the wrong thing. If `y` has shape `(n, 1)` and `pred` has shape `(n,)`, then `y - pred` is `(n, n)`, and the "mean squared error" you compute is nonsense. Check shapes when a loss looks odd.
+
+  ## In interviews
+
+  "Vectorise this loop" is a common live-coding prompt. Say which axis each operation runs over.
+items:
+  - id: bc-shape-mcq
+    type: mcq_single
+    title: Broadcast result shape
+    difficulty: easy
+    tags: [broadcasting, shapes]
+    prompt: |
+      What is the shape of `np.ones((5, 1, 3)) + np.ones((4, 1))`?
+    options:
+      - { id: a, text: "(5, 4, 3)" }
+      - { id: b, text: "(5, 1, 3)" }
+      - { id: c, text: "(5, 4, 1)" }
+      - { id: d, text: "It raises an error." }
+    answer: a
+    explanation: |
+      Align from the right: `(5, 1, 3)` and `(_, 4, 1)`. Column by column: 3 vs 1 → 3, 1 vs 4 → 4, 5 vs missing → 5. Result `(5, 4, 3)`.
+
+  - id: bc-silent-bug-mcq
+    type: mcq_single
+    title: A silently wrong loss
+    difficulty: medium
+    tags: [broadcasting, debugging]
+    prompt: |
+      `y` has shape `(1000, 1)` and `pred` has shape `(1000,)`. You compute `np.mean((y - pred) ** 2)`. What happens?
+    options:
+      - { id: a, text: "It raises a shape error." }
+      - { id: b, text: "It computes the correct mean squared error." }
+      - { id: c, text: "It averages a (1000, 1000) matrix of every y minus every prediction — a wrong number, no error." }
+      - { id: d, text: "It averages only the first column." }
+    answer: c
+    explanation: |
+      `(1000, 1)` and `(1000,)` broadcast to `(1000, 1000)`, so every target is compared with every prediction. No error is raised. Fix it with `y.ravel()` or `pred.reshape(-1, 1)`, and assert shapes in training code.
+
+  - id: bc-standardize-code
+    type: code
+    title: Standardise every feature
+    difficulty: easy
+    tags: [broadcasting, preprocessing]
+    prompt: |
+      Implement `standardize(X)`: subtract each column's mean and divide by each column's standard deviation
+      (population std, NumPy's default). Columns with zero standard deviation should become all zeros.
+      No Python loops.
+    function:
+      name: standardize
+      params:
+        - { name: X, type: ndarray }
+      returns: ndarray
+    starter: |
+      import numpy as np
+
+      def standardize(X):
+          return (X - X.mean()) / X.std()
+    solution: |
+      import numpy as np
+
+      def standardize(X):
+          mu = X.mean(axis=0)
+          sigma = X.std(axis=0)
+          sigma = np.where(sigma == 0, 1.0, sigma)
+          return (X - mu) / sigma
+    tests:
+      sample:
+        - args: [[[1, 10], [3, 30]]]
+          expected: [[-1, -1], [1, 1]]
+        - args: [[[1, 5], [2, 5], [3, 5]]]
+      hidden:
+        - args: [[[4, 4, 4]]]
+          expected: [[0, 0, 0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(loc=rng.normal(size=d) * 10, scale=rng.random(d) * 5 + 0.1, size=(n, d))] for n, d in [(20, 3), (100, 8)]]
+    hints:
+      - "`X.mean()` averages every number. Which `axis` gives one mean per column?"
+      - "`np.where` can swap zero standard deviations for 1."
+    explanation: |
+      `axis=0` reduces down the rows, giving one value per column; broadcasting then applies them to every row. The starter uses one global mean and std, which mixes features measured in different units — a real bug that hurts distance-based models like KNN.
+
+  - id: bc-pairwise-code
+    type: code
+    title: All pairwise distances
+    difficulty: hard
+    access: pro
+    tags: [broadcasting, distances, vectorisation]
+    prompt: |
+      Implement `pairwise_sq_distances(A, B)` returning the $(n, m)$ matrix of squared Euclidean distances
+      between every row of `A` (shape $(n, d)$) and every row of `B` (shape $(m, d)$). No Python loops.
+
+      $$D_{ij} = \lVert A_i - B_j \rVert^2$$
+    function:
+      name: pairwise_sq_distances
+      params:
+        - { name: A, type: ndarray }
+        - { name: B, type: ndarray }
+      returns: ndarray of shape (n, m)
+    starter: |
+      import numpy as np
+
+      def pairwise_sq_distances(A, B):
+          return np.sum((A - B) ** 2, axis=1)
+    solution: |
+      import numpy as np
+
+      def pairwise_sq_distances(A, B):
+          diff = A[:, None, :] - B[None, :, :]
+          return np.sum(diff ** 2, axis=-1)
+    tests:
+      sample:
+        - args: [[[0, 0], [1, 1]], [[0, 0], [3, 4]]]
+          expected: [[0, 25], [2, 13]]
+      hidden:
+        - args: [[[1, 2, 3]], [[1, 2, 3]]]
+          expected: [[0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, d)), rng.normal(size=(m, d))] for n, m, d in [(3, 5, 2), (40, 30, 6)]]
+    hints:
+      - "`A[:, None, :]` has shape (n, 1, d) and `B[None, :, :]` has shape (1, m, d)."
+    explanation: |
+      Inserting axes makes the subtraction broadcast to $(n, m, d)$, then summing the last axis leaves $(n, m)$. For large inputs, the identity $\lVert a - b \rVert^2 = \lVert a \rVert^2 + \lVert b \rVert^2 - 2a\cdot b$ avoids the $(n, m, d)$ intermediate and uses one matrix product instead.

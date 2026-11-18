@@ -32,6 +32,7 @@ export default class SubmissionJob {
           language: LANGUAGES[submission.language],
           code: submission.code,
           testCases: submission.testCases,
+          checker: submission.checker,
         },
         this.deps,
       );

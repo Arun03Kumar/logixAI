@@ -1,11 +1,13 @@
 import mongoose, { Schema, Types } from "mongoose";
 import {
+  AUDIT_ACTIONS,
   INSTITUTION_ROLES,
   INSTITUTION_TYPES,
   INVITABLE_ROLES,
   PLATFORM_ROLES,
 } from "@logixai/contracts";
-import type { Store } from "./types.js";
+import { decodeCursor, toPage } from "@logixai/service-kit";
+import { ROLE_RANK, type Store } from "./types.js";
 
 const opts = { timestamps: { createdAt: true, updatedAt: true } } as const;
 
@@ -51,43 +53,73 @@ const Institution = mongoose.model(
 
 const membershipSchema = new Schema(
   {
-    userId: { type: String, required: true, index: true },
-    institutionId: { type: String, required: true, index: true },
+    userId: { type: String, required: true },
+    institutionId: { type: String, required: true },
     role: { type: String, enum: INSTITUTION_ROLES, required: true },
+    /** Derived from role (owner 4 … student 1) so members list owners first, in the database. */
+    roleRank: { type: Number, required: true },
     batchIds: { type: [String], default: [] },
   },
   opts,
 );
+// One membership per user per institution; also serves "my institutions".
 membershipSchema.index({ userId: 1, institutionId: 1 }, { unique: true });
+// Members list: highest role first, then join order (keyset on roleRank + _id).
+membershipSchema.index({ institutionId: 1, roleRank: -1, _id: 1 });
+// Batch member counts.
+membershipSchema.index({ institutionId: 1, batchIds: 1 });
 const Membership = mongoose.model("Membership", membershipSchema);
 
+const caseInsensitive = { locale: "en", strength: 2 };
 const batchSchema = new Schema(
   {
-    institutionId: { type: String, required: true, index: true },
+    institutionId: { type: String, required: true },
     name: { type: String, required: true },
   },
   opts,
 );
-batchSchema.index({ institutionId: 1, name: 1 }, { unique: true });
+// "CSE 2026" and "cse 2026" are the same batch.
+batchSchema.index({ institutionId: 1, name: 1 }, { unique: true, collation: caseInsensitive });
 const Batch = mongoose.model("Batch", batchSchema);
 
-const Invite = mongoose.model(
-  "Invite",
-  new Schema(
-    {
-      institutionId: { type: String, required: true, index: true },
-      code: { type: String, required: true, unique: true },
-      role: { type: String, enum: INVITABLE_ROLES, required: true },
-      batchId: { type: String, default: null },
-      maxUses: { type: Number, default: null },
-      uses: { type: Number, default: 0 },
-      expiresAt: { type: Date, required: true },
-      revokedAt: { type: Date, default: null },
-      createdBy: { type: String, required: true },
-    },
-    opts,
-  ),
+const inviteSchema = new Schema(
+  {
+    institutionId: { type: String, required: true },
+    code: { type: String, required: true, unique: true },
+    role: { type: String, enum: INVITABLE_ROLES, required: true },
+    batchId: { type: String, default: null },
+    maxUses: { type: Number, default: null },
+    uses: { type: Number, default: 0 },
+    expiresAt: { type: Date, required: true },
+    revokedAt: { type: Date, default: null },
+    createdBy: { type: String, required: true },
+  },
+  opts,
 );
+inviteSchema.index({ institutionId: 1, createdAt: -1 });
+const Invite = mongoose.model("Invite", inviteSchema);
+
+/** Append-only record of who changed what (see packages/contracts/src/audit.ts). */
+const auditSchema = new Schema(
+  {
+    at: { type: Date, required: true, default: () => new Date() },
+    actorId: { type: String, required: true },
+    action: { type: String, enum: AUDIT_ACTIONS, required: true },
+    institutionId: { type: String, default: null },
+    targetType: { type: String, required: true },
+    targetId: { type: String, required: true },
+    meta: { type: Schema.Types.Mixed, default: {} },
+  },
+  { collection: "audit_events", versionKey: false, minimize: false },
+);
+auditSchema.index({ institutionId: 1, _id: -1 });
+auditSchema.index({ actorId: 1, _id: -1 });
+const AuditEventModel = mongoose.model("AuditEvent", auditSchema);
+
+type MembershipCursor = [number, string];
+const isMembershipCursor = (v: unknown): v is MembershipCursor =>
+  Array.isArray(v) && typeof v[0] === "number" && typeof v[1] === "string" && Types.ObjectId.isValid(v[1]);
+const isIdCursor = (v: unknown): v is string => typeof v === "string" && Types.ObjectId.isValid(v);
 
 /** Mongo document -> plain record with a string `id`. */
 function rec<T>(doc: unknown): T {
@@ -127,14 +159,42 @@ export function createMongoStore(): Store {
       slugExists: async (slug) => Boolean(await Institution.exists({ slug })),
     },
     memberships: {
-      create: async (data) => rec(await Membership.create(data)),
+      create: async (data) => rec(await Membership.create({ ...data, roleRank: ROLE_RANK[data.role] })),
       find: async (userId, institutionId) =>
         recOrNull(await Membership.findOne({ userId, institutionId })),
       listForUser: async (userId) => recs(await Membership.find({ userId }).sort({ createdAt: 1 })),
-      listForInstitution: async (institutionId) =>
-        recs(await Membership.find({ institutionId }).sort({ createdAt: 1 })),
+      pageForInstitution: async (institutionId, { limit, cursor, role, userIds }) => {
+        const after = decodeCursor(cursor, isMembershipCursor);
+        const filter: Record<string, unknown> = { institutionId };
+        if (role) filter.role = role;
+        if (userIds) filter.userId = { $in: userIds };
+        if (after) {
+          const [rank, id] = after;
+          filter.$or = [
+            { roleRank: { $lt: rank } },
+            { roleRank: rank, _id: { $gt: new Types.ObjectId(id) } },
+          ];
+        }
+        const docs = await Membership.find(filter).sort({ roleRank: -1, _id: 1 }).limit(limit + 1);
+        const page = toPage(docs, limit, (last) => [last.roleRank, String(last._id)]);
+        return { items: recs(page.items), nextCursor: page.nextCursor };
+      },
+      countByBatch: async (institutionId) => {
+        const rows = await Membership.aggregate<{ _id: string; count: number }>([
+          { $match: { institutionId } },
+          { $unwind: "$batchIds" },
+          { $group: { _id: "$batchIds", count: { $sum: 1 } } },
+        ]);
+        return Object.fromEntries(rows.map((r) => [r._id, r.count]));
+      },
       update: async (id, patch) =>
-        recOrNull(await Membership.findByIdAndUpdate(id, patch, { new: true })),
+        recOrNull(
+          await Membership.findByIdAndUpdate(
+            id,
+            { ...patch, ...(patch.role ? { roleRank: ROLE_RANK[patch.role] } : {}) },
+            { new: true },
+          ),
+        ),
       addBatch: async (id, batchId) => {
         await Membership.updateOne({ _id: id }, { $addToSet: { batchIds: batchId } });
       },
@@ -171,6 +231,28 @@ export function createMongoStore(): Store {
       },
       revoke: async (id) => {
         await Invite.updateOne({ _id: id }, { revokedAt: new Date() });
+      },
+    },
+    audit: {
+      record: async (event) => {
+        await AuditEventModel.create(event);
+      },
+      pageForInstitution: async (institutionId, { limit, cursor }) => {
+        const after = decodeCursor(cursor, isIdCursor);
+        const docs = await AuditEventModel.find({
+          institutionId,
+          ...(after ? { _id: { $lt: new Types.ObjectId(after) } } : {}),
+        })
+          .sort({ _id: -1 })
+          .limit(limit + 1);
+        const page = toPage(docs, limit, (last) => String(last._id));
+        return {
+          items: page.items.map((d) => {
+            const r = rec<Record<string, unknown>>(d);
+            return { ...r, at: (r.at as Date).toISOString() } as never;
+          }),
+          nextCursor: page.nextCursor,
+        };
       },
     },
   };

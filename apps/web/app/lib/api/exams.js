@@ -1,5 +1,6 @@
 import { EXAM_API_URL } from "@/app/coding-platform/lib/config";
 import { authFetch, readEnvelope } from "@/app/lib/auth/session";
+import { pageQuery } from "./pageQuery";
 
 const call = (path, { method = "GET", body } = {}) =>
   authFetch(`${EXAM_API_URL}${path}`, {
@@ -17,7 +18,16 @@ export const examApi = {
   remove: (examId) => call(`/exams/${examId}`, { method: "DELETE" }),
   publish: (examId) => call(`/exams/${examId}/publish`, { method: "POST" }),
   unpublish: (examId) => call(`/exams/${examId}/unpublish`, { method: "POST" }),
-  results: (examId) => call(`/exams/${examId}/results`),
+  /** One page of results (best first) with the whole-exam summary. */
+  results: (examId, { cursor, limit = 50 } = {}) =>
+    call(`/exams/${examId}/results?${pageQuery({ cursor, limit })}`),
+  /** Every result as a CSV file, built by the server. */
+  exportResults: async (examId) => {
+    const res = await authFetch(`${EXAM_API_URL}/exams/${examId}/results/export`);
+    if (!res.ok) await readEnvelope(res); // throws the server's message
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1];
+    return { blob: await res.blob(), filename: name ?? "exam-results.csv" };
+  },
   review: (examId, attemptId) => call(`/exams/${examId}/attempts/${attemptId}`),
 
   // Taking (students)

@@ -1,7 +1,7 @@
 # LogixAI
 
-Monorepo for the LogixAI marketing site and coding platform (problem authoring,
-in-browser IDE and a Docker-based judge).
+Monorepo for the LogixAI marketing site, coding platform (problem authoring,
+in-browser IDE and a Docker-based judge), institution exams and ML Arena.
 
 ## Layout
 
@@ -10,6 +10,7 @@ apps/
   web/                 Next.js app: marketing site + coding platform    :3008
   identity-service/    Accounts, sessions, institutions, invites (TS)    :3006
   exam-service/        Institution exams: authoring, attempts, grading   :3007
+  arena-service/       ML Arena: lessons, practice items, progress (TS)  :3009
   problem-service/     Problems CRUD (Express, MongoDB)                  :3001
   submission-service/  Accepts submissions, queues them (Fastify, Mongo) :3000
   evaluator-service/   Runs code in Docker, reports results (TS, BullMQ) :3002
@@ -37,16 +38,20 @@ Requires Node 22+, npm 11+ and Docker.
 ```bash
 npm install            # installs every workspace from the repo root
 npm run infra:up       # MongoDB + Redis via docker compose
+npm run judge:images   # builds the Python + NumPy sandbox image for ML Arena
 ```
 
 If Redis already runs on port 6379, start only MongoDB: `docker compose up -d mongo`.
-identity-service uses `mongodb://localhost:27017/logixai-identity` by default.
+Each backend service has its own database (`logixai-identity`,
+`logixai-problems`, `logixai-submissions`, `logixai-exams`, `logixai-arena`); see
+[docs/database.md](docs/database.md).
 
 Copy each `apps/*/.env.example` to `.env` (for `apps/web`, to `.env.local`) and
 adjust values. Each service validates its env on startup and exits with a clear
 message if something is missing.
 
 ```bash
+npm run db:migrate     # applies data migrations and builds indexes (every service)
 npm run dev            # builds packages/*, then starts every app with hot reload
 ```
 
@@ -62,6 +67,8 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
 | `npm test`          | Run every workspace's Vitest suite (`test/`)   |
 | `npm run lint`      | Lint                                           |
 | `npm run infra:up`  | Start MongoDB and Redis                        |
+| `npm run db:migrate`| Migrations + index sync; run on every deploy   |
+| `npm run content:build` | Validate ML Arena content, rebuild its tests |
 
 ## Conventions
 
@@ -145,6 +152,14 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
     are recorded for instructors to review. They are signals, not proof.
   - exam-service checks institution roles by forwarding the caller's token to
     identity-service (`GET /institutions/:id`).
+- **ML Arena** ([docs/ml-arena.md](docs/ml-arena.md)): content is YAML in
+  `apps/arena-service/content`, written with reference solutions; run
+  `npm run content:build` after changing it. Code items use the `PYTHON_ML`
+  runtime and are compared as JSON with a float tolerance, outside the sandbox.
+- **Data** ([docs/database.md](docs/database.md)): one database per service,
+  indexes declared in the models, data changes as migrations in
+  `src/db/migrations`, lists paged by cursor (`{ items, nextCursor }`), and
+  institution/exam/problem changes recorded in `audit_events`.
 - **Lockfile**: root `optionalDependencies` pin lightningcss's platform
   binaries. npm otherwise drops them from `package-lock.json` (npm bug), which
   breaks `next build`. Bump them together when Tailwind updates lightningcss.

@@ -233,6 +233,26 @@ export interface ResultRow {
   proctorEventCount: number;
 }
 
+/** Whole-exam numbers, computed by the database (not from the current page). */
+export interface ResultSummary {
+  attempts: number;
+  submitted: number;
+  inProgress: number;
+  /** Attempts with at least one proctoring event. */
+  flagged: number;
+  averageScore: number | null;
+  highestScore: number | null;
+  lowestScore: number | null;
+}
+
+/** GET /exams/:id/results: best scores first, `limit` rows per page. */
+export interface ExamResultsPage {
+  exam: ExamSummary;
+  summary: ResultSummary;
+  items: ResultRow[];
+  nextCursor: string | null;
+}
+
 export interface AttemptReview extends AttemptResult {
   student: { userId: string; name: string; email: string };
   startedAt: string;

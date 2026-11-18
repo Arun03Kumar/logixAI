@@ -14,7 +14,8 @@ export interface Membership {
 export interface IdentityClient {
   /** null when the caller isn't a member. */
   getMembership(authorization: string, institutionId: string): Promise<Membership | null>;
-  listMembers(authorization: string, institutionId: string): Promise<MemberView[]>;
+  /** The named members (missing ones are left out). Fetched 100 at a time. */
+  lookupMembers(authorization: string, institutionId: string, userIds: string[]): Promise<MemberView[]>;
 }
 
 const CACHE_MS = 30_000;
@@ -52,12 +53,21 @@ export function createHttpIdentityClient(baseUrl: string): IdentityClient {
       if (cache.size > 5000) cache.clear();
       return value;
     },
-    async listMembers(authorization, institutionId) {
-      const res = await get<MemberView[]>(
-        `/institutions/${encodeURIComponent(institutionId)}/members`,
-        authorization,
-      );
-      return res.data ?? [];
+    async lookupMembers(authorization, institutionId, userIds) {
+      const unique = [...new Set(userIds)];
+      const found: MemberView[] = [];
+      for (let i = 0; i < unique.length; i += 100) {
+        const ids = unique.slice(i, i + 100).map(encodeURIComponent).join(",");
+        const res = await get<{ items: MemberView[] }>(
+          `/institutions/${encodeURIComponent(institutionId)}/members?limit=100&userIds=${ids}`,
+          authorization,
+        );
+        if (res.status !== 200) {
+          throw new InternalServerError({ reason: `identity-service answered ${res.status}` });
+        }
+        found.push(...(res.data?.items ?? []));
+      }
+      return found;
     },
   };
 }

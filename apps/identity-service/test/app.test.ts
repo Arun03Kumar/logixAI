@@ -293,7 +293,8 @@ describe("institutions", () => {
       url: `/api/v1/institutions/${institutionId}/members`,
       headers: bearer(owner.token),
     });
-    expect(members.json().data.map((m: { role: string }) => m.role)).toEqual(["owner", "student"]);
+    expect(members.json().data.items.map((m: { role: string }) => m.role)).toEqual(["owner", "student"]);
+    expect(members.json().data.nextCursor).toBeNull();
 
     const batches = await app.inject({
       url: `/api/v1/institutions/${institutionId}/batches`,
@@ -307,6 +308,64 @@ describe("institutions", () => {
       headers: bearer(student.token),
     });
     expect(forbidden.statusCode).toBe(403);
+  });
+
+  it("pages members owners-first and records an audit trail", async () => {
+    const { app, owner, institutionId } = await withInstitution();
+    const invite = (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/institutions/${institutionId}/invites`,
+        headers: bearer(owner.token),
+        payload: { role: "student" },
+      })
+    ).json().data;
+    const students: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const s = await signUp(app, `p${i}@x.com`, `P${i}`);
+      await app.inject({ method: "POST", url: `/api/v1/invites/${invite.code}/accept`, headers: bearer(s.token) });
+      students.push(s.userId);
+    }
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const qs: string = `limit=2${cursor ? `&cursor=${cursor}` : ""}`;
+      const res = await app.inject({
+        url: `/api/v1/institutions/${institutionId}/members?${qs}`,
+        headers: bearer(owner.token),
+      });
+      expect(res.statusCode).toBe(200);
+      const page = res.json().data as { items: { role: string; userId: string }[]; nextCursor: string | null };
+      expect(page.items.length).toBeLessThanOrEqual(2);
+      seen.push(...page.items.map((m) => m.role));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(["owner", "student", "student", "student", "student", "student"]);
+
+    const lookup = await app.inject({
+      url: `/api/v1/institutions/${institutionId}/members?userIds=${students[0]},${students[3]}`,
+      headers: bearer(owner.token),
+    });
+    expect(lookup.json().data.items.map((m: { userId: string }) => m.userId).sort()).toEqual(
+      [students[0], students[3]].sort(),
+    );
+
+    const bad = await app.inject({
+      url: `/api/v1/institutions/${institutionId}/members?cursor=not-a-cursor`,
+      headers: bearer(owner.token),
+    });
+    expect(bad.statusCode).toBe(400);
+
+    const audit = await app.inject({
+      url: `/api/v1/institutions/${institutionId}/audit?limit=100`,
+      headers: bearer(owner.token),
+    });
+    const actions = audit.json().data.items.map((e: { action: string }) => e.action);
+    expect(actions[0]).toBe("member.joined"); // newest first
+    expect(actions).toContain("invite.created");
+    expect(actions).toContain("institution.created");
+    expect(actions.filter((a: string) => a === "member.joined")).toHaveLength(5);
   });
 
   it("rejects revoked invites", async () => {

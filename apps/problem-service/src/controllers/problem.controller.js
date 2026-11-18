@@ -1,6 +1,8 @@
 const { StatusCodes } = require("http-status-codes");
 const {
   CreateProblemSchema,
+  DifficultySchema,
+  PageQuerySchema,
   UpdateProblemSchema,
 } = require("@logixai/contracts");
 const {
@@ -34,7 +36,7 @@ function pingProblemController(req, res) {
 async function addProblem(req, res, next) {
   try {
     const data = parseBody(CreateProblemSchema, req.body, "problem");
-    const newproblem = await problemService.createProblem(data);
+    const newproblem = await problemService.createProblem(data, req.auth?.sub);
     return res
       .status(StatusCodes.CREATED)
       .json(successResponse(newproblem, "Successfully created a new problem"));
@@ -72,12 +74,15 @@ async function getProblemForJudge(req, res, next) {
 
 async function getProblems(req, res, next) {
   try {
-    const allProblems = await problemService.getAllProblems();
+    const query = parseBody(
+      PageQuerySchema.extend({ difficulty: DifficultySchema.optional() }),
+      req.query,
+      "query",
+    );
+    const page = await problemService.listProblems(query);
     return res
       .status(StatusCodes.OK)
-      .json(
-        successResponse(allProblems.map(toProblemSummary), "Successfully fetched all problems"),
-      );
+      .json(successResponse({ ...page, items: page.items.map(toProblemSummary) }));
   } catch (err) {
     next(err);
   }
@@ -85,7 +90,7 @@ async function getProblems(req, res, next) {
 
 async function deleteProblem(req, res, next) {
   try {
-    const deletedProblem = await problemService.deleteProblem(req.params.id);
+    const deletedProblem = await problemService.deleteProblem(req.params.id, req.auth?.sub);
     if (!deletedProblem) {
       throw new NotFoundError("Problem", req.params.id);
     }
@@ -103,6 +108,7 @@ async function updateProblem(req, res, next) {
     const updatedProblem = await problemService.updateProblem(
       req.params.id,
       data,
+      req.auth?.sub,
     );
     return res
       .status(StatusCodes.OK)

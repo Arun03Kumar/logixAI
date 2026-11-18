@@ -1,4 +1,5 @@
 import type {
+  AuditEvent,
   INSTITUTION_TYPES,
   INVITABLE_ROLES,
   InstitutionRole,
@@ -93,7 +94,16 @@ export interface Store {
     create(data: New<MembershipRecord>): Promise<MembershipRecord>;
     find(userId: string, institutionId: string): Promise<MembershipRecord | null>;
     listForUser(userId: string): Promise<MembershipRecord[]>;
-    listForInstitution(institutionId: string): Promise<MembershipRecord[]>;
+    /**
+     * Members of an institution, highest role first, then by join order.
+     * Keyset-paginated: pass back the returned `nextCursor`.
+     */
+    pageForInstitution(
+      institutionId: string,
+      query: { limit: number; cursor?: string; role?: InstitutionRole; userIds?: string[] },
+    ): Promise<{ items: MembershipRecord[]; nextCursor: string | null }>;
+    /** Number of members in each batch (one aggregation, not a full scan in the app). */
+    countByBatch(institutionId: string): Promise<Record<string, number>>;
     update(
       id: string,
       patch: Partial<Pick<MembershipRecord, "role" | "batchIds">>,
@@ -117,4 +127,19 @@ export interface Store {
     consumeUse(id: string): Promise<boolean>;
     revoke(id: string): Promise<void>;
   };
+  audit: {
+    record(event: Omit<AuditEvent, "id" | "at">): Promise<void>;
+    pageForInstitution(
+      institutionId: string,
+      query: { limit: number; cursor?: string },
+    ): Promise<{ items: AuditEvent[]; nextCursor: string | null }>;
+  };
 }
+
+/** Role order used for listing members (owners first). */
+export const ROLE_RANK: Record<InstitutionRole, number> = {
+  owner: 4,
+  admin: 3,
+  instructor: 2,
+  student: 1,
+};

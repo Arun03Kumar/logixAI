@@ -8,6 +8,18 @@ export const env = {
     z.enum(["development", "test", "production"]).default("development"),
   redisHost: () => z.string().min(1).default("127.0.0.1"),
   redisPort: () => z.coerce.number().int().positive().default(6379),
+  /** Optional in development (empty = no password); services require it in production. */
+  redisPassword: () =>
+    z
+      .string()
+      .optional()
+      .transform((v) => (v ? v : undefined)),
+  /** "true"/"false"/"1"/"0" -> boolean */
+  flag: (fallback: boolean) =>
+    z
+      .enum(["true", "false", "1", "0"])
+      .optional()
+      .transform((v) => (v === undefined ? fallback : v === "true" || v === "1")),
   url: () => z.url(),
   /** Comma-separated list, e.g. "http://localhost:3008,http://localhost:4000" */
   list: (fallback: string[]) =>

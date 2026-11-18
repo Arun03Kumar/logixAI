@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { AlertCircle, ChevronRight, Code2, Plus } from "lucide-react";
 import {
@@ -12,6 +12,8 @@ import {
   Skeleton,
 } from "@logixai/ui";
 import AppHeader from "@/app/components/layout/AppHeader";
+import LoadMore from "@/app/components/LoadMore";
+import { usePagedApi } from "@/app/lib/api/usePagedApi";
 import { PROBLEM_API_URL as API_BASE } from "@/app/coding-platform/lib/config";
 
 /**
@@ -33,29 +35,20 @@ function summary(markdown, title = "") {
   return text.slice(0, 160);
 }
 
-export default function ProblemsListPage() {
-  const [problems, setProblems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const PAGE_SIZE = 50;
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/problems`);
-        if (!res.ok) throw new Error("Couldn't load problems");
-        const data = await res.json();
-        if (active) setProblems(data?.data || []);
-      } catch (e) {
-        if (active) setError(e.message);
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+async function fetchProblems(cursor) {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) params.set("cursor", cursor);
+  const res = await fetch(`${API_BASE}/problems?${params}`);
+  if (!res.ok) throw new Error("Couldn't load problems");
+  const body = await res.json();
+  return { items: body?.data?.items ?? [], nextCursor: body?.data?.nextCursor ?? null };
+}
+
+export default function ProblemsListPage() {
+  const list = usePagedApi(fetchProblems, []);
+  const { loading, error, items: problems } = list;
 
   return (
     <>
@@ -149,6 +142,8 @@ export default function ProblemsListPage() {
                 ))}
               </ul>
             )}
+
+            {!loading && !error && <LoadMore list={list} />}
           </Card>
         </Container>
       </main>

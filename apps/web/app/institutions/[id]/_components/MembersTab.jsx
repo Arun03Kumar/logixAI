@@ -22,6 +22,8 @@ import {
 } from "@logixai/ui";
 import { identityApi } from "@/app/lib/api/identity";
 import { useApi } from "@/app/lib/api/useApi";
+import { usePagedApi } from "@/app/lib/api/usePagedApi";
+import LoadMore from "@/app/components/LoadMore";
 import { ROLE_LABEL, ROLE_TONE, canManage, formatDate } from "../../labels";
 
 /** Roles the current user may assign, mirroring identity-service's rules. */
@@ -34,14 +36,17 @@ function assignableRoles(myRole, member) {
 }
 
 export default function MembersTab({ institutionId, myRole, myUserId }) {
-  const members = useApi(() => identityApi.listMembers(institutionId), [institutionId]);
+  const members = usePagedApi(
+    (cursor) => identityApi.listMembers(institutionId, { cursor }),
+    [institutionId],
+  );
   const batches = useApi(() => identityApi.listBatches(institutionId), [institutionId]);
   const batchName = new Map((batches.data ?? []).map((b) => [b.id, b.name]));
 
   const changeRole = async (member, role) => {
     try {
       const updated = await identityApi.updateMember(institutionId, member.userId, { role });
-      members.setData((rows) => rows.map((r) => (r.userId === updated.userId ? updated : r)));
+      members.setItems((rows) => rows.map((r) => (r.userId === updated.userId ? updated : r)));
       toast.success(`${member.name} is now ${ROLE_LABEL[role].toLowerCase()}.`);
     } catch (err) {
       toast.error(err.message);
@@ -52,7 +57,7 @@ export default function MembersTab({ institutionId, myRole, myUserId }) {
     if (!window.confirm(`Remove ${member.name} from this institution?`)) return;
     try {
       await identityApi.removeMember(institutionId, member.userId);
-      members.setData((rows) => rows.filter((r) => r.userId !== member.userId));
+      members.setItems((rows) => rows.filter((r) => r.userId !== member.userId));
       toast.success(`${member.name} was removed.`);
     } catch (err) {
       toast.error(err.message);
@@ -75,7 +80,7 @@ export default function MembersTab({ institutionId, myRole, myUserId }) {
     );
   }
 
-  const rows = members.data ?? [];
+  const rows = members.items;
 
   return (
     <Card className="overflow-hidden">
@@ -174,6 +179,7 @@ export default function MembersTab({ institutionId, myRole, myUserId }) {
           })}
         </TableBody>
       </Table>
+      <LoadMore list={members} />
     </Card>
   );
 }

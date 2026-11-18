@@ -1,4 +1,7 @@
 import type {
+  AuditAction,
+  AuditEvent,
+  Page,
   BatchView,
   CreateBatchInput,
   CreateInstitutionInput,
@@ -102,6 +105,9 @@ export class InstitutionService {
       role: "owner",
       batchIds: [],
     });
+    await this.audit(userId, "institution.created", institution.id, "institution", institution.id, {
+      name: institution.name,
+    });
     return {
       institution: toInstitutionSummary(institution),
       role: membership.role,
@@ -121,23 +127,40 @@ export class InstitutionService {
     };
   }
 
-  async listMembers(userId: string, institutionId: string): Promise<MemberView[]> {
+  /** One page of members, highest role first. `userIds` looks up specific people. */
+  async listMembers(
+    userId: string,
+    institutionId: string,
+    query: { limit: number; cursor?: string; role?: InstitutionRole; userIds?: string[] },
+  ): Promise<Page<MemberView>> {
     await this.requireRole(userId, institutionId, "instructor");
-    const memberships = await this.store.memberships.listForInstitution(institutionId);
-    const users = await this.store.users.findByIds(memberships.map((m) => m.userId));
+    const page = await this.store.memberships.pageForInstitution(institutionId, query);
+    const users = await this.store.users.findByIds(page.items.map((m) => m.userId));
     const byId = new Map(users.map((u) => [u.id, u]));
-    return memberships
-      .map((m) => ({ m, u: byId.get(m.userId) }))
-      .filter((x): x is { m: MembershipRecord; u: NonNullable<typeof x.u> } => Boolean(x.u))
-      .map(({ m, u }) => ({
-        userId: u.id,
-        name: u.name,
-        email: u.email,
-        role: m.role,
-        batchIds: m.batchIds,
-        joinedAt: m.createdAt.toISOString(),
-      }))
-      .sort((a, b) => RANK[b.role] - RANK[a.role] || a.name.localeCompare(b.name));
+    return {
+      items: page.items
+        .map((m) => ({ m, u: byId.get(m.userId) }))
+        .filter((x): x is { m: MembershipRecord; u: NonNullable<typeof x.u> } => Boolean(x.u))
+        .map(({ m, u }) => ({
+          userId: u.id,
+          name: u.name,
+          email: u.email,
+          role: m.role,
+          batchIds: m.batchIds,
+          joinedAt: m.createdAt.toISOString(),
+        })),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  /** The institution's audit log, newest first (owners and admins). */
+  async listAudit(
+    userId: string,
+    institutionId: string,
+    query: { limit: number; cursor?: string },
+  ): Promise<Page<AuditEvent>> {
+    await this.requireRole(userId, institutionId, "admin");
+    return this.store.audit.pageForInstitution(institutionId, query);
   }
 
   async updateMember(
@@ -183,6 +206,17 @@ export class InstitutionService {
     });
     const user = await this.store.users.findById(targetUserId);
     if (!updated || !user) throw new NotFoundError("Member", targetUserId);
+    if (input.role && input.role !== target.role) {
+      await this.audit(actorId, "member.role_changed", institutionId, "member", targetUserId, {
+        from: target.role,
+        to: input.role,
+      });
+    }
+    if (input.batchIds) {
+      await this.audit(actorId, "member.batches_changed", institutionId, "member", targetUserId, {
+        batchIds: updated.batchIds,
+      });
+    }
     return {
       userId: user.id,
       name: user.name,
@@ -212,6 +246,10 @@ export class InstitutionService {
       });
     }
     await this.store.memberships.delete(target.id);
+    await this.audit(actorId, "member.removed", institutionId, "member", target.userId, {
+      role: target.role,
+      left: leaving,
+    });
   }
 
   async createBatch(userId: string, institutionId: string, input: CreateBatchInput): Promise<BatchView> {
@@ -220,19 +258,20 @@ export class InstitutionService {
       throw new ConflictError("A batch with this name already exists.");
     }
     const batch = await this.store.batches.create({ institutionId, name: input.name });
+    await this.audit(userId, "batch.created", institutionId, "batch", batch.id, { name: batch.name });
     return { id: batch.id, name: batch.name, memberCount: 0, createdAt: batch.createdAt.toISOString() };
   }
 
   async listBatches(userId: string, institutionId: string): Promise<BatchView[]> {
     await this.requireRole(userId, institutionId, "instructor");
-    const [batches, memberships] = await Promise.all([
+    const [batches, counts] = await Promise.all([
       this.store.batches.listForInstitution(institutionId),
-      this.store.memberships.listForInstitution(institutionId),
+      this.store.memberships.countByBatch(institutionId),
     ]);
     return batches.map((b) => ({
       id: b.id,
       name: b.name,
-      memberCount: memberships.filter((m) => m.batchIds.includes(b.id)).length,
+      memberCount: counts[b.id] ?? 0,
       createdAt: b.createdAt.toISOString(),
     }));
   }
@@ -259,6 +298,11 @@ export class InstitutionService {
       revokedAt: null,
       createdBy: userId,
     });
+    await this.audit(userId, "invite.created", institutionId, "invite", invite.id, {
+      role: invite.role,
+      batchId: invite.batchId,
+      maxUses: invite.maxUses,
+    });
     return toInviteView(invite);
   }
 
@@ -274,6 +318,7 @@ export class InstitutionService {
       throw new NotFoundError("Invite", inviteId);
     }
     await this.store.invites.revoke(invite.id);
+    await this.audit(userId, "invite.revoked", institutionId, "invite", invite.id, { code: invite.code });
   }
 
   async previewInvite(code: string): Promise<InvitePreview> {
@@ -314,6 +359,10 @@ export class InstitutionService {
         role: invite.role,
         batchIds: invite.batchId ? [invite.batchId] : [],
       });
+      await this.audit(userId, "member.joined", institution.id, "member", userId, {
+        role: invite.role,
+        inviteId: invite.id,
+      });
     } else if (invite.batchId && !membership.batchIds.includes(invite.batchId)) {
       // Existing members keep their role; the invite only adds the batch.
       await this.store.memberships.addBatch(membership.id, invite.batchId);
@@ -326,6 +375,20 @@ export class InstitutionService {
       batchIds: membership.batchIds,
       joinedAt: membership.createdAt.toISOString(),
     };
+  }
+
+  /** Audit records must never block the action itself. */
+  private async audit(
+    actorId: string,
+    action: AuditAction,
+    institutionId: string,
+    targetType: AuditEvent["targetType"],
+    targetId: string,
+    meta: Record<string, unknown> = {},
+  ) {
+    await this.store.audit
+      .record({ actorId, action, institutionId, targetType, targetId, meta })
+      .catch(() => {});
   }
 
   private async requireRole(userId: string, institutionId: string, minimum: InstitutionRole) {

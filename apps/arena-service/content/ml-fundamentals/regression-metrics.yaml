@@ -1,0 +1,127 @@
+id: regression-metrics
+title: Regression metrics
+summary: MAE, MSE, RMSE and R² — what each one measures and when to use it.
+prerequisites: [numpy-stats-linalg]
+lesson: |
+  ## Measuring numeric predictions
+
+  For a regression model the error on one example is $e_i = y_i - \hat{y}_i$. The metrics differ in how they add these up.
+
+  $$\text{MAE} = \frac{1}{n}\sum |e_i| \qquad \text{MSE} = \frac{1}{n}\sum e_i^2 \qquad \text{RMSE} = \sqrt{\text{MSE}}$$
+
+  - **MAE** is in the target's units and treats every error equally — robust to a few outliers.
+  - **MSE** squares errors, so large mistakes dominate. It's smooth, which makes it the usual *training* loss.
+  - **RMSE** is MSE back in the target's units ("we're typically off by about ₹4,000").
+
+  ## R², the coefficient of determination
+
+  $$R^2 = 1 - \frac{\sum (y_i - \hat{y}_i)^2}{\sum (y_i - \bar{y})^2}$$
+
+  It compares the model with the trivial model that always predicts the mean $\bar{y}$. $R^2 = 1$ is perfect, $0$ is no better than the mean, and it can be **negative** when the model is worse than the mean.
+
+  ## Worked example
+
+  $y = [3, 5, 7]$, $\hat{y} = [2, 5, 9]$: errors $[1, 0, -2]$.
+  MAE $= 1$, MSE $= 5/3 \approx 1.667$, RMSE $\approx 1.291$.
+  $\bar{y} = 5$, total sum of squares $= 4 + 0 + 4 = 8$, so $R^2 = 1 - 5/8 = 0.375$.
+
+  ## In interviews
+
+  "When would you prefer MAE to RMSE?" — when outliers shouldn't dominate, or when every unit of error costs the same.
+items:
+  - id: reg-mse-numeric
+    type: numeric
+    title: Mean squared error
+    difficulty: easy
+    tags: [mse]
+    prompt: |
+      True values $[2, 4, 6, 8]$, predictions $[3, 4, 4, 9]$. What is the MSE?
+    answer: 1.5
+    tolerance: 0.001
+    explanation: |
+      Errors $[-1, 0, 2, -1]$, squares $[1, 0, 4, 1]$, mean $6/4 = 1.5$.
+
+  - id: reg-r2-mcq
+    type: mcq_single
+    title: A negative R²
+    difficulty: medium
+    tags: [r-squared]
+    prompt: |
+      A model scores $R^2 = -0.3$ on the test set. What does that mean?
+    options:
+      - { id: a, text: "It's impossible; R² is always between 0 and 1." }
+      - { id: b, text: "The model's predictions are worse than always predicting the test set's mean." }
+      - { id: c, text: "The predictions are negatively correlated with the target, but otherwise fine." }
+      - { id: d, text: "30% of the variance is explained." }
+    answer: b
+    explanation: |
+      $R^2 = 1 - \text{SSE}/\text{SST}$ goes below zero when the model's squared error exceeds that of the constant mean prediction. It's a strong sign of a broken pipeline or heavy overfitting.
+
+  - id: reg-outlier-mcq
+    type: mcq_single
+    title: One huge error
+    difficulty: easy
+    tags: [mae, rmse, outliers]
+    prompt: |
+      Two models have the same MAE, but model B has a much higher RMSE. What's the most likely explanation?
+    options:
+      - { id: a, text: "Model B makes a few very large errors." }
+      - { id: b, text: "Model B is biased upwards." }
+      - { id: c, text: "Model B has more small errors." }
+      - { id: d, text: "RMSE and MAE always agree, so one is computed wrongly." }
+    answer: a
+    explanation: |
+      Squaring makes big errors count disproportionately, so RMSE rises when a few predictions are far off even if the average absolute error is unchanged. RMSE ≥ MAE always; a big gap signals outlier errors.
+
+  - id: reg-metrics-code
+    type: code
+    title: MAE, RMSE and R² from scratch
+    difficulty: medium
+    tags: [mae, rmse, r-squared, from-scratch]
+    prompt: |
+      Implement `regression_report(y, y_pred)` returning `[mae, rmse, r2]`.
+      If all `y` are equal (zero total variance), return `r2 = 0.0`.
+    function:
+      name: regression_report
+      params:
+        - { name: y, type: ndarray }
+        - { name: y_pred, type: ndarray }
+      returns: "[mae, rmse, r2]"
+    starter: |
+      import numpy as np
+
+      def regression_report(y, y_pred):
+          errors = y - y_pred
+          mae = np.mean(errors)
+          rmse = np.sqrt(np.mean(errors ** 2))
+          r2 = 1 - np.sum(errors ** 2) / np.sum(y ** 2)
+          return [mae, rmse, r2]
+    solution: |
+      import numpy as np
+
+      def regression_report(y, y_pred):
+          errors = y - y_pred
+          mae = float(np.mean(np.abs(errors)))
+          rmse = float(np.sqrt(np.mean(errors ** 2)))
+          sst = float(np.sum((y - y.mean()) ** 2))
+          r2 = 1 - float(np.sum(errors ** 2)) / sst if sst > 0 else 0.0
+          return [mae, rmse, r2]
+    tests:
+      sample:
+        - args: [[3, 5, 7], [2, 5, 9]]
+        - args: [[1, 2, 3, 4], [1, 2, 3, 4]]
+          expected: [0, 0, 1]
+      hidden:
+        - args: [[5, 5, 5], [4, 5, 6]]
+      generate: |
+        def cases(rng):
+            out = []
+            for n in [10, 300]:
+                y = rng.normal(size=n) * 10 + 50
+                out.append([y, y + rng.normal(size=n) * 3])
+            return out
+    hints:
+      - MAE needs absolute values, or positive and negative errors cancel.
+      - R² compares against predicting the mean, not against zero.
+    explanation: |
+      The starter has two classic bugs: averaging raw errors (they cancel, so a biased model can score 0) and using $\sum y^2$ instead of $\sum (y - \bar{y})^2$ as the baseline, which inflates R² whenever the target isn't centred at zero.

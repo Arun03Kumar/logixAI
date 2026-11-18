@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { Store } from "./types.js";
+import type { AuditEvent } from "@logixai/contracts";
+import { decodeCursor, encodeCursor } from "@logixai/service-kit";
+import { ROLE_RANK, type Store } from "./types.js";
 
 /** In-memory Store for tests and local experiments. Not for production. */
 export function createMemoryStore(): Store {
@@ -10,6 +12,7 @@ export function createMemoryStore(): Store {
   const memberships = table<import("./types.js").MembershipRecord>();
   const batches = table<import("./types.js").BatchRecord>();
   const invites = table<import("./types.js").InviteRecord>();
+  const auditLog: AuditEvent[] = [];
 
   function insert<T extends { id: string; createdAt: Date }>(
     map: Map<string, T>,
@@ -73,8 +76,46 @@ export function createMemoryStore(): Store {
           ),
         ),
       listForUser: async (userId) => all(memberships).filter((m) => m.userId === userId),
-      listForInstitution: async (institutionId) =>
-        all(memberships).filter((m) => m.institutionId === institutionId),
+      async pageForInstitution(institutionId, { limit, cursor, role, userIds }) {
+        // Same order as MongoStore: highest role first, then join order.
+        const order = [...memberships.keys()];
+        const key = (m: { id: string; role: keyof typeof ROLE_RANK }) =>
+          [ROLE_RANK[m.role], order.indexOf(m.id)] as const;
+        const after = decodeCursor(
+          cursor,
+          (v): v is [number, number] => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number"),
+        );
+        const rows = all(memberships)
+          .filter(
+            (m) =>
+              m.institutionId === institutionId &&
+              (!role || m.role === role) &&
+              (!userIds || userIds.includes(m.userId)),
+          )
+          .sort((a, b) => key(b)[0] - key(a)[0] || key(a)[1] - key(b)[1])
+          .filter((m) => {
+            if (!after) return true;
+            const [rank, seq] = key(m);
+            return rank < after[0] || (rank === after[0] && seq > after[1]);
+          });
+        const items = rows.slice(0, limit);
+        const last = items[items.length - 1];
+        return {
+          items,
+          nextCursor:
+            rows.length > limit && last
+              ? encodeCursor(key(last))
+              : null,
+        };
+      },
+      async countByBatch(institutionId) {
+        const counts: Record<string, number> = {};
+        for (const m of memberships.values()) {
+          if (m.institutionId !== institutionId) continue;
+          for (const b of m.batchIds) counts[b] = (counts[b] ?? 0) + 1;
+        }
+        return counts;
+      },
       async update(id, patch) {
         const m = memberships.get(id);
         if (!m) return null;
@@ -121,6 +162,21 @@ export function createMemoryStore(): Store {
       async revoke(id) {
         const i = invites.get(id);
         if (i) i.revokedAt = new Date();
+      },
+    },
+    audit: {
+      async record(event) {
+        auditLog.push({ ...structuredClone(event), id: randomUUID(), at: new Date().toISOString() });
+      },
+      async pageForInstitution(institutionId, { limit, cursor }) {
+        const start = decodeCursor(cursor, (v): v is number => Number.isInteger(v) && (v as number) >= 0) ?? 0;
+        const rows = auditLog.filter((e) => e.institutionId === institutionId).reverse();
+        const items = rows.slice(start, start + limit);
+        return {
+          items,
+          nextCursor:
+            rows.length > start + limit ? encodeCursor(start + limit) : null,
+        };
       },
     },
   };

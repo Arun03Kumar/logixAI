@@ -4,13 +4,18 @@
 #
 # The Node services run on the host with `npm run dev` so they hot-reload.
 # The evaluator talks to the host Docker daemon to start judge containers.
+#
+# Ports are bound to 127.0.0.1 so nothing else on your network can reach them.
+# To try Redis with a password locally: REDIS_PASSWORD=... npm run infra:up,
+# and put the same REDIS_PASSWORD in each service's .env.
+# This file is for development only; see docs/database.md for production.
 
 services:
   mongo:
     image: mongo:7
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo-data:/data/db
     healthcheck:
@@ -22,12 +27,20 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    # Append-only file: queued judge jobs survive a Redis restart.
+    # BullMQ needs noeviction so queue keys are never evicted under memory pressure.
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --maxmemory-policy noeviction $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+--no-auth-warning -a \"$$REDIS_PASSWORD\"} ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

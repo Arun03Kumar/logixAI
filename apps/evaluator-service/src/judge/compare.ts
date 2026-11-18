@@ -16,3 +16,6 @@ export function outputsMatch(expected: string, actual: string): boolean {
   const b = normalizeOutput(actual);
   return a.length === b.length && a.every((line, i) => line === b[i]);
 }
+
+
+export { jsonOutputsMatch, jsonValuesMatch } from "@logixai/contracts";

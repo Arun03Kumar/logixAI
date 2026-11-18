@@ -1,0 +1,192 @@
+id: logistic-regression
+title: Logistic regression from scratch
+summary: Turning a linear score into a probability, the log-loss, its gradient, and a decision threshold.
+prerequisites: [linear-regression, derivatives, classification-metrics]
+lesson: |
+  ## From scores to probabilities
+
+  For classification we want $P(y = 1 \mid \mathbf{x})$, a number between 0 and 1. Logistic regression computes a linear score and squashes it with the sigmoid:
+
+  $$z = \mathbf{w}^\top \mathbf{x} + b, \qquad p = \sigma(z) = \frac{1}{1 + e^{-z}}$$
+
+  The **decision boundary** $p = 0.5$ is where $z = 0$: a straight line (a hyperplane) in feature space.
+
+  ## The loss: binary cross-entropy
+
+  $$L = -\frac{1}{n}\sum_i \big[\, y_i \log p_i + (1 - y_i)\log(1 - p_i) \,\big]$$
+
+  If the true label is 1 and the model says $p = 0.01$, the loss is $-\log 0.01 \approx 4.6$; at $p = 0.99$ it's $0.01$. Confident mistakes are punished hard. Mean squared error would make the loss non-convex and its gradients tiny for confident mistakes, which is why classification uses cross-entropy.
+
+  ## A remarkably clean gradient
+
+  Combining the sigmoid's derivative $\sigma(1 - \sigma)$ with the log-loss, everything cancels to:
+
+  $$\nabla_{\mathbf{w}} L = \frac{1}{n} X^\top (\mathbf{p} - \mathbf{y}), \qquad \frac{\partial L}{\partial b} = \frac{1}{n}\sum_i (p_i - y_i)$$
+
+  — the same shape as linear regression's gradient, with $\mathbf{p}$ in place of the predictions.
+
+  ## Numerical care
+
+  $\log 0$ is $-\infty$. Implementations clip probabilities to $[\epsilon, 1 - \epsilon]$ (e.g. $\epsilon = 10^{-12}$) before taking logs, or compute the loss directly from $z$.
+
+  ## Interpreting weights
+
+  $e^{w_j}$ is the **odds ratio**: how the odds $p/(1-p)$ multiply when feature $j$ increases by one unit.
+
+  ## In interviews
+
+  "Why not use MSE for classification?" and "derive the gradient of the log-loss" are both standard.
+items:
+  - id: logreg-logloss-numeric
+    type: numeric
+    title: Log-loss of one prediction
+    difficulty: easy
+    tags: [cross-entropy]
+    prompt: |
+      The true label is $y = 1$ and the model predicts $p = 0.2$. What is the binary cross-entropy for this example (natural log)? Give 3 decimal places.
+    answer: 1.609
+    tolerance: 0.001
+    answerFormat: 3 decimal places
+    explanation: |
+      $-[1 \cdot \ln 0.2 + 0 \cdot \ln 0.8] = -\ln 0.2 \approx 1.609$. Had it predicted 0.8, the loss would be $-\ln 0.8 \approx 0.223$.
+
+  - id: logreg-boundary-mcq
+    type: mcq_single
+    title: Where is the decision boundary?
+    difficulty: medium
+    tags: [decision-boundary]
+    prompt: |
+      A logistic regression on two features has $w = [2, -1]$ and $b = -4$. With a 0.5 threshold, which point is classified as positive?
+    options:
+      - { id: a, text: "(1, 0)" }
+      - { id: b, text: "(2, 1)" }
+      - { id: c, text: "(3, 1)" }
+      - { id: d, text: "(0, -3)" }
+    answer: c
+    explanation: |
+      Positive means $z = 2x_1 - x_2 - 4 > 0$. (1, 0): −2. (2, 1): −1. (3, 1): 1 ✓. (0, −3): −1. The boundary is the line $2x_1 - x_2 = 4$.
+
+  - id: logreg-mse-why-mcq
+    type: mcq_single
+    title: Why not mean squared error?
+    difficulty: hard
+    access: pro
+    tags: [cross-entropy, loss-functions]
+    prompt: |
+      Why is cross-entropy preferred to mean squared error for training logistic regression?
+    options:
+      - { id: a, text: "MSE can't be computed on probabilities." }
+      - { id: b, text: "With a sigmoid output, MSE gives a non-convex loss whose gradient vanishes for confident wrong predictions; cross-entropy is convex and its gradient is p − y." }
+      - { id: c, text: "Cross-entropy is faster to compute." }
+      - { id: d, text: "MSE always overfits." }
+    answer: b
+    explanation: |
+      The MSE gradient carries an extra factor $\sigma'(z) = p(1 - p)$, which is near zero when $p$ is near 0 or 1 — exactly when the model is confidently wrong — so learning stalls. Cross-entropy cancels that factor, leaving $p - y$, and the loss is convex in $\mathbf{w}$, so gradient descent finds the global minimum.
+
+  - id: logreg-loss-code
+    type: code
+    title: Binary cross-entropy, safely
+    difficulty: medium
+    tags: [cross-entropy, numerical-stability]
+    prompt: |
+      Implement `log_loss(y, p)`: the mean binary cross-entropy for labels `y` (0/1) and predicted probabilities `p`.
+      Clip `p` to `[1e-12, 1 - 1e-12]` first so that probabilities of exactly 0 or 1 don't produce infinities.
+    function:
+      name: log_loss
+      params:
+        - { name: y, type: ndarray }
+        - { name: p, type: ndarray }
+      returns: float
+    starter: |
+      import numpy as np
+
+      def log_loss(y, p):
+          return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+    solution: |
+      import numpy as np
+
+      def log_loss(y, p):
+          p = np.clip(p, 1e-12, 1 - 1e-12)
+          return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+    tests:
+      sample:
+        - args: [[1, 0], [0.8, 0.3]]
+        - args: [[1, 0, 1], [1.0, 0.0, 0.5]]
+      hidden:
+        - args: [[1], [0.0]]
+      generate: |
+        def cases(rng):
+            out = []
+            for n in [10, 200]:
+                y = (rng.random(n) < 0.4).astype(float)
+                out.append([y, rng.random(n)])
+            return out
+    hints:
+      - "`np.clip(p, low, high)` limits values to a range."
+    explanation: |
+      Without clipping, a prediction of exactly 1.0 for a negative example gives $\log 0 = -\infty$ and the loss becomes `inf` (or `nan` from `0 * -inf`). With clipping, a confident mistake costs about $-\ln 10^{-12} \approx 27.6$ — huge, but finite.
+
+  - id: logreg-train-code
+    type: code
+    title: Train logistic regression
+    difficulty: hard
+    access: pro
+    tags: [logistic-regression, gradient-descent, from-scratch]
+    prompt: |
+      Implement `train_logistic(X, y, lr, epochs)`. Start from `w = 0`, `b = 0`. Each epoch:
+      $\mathbf{p} = \sigma(X\mathbf{w} + b)$, then update with the full-batch gradients
+      $\frac{1}{n} X^\top (\mathbf{p} - \mathbf{y})$ and $\frac{1}{n}\sum (p_i - y_i)$. Return `[w, b]`.
+    function:
+      name: train_logistic
+      params:
+        - { name: X, type: ndarray }
+        - { name: y, type: ndarray }
+        - { name: lr, type: float }
+        - { name: epochs, type: int }
+      returns: "[w, b]"
+    starter: |
+      import numpy as np
+
+      def sigmoid(z):
+          return 1.0 / (1.0 + np.exp(-z))
+
+      def train_logistic(X, y, lr, epochs):
+          n, d = X.shape
+          w = np.zeros(d)
+          b = 0.0
+          for _ in range(epochs):
+              p = sigmoid(X @ w + b)
+              w = w + lr * (X.T @ (p - y)) / n
+              b = b + lr * np.mean(p - y)
+          return [w, b]
+    solution: |
+      import numpy as np
+
+      def sigmoid(z):
+          return 1.0 / (1.0 + np.exp(-z))
+
+      def train_logistic(X, y, lr, epochs):
+          n, d = X.shape
+          w = np.zeros(d)
+          b = 0.0
+          for _ in range(epochs):
+              p = sigmoid(X @ w + b)
+              w = w - lr * (X.T @ (p - y)) / n
+              b = b - lr * float(np.mean(p - y))
+          return [w, float(b)]
+    tests:
+      sample:
+        - args: [[[0.0], [1.0], [2.0], [3.0]], [0.0, 0.0, 1.0, 1.0], 0.5, 1]
+        - args: [[[0.0], [1.0], [2.0], [3.0]], [0.0, 0.0, 1.0, 1.0], 0.5, 200]
+      generate: |
+        def cases(rng):
+            out = []
+            for n, d in [(40, 2), (150, 3)]:
+                X = rng.normal(size=(n, d))
+                y = (X @ rng.normal(size=d) + rng.normal(size=n) * 0.5 > 0).astype(float)
+                out.append([X, y, 0.3, 100])
+            return out
+    hints:
+      - Gradient descent moves against the gradient. Check the sign of each update.
+    explanation: |
+      The starter climbs the loss (gradient *ascent*), so the weights move the wrong way and the loss grows. Training loops with a flipped sign still run without errors — plotting the loss each epoch is the fastest way to catch it.

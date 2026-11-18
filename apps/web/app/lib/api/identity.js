@@ -1,5 +1,6 @@
 import { IDENTITY_API_URL } from "@/app/coding-platform/lib/config";
 import { authFetch, readEnvelope } from "@/app/lib/auth/session";
+import { pageQuery } from "./pageQuery";
 
 const call = (path, { method = "GET", body } = {}) =>
   authFetch(`${IDENTITY_API_URL}${path}`, {
@@ -13,7 +14,12 @@ export const identityApi = {
   createInstitution: (input) => call("/institutions", { method: "POST", body: input }),
   getInstitution: (id) => call(`/institutions/${id}`),
 
-  listMembers: (id) => call(`/institutions/${id}/members`),
+  /** One page of members, owners first: { items, nextCursor }. */
+  listMembers: (id, { cursor, limit = 50, role } = {}) =>
+    call(`/institutions/${id}/members?${pageQuery({ cursor, limit, role })}`),
+  /** Admins only: institution changes, newest first. */
+  listAudit: (id, { cursor, limit = 50 } = {}) =>
+    call(`/institutions/${id}/audit?${pageQuery({ cursor, limit })}`),
   updateMember: (id, userId, patch) =>
     call(`/institutions/${id}/members/${userId}`, { method: "PATCH", body: patch }),
   removeMember: (id, userId) =>
