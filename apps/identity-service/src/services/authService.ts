@@ -1,13 +1,16 @@
 import {
   FREE_PLAN,
+  featuresWithDefaults,
   type AuthSession,
+  type ChangePasswordInput,
   type MembershipSummary,
+  type RollSignInInput,
   type PlanState,
   type PublicUser,
   type SignInInput,
   type SignUpInput,
 } from "@logixai/contracts";
-import { ConflictError, UnauthorizedError } from "@logixai/service-kit";
+import { ConflictError, ForbiddenError, UnauthorizedError } from "@logixai/service-kit";
 import { getDummyHash, hashPassword, verifyPassword } from "../lib/passwords.js";
 import { hashToken, newRefreshToken, type TokenIssuer } from "../lib/tokens.js";
 import type { Store, UserRecord } from "../store/types.js";
@@ -21,7 +24,8 @@ export function toPublicUser(user: UserRecord, plan: PlanState = FREE_PLAN): Pub
   return {
     id: user.id,
     name: user.name,
-    email: user.email,
+    email: user.email ?? "",
+    mustChangePassword: Boolean(user.mustChangePassword),
     role: user.role,
     createdAt: user.createdAt.toISOString(),
     plan,
@@ -76,6 +80,42 @@ export class AuthService {
     return this.startSession(user);
   }
 
+  /**
+   * Students without email: institution code (its slug) + roll number +
+   * password. Works for any member with a roll number while the institution
+   * has roll-number login switched on.
+   */
+  async signInWithRollNumber(input: RollSignInInput): Promise<IssuedSession> {
+    const wrong = () => new UnauthorizedError("Institution code, roll number or password is incorrect.");
+    const institution = await this.store.institutions.findBySlug(input.institution);
+    const membership = institution ? await this.store.memberships.findByRollNumber(institution.id, input.rollNumber) : null;
+    const user = membership ? await this.store.users.findById(membership.userId) : null;
+    const ok = await verifyPassword(input.password, user?.passwordHash ?? (await getDummyHash()));
+    if (!institution || !user || !ok) throw wrong();
+    if (!featuresWithDefaults(institution.features, institution.type).rollNumberLogin) {
+      throw new ForbiddenError("Roll-number sign-in isn't switched on for this institution. Sign in with your email.");
+    }
+    if ((institution.status ?? "active") !== "active") {
+      throw new ForbiddenError("This institution is closed right now. Contact your institution.");
+    }
+    return this.startSession(user);
+  }
+
+  /** Sets a new password, signs out every other session and starts a fresh one. */
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<IssuedSession> {
+    const user = await this.store.users.findById(userId);
+    if (!user) throw new UnauthorizedError();
+    if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      throw new UnauthorizedError("Your current password is incorrect.");
+    }
+    const updated = await this.store.users.update(userId, {
+      passwordHash: await hashPassword(input.newPassword),
+      mustChangePassword: false,
+    });
+    await this.store.refreshTokens.revokeAllForUser(userId);
+    return this.startSession(updated ?? user);
+  }
+
   /** Exchanges a refresh token for a new session, rotating the token. */
   async refresh(refreshToken: string | undefined): Promise<IssuedSession> {
     if (!refreshToken) throw new UnauthorizedError();
@@ -123,6 +163,7 @@ export class AuthService {
                 institution: toInstitutionSummary(inst),
                 role: m.role,
                 batchIds: m.batchIds,
+                departmentIds: m.departmentIds ?? [],
                 joinedAt: m.createdAt.toISOString(),
               },
             ]
@@ -142,12 +183,14 @@ export class AuthService {
       expiresAt: refreshExpiresAt,
       revokedAt: null,
     });
+    // "Active this week" for institution health; never blocks signing in.
+    await this.store.users.touchLastSeen(user.id, new Date()).catch(() => {});
     const plan = await planFor(this.store, user);
     const accessToken = await this.tokens.issueAccessToken({
       sub: user.id,
       role: user.role,
       name: user.name,
-      email: user.email,
+      email: user.email ?? "",
       plan: plan.tier,
       planUntil: plan.until ? Math.floor(new Date(plan.until).getTime() / 1000) : null,
     });

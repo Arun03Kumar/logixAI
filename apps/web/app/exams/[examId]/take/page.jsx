@@ -239,8 +239,12 @@ function Runner({ initial, onFinished }) {
   const questions = attempt.questions;
   const isAnswered = (q) => {
     const a = answers[q.id];
-    return q.type === "coding" ? Boolean(a?.code?.trim()) : (a?.selectedOptionIds?.length ?? 0) > 0;
+    if (q.type === "coding") return Boolean(a?.code?.trim());
+    if (q.type === "short_answer" || q.type === "long_answer") return Boolean(a?.text?.trim());
+    return (a?.selectedOptionIds?.length ?? 0) > 0;
   };
+  const sections = new Map((attempt.exam.sections ?? []).map((s) => [s.id, s]));
+  const sectionOf = (q) => (q?.sectionId ? sections.get(q.sectionId) : undefined);
   const unanswered = questions.filter((q) => !isAnswered(q)).length;
 
   const confirmSubmit = () => {
@@ -288,7 +292,14 @@ function Runner({ initial, onFinished }) {
             {questions.length - unanswered} of {questions.length} answered
           </p>
           <ol className="grid grid-cols-1 gap-1.5 sm:grid-cols-4">
-            {questions.map((q, i) => (
+            {questions.flatMap((q, i) => [
+              ...(sectionOf(q) && sectionOf(q) !== sectionOf(questions[i - 1])
+                ? [
+                    <li key={`section-${q.sectionId}`} className="col-span-full mt-2 hidden truncate text-xs font-semibold text-muted-foreground first:mt-0 sm:block">
+                      {sectionOf(q).title}
+                    </li>,
+                  ]
+                : []),
               <li key={q.id}>
                 <button
                   type="button"
@@ -305,8 +316,8 @@ function Runner({ initial, onFinished }) {
                 >
                   {i + 1}
                 </button>
-              </li>
-            ))}
+              </li>,
+            ])}
           </ol>
         </nav>
 
@@ -316,6 +327,7 @@ function Runner({ initial, onFinished }) {
               key={question.id}
               index={current}
               question={question}
+              section={sectionOf(question)}
               answer={answers[question.id]}
               onAnswer={(patch) => onAnswer(question.id, patch)}
               onRun={() => run(question.id)}

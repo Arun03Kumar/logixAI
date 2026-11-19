@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
   Spinner,
+  Textarea,
   cn,
 } from "@logixai/ui";
 import { LANGUAGES } from "@logixai/languages";
@@ -18,7 +19,7 @@ import {
   editorOptions,
   handleEditorMount,
 } from "@/app/coding-platform/components/problem/editorConfig";
-import { QUESTION_TYPE } from "@/app/lib/exams/format";
+import { QUESTION_TYPE, countWords, isWritten } from "@/app/lib/exams/format";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -77,6 +78,28 @@ function McqAnswer({ question, answer, onAnswer, disabled }) {
         </button>
       ) : null}
     </fieldset>
+  );
+}
+
+function WrittenAnswer({ question, answer, onAnswer, disabled }) {
+  const text = answer?.text ?? "";
+  const words = countWords(text);
+  const over = question.maxWords && words > question.maxWords;
+  return (
+    <div className="space-y-1.5">
+      <Textarea
+        aria-label={`Your answer to question`}
+        value={text}
+        disabled={disabled}
+        onChange={(e) => onAnswer({ text: e.target.value })}
+        placeholder="Write your answer here."
+        className={question.type === "long_answer" ? "min-h-72" : "min-h-28"}
+      />
+      <p className={cn("text-right text-xs", over ? "font-medium text-warning" : "text-muted-foreground")} aria-live="polite">
+        {words} {words === 1 ? "word" : "words"}
+        {question.maxWords ? ` of about ${question.maxWords}` : ""}
+      </p>
+    </div>
   );
 }
 
@@ -156,14 +179,23 @@ function CodingAnswer({ question, answer, onAnswer, onRun, running, disabled }) 
   );
 }
 
-export default function QuestionView({ index, question, answer, onAnswer, onRun, running, disabled }) {
+export default function QuestionView({ index, question, section, answer, onAnswer, onRun, running, disabled }) {
   const header = (
-    <div className="flex flex-wrap items-center gap-2">
-      <h2 className="text-lg font-semibold">Question {index + 1}</h2>
-      <Badge>{QUESTION_TYPE[question.type]}</Badge>
-      <Badge tone="outline">
-        {question.marks} {question.marks === 1 ? "mark" : "marks"}
-      </Badge>
+    <div className="space-y-2">
+      {section ? (
+        <div className="rounded-lg bg-muted px-3 py-2 text-sm">
+          <p className="font-semibold">{section.title}</p>
+          {section.instructions ? <p className="text-muted-foreground">{section.instructions}</p> : null}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-semibold">Question {index + 1}</h2>
+        <Badge>{QUESTION_TYPE[question.type]}</Badge>
+        <Badge tone="outline">
+          {question.marks} {question.marks === 1 ? "mark" : "marks"}
+        </Badge>
+        {question.negativeMarks ? <Badge tone="warning">−{question.negativeMarks} if wrong</Badge> : null}
+      </div>
     </div>
   );
 
@@ -172,7 +204,11 @@ export default function QuestionView({ index, question, answer, onAnswer, onRun,
       <div className="mx-auto max-w-3xl space-y-6">
         {header}
         <Markdown>{question.prompt}</Markdown>
-        <McqAnswer question={question} answer={answer} onAnswer={onAnswer} disabled={disabled} />
+        {isWritten(question.type) ? (
+          <WrittenAnswer question={question} answer={answer} onAnswer={onAnswer} disabled={disabled} />
+        ) : (
+          <McqAnswer question={question} answer={answer} onAnswer={onAnswer} disabled={disabled} />
+        )}
       </div>
     );
   }

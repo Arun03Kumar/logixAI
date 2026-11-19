@@ -1,14 +1,17 @@
-import type {
-  AttemptResult,
-  AttemptView,
-  CodingQuestion,
-  EvaluationJobPayload,
-  ExecutionResponse,
-  ExamQuestion,
-  LanguageId,
-  ProctorEventType,
-  SaveAnswerInput,
-  StudentQuestion,
+import {
+  isWrittenType,
+  type AttemptResult,
+  type AttemptView,
+  type CodingQuestion,
+  type EvaluationJobPayload,
+  type ExecutionResponse,
+  type ExamQuestion,
+  type LanguageId,
+  type ProctorEventType,
+  type RankView,
+  type ReevaluationView,
+  type SaveAnswerInput,
+  type StudentQuestion,
 } from "@logixai/contracts";
 import {
   BadRequestError,
@@ -20,16 +23,41 @@ import {
   SAVE_GRACE_MS,
   allTests,
   codeHash,
+  computeScores,
+  deadlineFor,
   examPhase,
+  extraMinutes,
+  finishedAt,
   isAssigned,
-  round2,
-  scoreQuestion,
+  isMcqQuestion,
+  isWrittenQuestion,
+  questionOrder,
   shuffle,
   totalMarks,
 } from "../lib/rules.js";
 import type { AnswerRecord, AttemptRecord, ExamRecord, JudgeRecord } from "../store/types.js";
 import { loadExamFor, type Caller, type Deps } from "./context.js";
-import { buildResult, toAnswerView } from "./results.js";
+import { buildResult, toAnswerView, toReevaluationView } from "./results.js";
+
+const DAY = 24 * 60 * 60_000;
+
+/** When students see scores: never, once submitted, or once the exam is over for everyone. */
+export function isReleased(exam: ExamRecord, now = new Date()): boolean {
+  const visibility = exam.settings.resultsVisibility;
+  if (visibility === "hidden") return false;
+  if (visibility === "after_submit") return true;
+  const over = finishedAt(exam);
+  return Boolean(over && now >= over);
+}
+
+/** Students can ask for a re-check from release until N days after the exam is over. */
+export function reevaluationWindow(exam: ExamRecord, now = new Date()): { open: boolean; until: string | null } {
+  const days = exam.settings.reevaluationDays ?? 0;
+  const over = finishedAt(exam);
+  if (!days || !over) return { open: false, until: null };
+  const until = new Date(over.getTime() + days * DAY);
+  return { open: isReleased(exam, now) && now < until, until: until.toISOString() };
+}
 
 const MAX_PROCTOR_EVENTS = 500;
 /** A run that hasn't answered within this time may be retried. */
@@ -105,13 +133,10 @@ export class AttemptService {
     if (phase === "upcoming") throw new BadRequestError("exam", { reason: "This exam hasn't opened yet." });
     if (phase !== "live") throw new BadRequestError("exam", { reason: "This exam has closed." });
 
-    const deadline = new Date(
-      Math.min(now.getTime() + exam.durationMinutes * 60_000, exam.endsAt!.getTime()),
-    );
-    const ids = exam.questions.map((q) => q.id);
+    const deadline = deadlineFor(exam, now, extraMinutes(exam, caller.userId));
     const optionOrder: Record<string, string[]> = {};
     for (const q of exam.questions) {
-      if (q.type !== "coding") {
+      if (isMcqQuestion(q)) {
         const optionIds = q.options.map((o) => o.id);
         optionOrder[q.id] = exam.settings.shuffleOptions ? shuffle(optionIds) : optionIds;
       }
@@ -126,9 +151,10 @@ export class AttemptService {
         startedAt: now,
         deadline,
         submittedAt: null,
-        questionOrder: exam.settings.shuffleQuestions ? shuffle(ids) : ids,
+        questionOrder: questionOrder(exam, exam.settings.shuffleQuestions),
         optionOrder,
         answers: {},
+        grades: {},
         scores: null,
         score: null,
         maxScore: totalMarks(exam.questions),
@@ -171,7 +197,9 @@ export class AttemptService {
         language: input.language ?? attempt.answers[questionId]?.language ?? question.languages[0]!,
         savedAt,
       };
-    } else {
+    } else if (isWrittenQuestion(question)) {
+      answer = { text: input.text ?? attempt.answers[questionId]?.text ?? "", savedAt };
+    } else if (isMcqQuestion(question)) {
       const valid = new Set(question.options.map((o) => o.id));
       const selected = [...new Set(input.selectedOptionIds ?? [])];
       if (selected.some((id) => !valid.has(id))) {
@@ -181,6 +209,8 @@ export class AttemptService {
         throw new BadRequestError("selectedOptionIds", { reason: "Choose one option." });
       }
       answer = { selectedOptionIds: selected, savedAt };
+    } else {
+      throw new NotFoundError("Question", questionId);
     }
 
     const ok = await this.deps.store.attempts.saveAnswer(
@@ -234,19 +264,80 @@ export class AttemptService {
     if (attempt.status === "in_progress") {
       throw new BadRequestError("attempt", { reason: "Submit the exam to see your result." });
     }
-    const visibility = exam.settings.resultsVisibility;
-    const ended = examPhase(exam) === "ended";
-    if (visibility === "hidden" || (visibility === "after_end" && !ended)) {
+    if (!isReleased(exam)) {
       const result = buildResult(exam, attempt, { includeAnswers: false });
       // Submitted, but scores aren't released yet.
       return {
         ...result,
         released: false,
         score: null,
-        questions: result.questions.map((q) => ({ ...q, score: null })),
+        questions: result.questions.map(({ awaitingGrading: _a, ...q }) => ({ ...q, score: null })),
       };
     }
-    return buildResult(exam, attempt, { includeAnswers: true });
+    const reevaluations = await this.deps.store.reevaluations.listForAttempt(attempt.id);
+    const result = buildResult(exam, attempt, { includeAnswers: true, reevaluations });
+    const rank = await this.rank(exam, attempt);
+    return { ...result, ...(rank ? { rank } : {}), reevaluation: reevaluationWindow(exam) };
+  }
+
+  /** Asks staff to look at one question again (once per question). */
+  async requestReevaluation(
+    caller: Caller,
+    examId: string,
+    input: { questionId: string; reason: string },
+  ): Promise<ReevaluationView> {
+    const { exam } = await loadExamFor(this.deps, caller, examId);
+    const attempt = await this.deps.store.attempts.find(exam.id, caller.userId);
+    if (!attempt || attempt.status === "in_progress") throw new NotFoundError("Attempt", examId);
+    const window = reevaluationWindow(exam);
+    if (!window.open) {
+      throw new BadRequestError("reevaluation", {
+        reason: exam.settings.reevaluationDays ? "Re-evaluation requests are closed for this exam." : "This exam doesn't take re-evaluation requests.",
+      });
+    }
+    if (!exam.questions.some((q) => q.id === input.questionId)) throw new NotFoundError("Question", input.questionId);
+    try {
+      const request = await this.deps.store.reevaluations.create({
+        examId: exam.id,
+        institutionId: exam.institutionId,
+        attemptId: attempt.id,
+        userId: caller.userId,
+        questionId: input.questionId,
+        reason: input.reason,
+        status: "open",
+        response: "",
+        scoreBefore: attempt.scores?.[input.questionId] ?? null,
+        scoreAfter: null,
+        resolvedBy: null,
+        resolvedAt: null,
+      });
+      await this.deps.store.audit
+        .record({
+          actorId: caller.userId,
+          action: "exam.reevaluation_requested",
+          institutionId: exam.institutionId,
+          targetType: "attempt",
+          targetId: attempt.id,
+          meta: { examId: exam.id, questionId: input.questionId },
+        })
+        .catch(() => {});
+      return toReevaluationView(request);
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        throw new ConflictError("You've already asked for this question to be re-checked.");
+      }
+      throw err;
+    }
+  }
+
+  private async rank(exam: ExamRecord, attempt: AttemptRecord): Promise<RankView | null> {
+    if (!exam.settings.showRank || attempt.score === null) return null;
+    const { above, below, total } = await this.deps.store.attempts.rankCounts(exam.id, attempt.score);
+    return {
+      position: above + 1,
+      outOf: total,
+      percentile: total > 1 ? Math.round((100 * below) / (total - 1)) : 100,
+    };
   }
 
   /** Called by the judge worker with the evaluator's per-test results. */
@@ -280,7 +371,7 @@ export class AttemptService {
     if (attempt.status !== "in_progress" && exam) {
       const fresh = await this.deps.store.attempts.findById(attempt.id);
       if (fresh) {
-        const { scores, score } = this.score(exam, fresh.answers);
+        const { scores, score } = computeScores(exam, fresh.answers, fresh.grades);
         await this.deps.store.attempts.setScores(fresh.id, scores, score);
       }
     }
@@ -344,7 +435,7 @@ export class AttemptService {
       }
     }
 
-    const { scores, score } = this.score(exam, answers);
+    const { scores, score } = computeScores(exam, answers, attempt.grades);
     const done = await this.deps.store.attempts.finalize(attempt.id, {
       status,
       submittedAt: new Date(),
@@ -364,19 +455,6 @@ export class AttemptService {
       }
     }
     return done;
-  }
-
-  private score(exam: ExamRecord, answers: Record<string, AnswerRecord>) {
-    const scores: Record<string, number | null> = {};
-    let total = 0;
-    let pending = false;
-    for (const q of exam.questions) {
-      const s = scoreQuestion(q, answers[q.id]);
-      scores[q.id] = s;
-      if (s === null) pending = true;
-      else total += s;
-    }
-    return { scores, score: pending ? null : round2(total) };
   }
 
   private newJudge(
@@ -429,7 +507,10 @@ export class AttemptService {
       .map((id) => byId.get(id))
       .filter((q): q is ExamQuestion => Boolean(q))
       .map((q) => {
-        const base = { id: q.id, type: q.type, prompt: q.prompt, marks: q.marks };
+        const base = { id: q.id, type: q.type, prompt: q.prompt, marks: q.marks, sectionId: q.sectionId ?? null };
+        if (isWrittenQuestion(q)) {
+          return { ...base, maxWords: q.maxWords ?? null };
+        }
         if (q.type === "coding") {
           return {
             ...base,
@@ -438,9 +519,14 @@ export class AttemptService {
             sampleTestCases: q.sampleTestCases,
           };
         }
+        if (!isMcqQuestion(q)) return base;
         const options = new Map(q.options.map((o) => [o.id, o]));
         const order = attempt.optionOrder[q.id] ?? q.options.map((o) => o.id);
-        return { ...base, options: order.map((id) => options.get(id)).filter((o) => o !== undefined) };
+        return {
+          ...base,
+          negativeMarks: q.negativeMarks ?? 0,
+          options: order.map((id) => options.get(id)).filter((o) => o !== undefined),
+        };
       });
 
     return {
@@ -459,7 +545,9 @@ export class AttemptService {
           requireFullscreen: exam.settings.requireFullscreen,
           blockCopyPaste: exam.settings.blockCopyPaste,
         },
+        sections: exam.sections ?? [],
       },
+      extraMinutes: extraMinutes(exam, attempt.userId),
       questions,
       answers: Object.fromEntries(
         Object.entries(attempt.answers).map(([id, a]) => [id, toAnswerView(a)]),

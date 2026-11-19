@@ -5,7 +5,8 @@ import type { FastifyInstance } from "fastify";
 import { UnauthorizedError, type AccessTokenVerifier } from "@logixai/service-kit";
 import { buildApp } from "../src/app.js";
 import { loadCatalog } from "../src/content/catalog.js";
-import type { IdentityClient } from "../src/lib/identity.js";
+import { DEFAULT_FEATURES, type FeatureFlags, type InstitutionRole } from "@logixai/contracts";
+import { membershipFromRole, type IdentityClient } from "../src/lib/identity.js";
 import type { ArenaService, JudgeRequest } from "../src/services/arenaService.js";
 import { nextReview } from "../src/services/learning.js";
 import { createMemoryStore } from "../src/store/memoryStore.js";
@@ -25,21 +26,26 @@ const verifier: AccessTokenVerifier = {
 };
 
 /** One institution "inst" with batches "cse" and "ece"; tokens are "Bearer <userId>". */
-const PEOPLE: Record<string, { role: "owner" | "instructor" | "student"; batchIds: string[] }> = {
-  teacher: { role: "instructor", batchIds: [] },
+const PEOPLE: Record<string, { role: InstitutionRole; batchIds: string[] }> = {
+  principal: { role: "admin", batchIds: [] },
+  teacher: { role: "instructor", batchIds: ["cse"] },
+  ecTeacher: { role: "instructor", batchIds: ["ece"] },
+  ta: { role: "assistant", batchIds: ["cse"] },
   asha: { role: "student", batchIds: ["cse"] },
   ravi: { role: "student", batchIds: ["cse"] },
   meera: { role: "student", batchIds: ["ece"] },
 };
 const who = (auth: string) => auth.replace(/^Bearer /, "");
+let features: Partial<FeatureFlags> = {};
 const identity: IdentityClient = {
   async getMembership(auth, institutionId) {
-    return institutionId === "inst" ? (PEOPLE[who(auth)] ?? null) : null;
+    const p = institutionId === "inst" ? PEOPLE[who(auth)] : undefined;
+    return p ? membershipFromRole(p.role, p.batchIds, features) : null;
   },
   async myMemberships(auth) {
     const p = PEOPLE[who(auth)];
     return p
-      ? [{ institution: { id: "inst", name: "Delhi Public School", slug: "dps", type: "school", createdAt: "" }, role: p.role, batchIds: p.batchIds, joinedAt: "" }]
+      ? [{ institution: { id: "inst", name: "Delhi Public School", slug: "dps", type: "school", status: "active", features: DEFAULT_FEATURES.school, createdAt: "" }, role: p.role, batchIds: p.batchIds, departmentIds: [], joinedAt: "" }]
       : [];
   },
   async listBatches() {
@@ -51,7 +57,7 @@ const identity: IdentityClient = {
   async listBatchMembers(_auth, _inst, batchId) {
     return Object.entries(PEOPLE)
       .filter(([, p]) => p.batchIds.includes(batchId))
-      .map(([userId, p]) => ({ userId, name: userId, email: `${userId}@x.com`, role: p.role, batchIds: p.batchIds, joinedAt: "" }));
+      .map(([userId, p]) => ({ userId, name: userId, email: `${userId}@x.com`, role: p.role, batchIds: p.batchIds, departmentIds: [], rollNumber: null, managed: false, joinedAt: "" }));
   },
 };
 
@@ -64,6 +70,7 @@ const later = (days: number) => (clock = new Date(clock.getTime() + days * DAY))
 
 beforeEach(async () => {
   judged = [];
+  features = {};
   clock = new Date("2026-11-18T06:00:00Z");
   const built = await buildApp({
     catalog,
@@ -248,5 +255,25 @@ describe("institutions", () => {
     expect(report.rows[1].topicMastery[1]).toBeGreaterThan(0);
     expect(report.topicAverages[0]).toBeCloseTo(report.rows[0].topicMastery[0] / 2, 1);
     expect(report.rows[0].lastActiveAt).toBe(clock.toISOString());
+  });
+
+  it("keeps staff to their own batches and follows the feature switch", async () => {
+    const body = { batchId: "cse", trackId: "math-for-ml" };
+    // The ECE instructor can't assign to, unassign from or report on CSE.
+    expect((await req("ecTeacher", "POST", "/institutions/inst/assignments", body)).status).toBe(403);
+    const cse = (await req("teacher", "POST", "/institutions/inst/assignments", body)).data;
+    expect((await req("ecTeacher", "DELETE", `/institutions/inst/assignments/${cse.id}`)).status).toBe(403);
+    expect((await req("ecTeacher", "GET", "/institutions/inst/report?batchId=cse&trackId=math-for-ml")).status).toBe(403);
+    expect((await req("ecTeacher", "GET", "/institutions/inst/assignments")).data).toEqual([]);
+    // Assistants see reports for their batch but don't assign.
+    expect((await req("ta", "GET", "/institutions/inst/report?batchId=cse&trackId=math-for-ml")).status).toBe(200);
+    expect((await req("ta", "POST", "/institutions/inst/assignments", { ...body, batchId: "ece" })).status).toBe(403);
+    // Admins see and act on every batch, and read the audit log.
+    expect((await req("principal", "POST", "/institutions/inst/assignments", { ...body, batchId: "ece" })).status).toBe(201);
+    expect((await req("principal", "GET", "/institutions/inst/assignments")).data).toHaveLength(2);
+    expect((await req("principal", "GET", "/institutions/inst/audit")).status).toBe(200);
+
+    features = { arena: false };
+    expect((await req("teacher", "GET", "/institutions/inst/assignments")).status).toBe(403);
   });
 });

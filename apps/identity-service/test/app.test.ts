@@ -220,14 +220,17 @@ describe("institutions", () => {
   async function withInstitution() {
     const ctx = await setup();
     const owner = await signUp(ctx.app, "owner@x.com", "Owner");
+    // Institutions are set up by LogixAI: a platform admin creates it with the owner.
+    const boss = await signUp(ctx.app, "boss@logixai.com", "Boss");
     const res = await ctx.app.inject({
       method: "POST",
-      url: "/api/v1/institutions",
-      headers: bearer(owner.token),
-      payload: { name: "Delhi Public School", type: "school" },
+      url: "/api/v1/admin/institutions",
+      headers: bearer(boss.token),
+      payload: { name: "Delhi Public School", type: "school", ownerEmails: ["owner@x.com"] },
     });
     expect(res.statusCode).toBe(201);
-    return { ...ctx, owner, institutionId: res.json().data.institution.id as string };
+    expect(res.json().data.ownersAdded).toEqual(["owner@x.com"]);
+    return { ...ctx, owner, boss, institutionId: res.json().data.institution.id as string };
   }
 
   it("makes the creator the owner and hides it from non-members", async () => {

@@ -12,6 +12,8 @@ export function createMemoryStore(): Store {
   const memberships = table<import("./types.js").MembershipRecord>();
   const batches = table<import("./types.js").BatchRecord>();
   const invites = table<import("./types.js").InviteRecord>();
+  const departments = table<import("./types.js").DepartmentRecord>();
+  const joinRequests = table<import("./types.js").JoinRequestRecord>();
   const auditLog: AuditEvent[] = [];
   const grants = new Set<string>();
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -30,14 +32,25 @@ export function createMemoryStore(): Store {
   return {
     users: {
       async create(data) {
-        if ([...users.values()].some((u) => u.email === data.email)) {
+        if (data.email && [...users.values()].some((u) => u.email === data.email)) {
           throw Object.assign(new Error("duplicate key"), { code: 11000 });
         }
         return insert(users, data);
       },
       findById: async (id) => copy(users.get(id)),
-      findByEmail: async (email) => copy([...users.values()].find((u) => u.email === email)),
+      findByEmail: async (email) => copy([...users.values()].find((u) => u.email !== null && u.email === email)),
       findByIds: async (ids) => all(users).filter((u) => ids.includes(u.id)),
+      findByEmails: async (emails) => all(users).filter((u) => u.email !== null && emails.includes(u.email)),
+      async update(id, patch) {
+        const u = users.get(id);
+        if (!u) return null;
+        Object.assign(u, patch);
+        return { ...u };
+      },
+      async touchLastSeen(userId, at) {
+        const u = users.get(userId);
+        if (u) u.lastSeenAt = at;
+      },
       async extendPro(userId, days, now) {
         const u = users.get(userId);
         if (!u) return null;
@@ -73,10 +86,19 @@ export function createMemoryStore(): Store {
       findById: async (id) => copy(institutions.get(id)),
       findByIds: async (ids) => all(institutions).filter((i) => ids.includes(i.id)),
       slugExists: async (slug) => [...institutions.values()].some((i) => i.slug === slug),
+      findBySlug: async (slug) => copy([...institutions.values()].find((i) => i.slug === slug)),
+      findByEmailDomain: async (domain) =>
+        all(institutions).filter((i) => (i.status ?? "active") === "active" && (i.emailDomains ?? []).includes(domain)),
       async setLicence(id, until, seats) {
         const inst = institutions.get(id);
         if (!inst) return null;
         Object.assign(inst, { licenceUntil: until, licenceSeats: seats });
+        return { ...inst };
+      },
+      async update(id, patch) {
+        const inst = institutions.get(id);
+        if (!inst) return null;
+        Object.assign(inst, patch);
         return { ...inst };
       },
       search: async (query, limit) =>
@@ -94,8 +116,17 @@ export function createMemoryStore(): Store {
         ) {
           throw Object.assign(new Error("duplicate key"), { code: 11000 });
         }
+        if (data.rollNumber && [...memberships.values()].some((m) => m.institutionId === data.institutionId && m.rollNumber === data.rollNumber)) {
+          throw Object.assign(new Error("duplicate key"), { code: 11000 });
+        }
         return insert(memberships, data);
       },
+      findByRollNumber: async (institutionId, rollNumber) =>
+        copy([...memberships.values()].find((m) => m.institutionId === institutionId && m.rollNumber === rollNumber)),
+      findByRollNumbers: async (institutionId, rollNumbers) =>
+        all(memberships).filter((m) => m.institutionId === institutionId && m.rollNumber && rollNumbers.includes(m.rollNumber)),
+      findForUsers: async (institutionId, userIds) =>
+        all(memberships).filter((m) => m.institutionId === institutionId && userIds.includes(m.userId)),
       find: async (userId, institutionId) =>
         copy(
           [...memberships.values()].find(
@@ -103,6 +134,25 @@ export function createMemoryStore(): Store {
           ),
         ),
       listForUser: async (userId) => all(memberships).filter((m) => m.userId === userId),
+      async roleCounts(institutionIds) {
+        const out: Record<string, Record<string, number>> = {};
+        for (const m of memberships.values()) {
+          if (!institutionIds.includes(m.institutionId)) continue;
+          const row = (out[m.institutionId] ??= {});
+          row[m.role] = (row[m.role] ?? 0) + 1;
+        }
+        return out;
+      },
+      async activeSince(institutionIds, since) {
+        const out: Record<string, number> = {};
+        for (const m of memberships.values()) {
+          const u = users.get(m.userId);
+          if (institutionIds.includes(m.institutionId) && u?.lastSeenAt && u.lastSeenAt >= since) {
+            out[m.institutionId] = (out[m.institutionId] ?? 0) + 1;
+          }
+        }
+        return out;
+      },
       async countForInstitutions(institutionIds) {
         const counts: Record<string, number> = {};
         for (const m of memberships.values()) {
@@ -110,7 +160,7 @@ export function createMemoryStore(): Store {
         }
         return counts;
       },
-      async pageForInstitution(institutionId, { limit, cursor, role, userIds, batchId }) {
+      async pageForInstitution(institutionId, { limit, cursor, role, userIds, batchId, batchIds }) {
         // Same order as MongoStore: highest role first, then join order.
         const order = [...memberships.keys()];
         const key = (m: { id: string; role: keyof typeof ROLE_RANK }) =>
@@ -125,7 +175,8 @@ export function createMemoryStore(): Store {
               m.institutionId === institutionId &&
               (!role || m.role === role) &&
               (!userIds || userIds.includes(m.userId)) &&
-              (!batchId || m.batchIds.includes(batchId)),
+              (!batchId || m.batchIds.includes(batchId)) &&
+              (!batchIds || m.batchIds.some((b) => batchIds.includes(b))),
           )
           .sort((a, b) => key(b)[0] - key(a)[0] || key(a)[1] - key(b)[1])
           .filter((m) => {
@@ -154,6 +205,12 @@ export function createMemoryStore(): Store {
       async update(id, patch) {
         const m = memberships.get(id);
         if (!m) return null;
+        if (
+          patch.rollNumber &&
+          [...memberships.values()].some((o) => o.id !== id && o.institutionId === m.institutionId && o.rollNumber === patch.rollNumber)
+        ) {
+          throw Object.assign(new Error("duplicate key"), { code: 11000 });
+        }
         Object.assign(m, patch);
         return { ...m };
       },
@@ -168,6 +225,23 @@ export function createMemoryStore(): Store {
         [...memberships.values()].filter(
           (m) => m.institutionId === institutionId && m.role === role,
         ).length,
+      countSeatedStudents: async (institutionId, archived) =>
+        [...memberships.values()].filter(
+          (m) =>
+            m.institutionId === institutionId &&
+            m.role === "student" &&
+            (m.batchIds.length === 0 || m.batchIds.some((b) => !archived.includes(b))),
+        ).length,
+      async moveBatch(institutionId, from, to, userIds) {
+        let moved = 0;
+        for (const m of memberships.values()) {
+          if (m.institutionId !== institutionId || m.role !== "student" || !m.batchIds.includes(from)) continue;
+          if (userIds && !userIds.includes(m.userId)) continue;
+          m.batchIds = [...new Set([...m.batchIds.filter((b) => b !== from), to])];
+          moved++;
+        }
+        return moved;
+      },
     },
     batches: {
       create: async (data) => insert(batches, data),
@@ -181,6 +255,35 @@ export function createMemoryStore(): Store {
         ),
       listForInstitution: async (institutionId) =>
         all(batches).filter((b) => b.institutionId === institutionId),
+      async update(id, patch) {
+        const b = batches.get(id);
+        if (!b) return null;
+        Object.assign(b, patch);
+        return { ...b };
+      },
+    },
+    departments: {
+      async create(data) {
+        const taken = [...departments.values()].some(
+          (d) => d.institutionId === data.institutionId && d.name.toLowerCase() === data.name.toLowerCase(),
+        );
+        if (taken) throw Object.assign(new Error("duplicate key"), { code: 11000 });
+        return insert(departments, data);
+      },
+      findById: async (id) => copy(departments.get(id)),
+      listForInstitution: async (institutionId) =>
+        all(departments)
+          .filter((d) => d.institutionId === institutionId)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      async update(id, patch) {
+        const d = departments.get(id);
+        if (!d) return null;
+        Object.assign(d, patch);
+        return { ...d };
+      },
+      async delete(id) {
+        departments.delete(id);
+      },
     },
     invites: {
       create: async (data) => insert(invites, data),
@@ -197,6 +300,27 @@ export function createMemoryStore(): Store {
       async revoke(id) {
         const i = invites.get(id);
         if (i) i.revokedAt = new Date();
+      },
+    },
+    joinRequests: {
+      async create(data) {
+        if ([...joinRequests.values()].some((r) => r.status === "pending" && r.userId === data.userId && r.institutionId === data.institutionId)) {
+          throw Object.assign(new Error("duplicate key"), { code: 11000 });
+        }
+        return insert(joinRequests, data);
+      },
+      findById: async (id) => copy(joinRequests.get(id)),
+      listForInstitution: async (institutionId, status, limit) =>
+        all(joinRequests)
+          .filter((r) => r.institutionId === institutionId && r.status === status)
+          .reverse()
+          .slice(0, limit),
+      pendingForUser: async (userId) => all(joinRequests).filter((r) => r.userId === userId && r.status === "pending"),
+      async decide(id, status, by, at) {
+        const r = joinRequests.get(id);
+        if (!r || r.status !== "pending") return null;
+        Object.assign(r, { status, decidedBy: by, decidedAt: at });
+        return { ...r };
       },
     },
     audit: {

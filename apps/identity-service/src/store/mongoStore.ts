@@ -3,7 +3,10 @@ import {
   AUDIT_ACTIONS,
   INSTITUTION_ROLES,
   INSTITUTION_TYPES,
-  INVITABLE_ROLES,
+  INVITE_ROLES,
+  INSTITUTION_STATUSES,
+  JOIN_REQUEST_STATUSES,
+  PRICING_MODELS,
   PLATFORM_ROLES,
 } from "@logixai/contracts";
 import { decodeCursor, toPage } from "@logixai/service-kit";
@@ -16,13 +19,17 @@ const User = mongoose.model(
   new Schema(
     {
       name: { type: String, required: true },
-      email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+      // Accounts created for students without email have none (see the partial unique index below).
+      email: { type: String, default: null, lowercase: true, trim: true },
       passwordHash: { type: String, required: true },
       role: { type: String, enum: PLATFORM_ROLES, default: "user" },
+      managedBy: { type: String, default: null },
+      mustChangePassword: { type: Boolean, default: false },
       proUntil: { type: Date, default: null },
+      lastSeenAt: { type: Date, default: null },
     },
     opts,
-  ),
+  ).index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: "string" } } }),
 );
 
 const RefreshToken = mongoose.model(
@@ -49,6 +56,24 @@ const Institution = mongoose.model(
       createdBy: { type: String, required: true },
       licenceUntil: { type: Date, default: null },
       licenceSeats: { type: Number, default: null },
+      status: { type: String, enum: INSTITUTION_STATUSES, default: "active" },
+      features: { type: Schema.Types.Mixed, default: {} },
+      contract: {
+        type: new Schema(
+          {
+            model: { type: String, enum: PRICING_MODELS, required: true },
+            seats: { type: Number, default: null },
+            pricePaise: { type: Number, required: true },
+            startsAt: { type: Date, required: true },
+            endsAt: { type: Date, required: true },
+            notes: { type: String, default: "" },
+            updatedAt: { type: Date, required: true },
+          },
+          { _id: false },
+        ),
+        default: null,
+      },
+      emailDomains: { type: [String], default: [], index: true },
     },
     opts,
   ),
@@ -59,11 +84,18 @@ const membershipSchema = new Schema(
     userId: { type: String, required: true },
     institutionId: { type: String, required: true },
     role: { type: String, enum: INSTITUTION_ROLES, required: true },
-    /** Derived from role (owner 4 … student 1) so members list owners first, in the database. */
+    /** Derived from role (owner 6 … student 1) so members list owners first, in the database. */
     roleRank: { type: Number, required: true },
     batchIds: { type: [String], default: [] },
+    departmentIds: { type: [String], default: [] },
+    rollNumber: { type: String, default: null },
   },
   opts,
+);
+// Roll-number sign-in and import matching; unique within an institution.
+membershipSchema.index(
+  { institutionId: 1, rollNumber: 1 },
+  { unique: true, partialFilterExpression: { rollNumber: { $type: "string" } } },
 );
 // One membership per user per institution; also serves "my institutions".
 membershipSchema.index({ userId: 1, institutionId: 1 }, { unique: true });
@@ -78,6 +110,9 @@ const batchSchema = new Schema(
   {
     institutionId: { type: String, required: true },
     name: { type: String, required: true },
+    departmentId: { type: String, default: null },
+    academicYear: { type: String, default: null },
+    archivedAt: { type: Date, default: null },
   },
   opts,
 );
@@ -85,24 +120,58 @@ const batchSchema = new Schema(
 batchSchema.index({ institutionId: 1, name: 1 }, { unique: true, collation: caseInsensitive });
 const Batch = mongoose.model("Batch", batchSchema);
 
+const departmentSchema = new Schema(
+  {
+    institutionId: { type: String, required: true },
+    name: { type: String, required: true },
+    code: { type: String, default: "" },
+  },
+  opts,
+);
+departmentSchema.index({ institutionId: 1, name: 1 }, { unique: true, collation: caseInsensitive });
+const Department = mongoose.model("Department", departmentSchema);
+
 const inviteSchema = new Schema(
   {
     institutionId: { type: String, required: true },
     code: { type: String, required: true, unique: true },
-    role: { type: String, enum: INVITABLE_ROLES, required: true },
+    role: { type: String, enum: INVITE_ROLES, required: true },
+    email: { type: String, default: null },
     batchId: { type: String, default: null },
     maxUses: { type: Number, default: null },
     uses: { type: Number, default: 0 },
     expiresAt: { type: Date, required: true },
     revokedAt: { type: Date, default: null },
     createdBy: { type: String, required: true },
+    requiresApproval: { type: Boolean, default: false },
   },
   opts,
 );
 inviteSchema.index({ institutionId: 1, createdAt: -1 });
 const Invite = mongoose.model("Invite", inviteSchema);
 
-/** Append-only record of who changed what (see packages/contracts/src/audit.ts). */
+const joinRequestSchema = new Schema(
+  {
+    institutionId: { type: String, required: true },
+    userId: { type: String, required: true },
+    role: { type: String, enum: INSTITUTION_ROLES, required: true },
+    batchId: { type: String, default: null },
+    rollNumber: { type: String, default: null },
+    source: { type: String, enum: ["invite", "domain"], required: true },
+    inviteId: { type: String, default: null },
+    status: { type: String, enum: JOIN_REQUEST_STATUSES, default: "pending" },
+    decidedBy: { type: String, default: null },
+    decidedAt: { type: Date, default: null },
+  },
+  { ...opts, collection: "join_requests" },
+);
+// One pending request per person per institution.
+joinRequestSchema.index({ institutionId: 1, userId: 1 }, { unique: true, partialFilterExpression: { status: "pending" } });
+// Approvals queue, newest first.
+joinRequestSchema.index({ institutionId: 1, status: 1, _id: -1 });
+joinRequestSchema.index({ userId: 1, status: 1 });
+const JoinRequest = mongoose.model("JoinRequest", joinRequestSchema);
+
 /** One row per Pro grant (order, trial, admin); the unique reference makes grants idempotent. */
 const EntitlementGrant = mongoose.model(
   "EntitlementGrant",
@@ -157,8 +226,14 @@ export function createMongoStore(): Store {
     users: {
       create: async (data) => rec(await User.create(data)),
       findById: async (id) => (isId(id) ? recOrNull(await User.findById(id)) : null),
-      findByEmail: async (email) => recOrNull(await User.findOne({ email })),
+      findByEmail: async (email) => (email ? recOrNull(await User.findOne({ email })) : null),
       findByIds: async (ids) => recs(await User.find({ _id: { $in: ids.filter(isId) } })),
+      findByEmails: async (emails) => (emails.length ? recs(await User.find({ email: { $in: emails } })) : []),
+      update: async (id, patch) =>
+        isId(id) ? recOrNull(await User.findByIdAndUpdate(id, { $set: patch }, { new: true })) : null,
+      touchLastSeen: async (userId, at) => {
+        if (isId(userId)) await User.updateOne({ _id: userId }, { $set: { lastSeenAt: at } });
+      },
       extendPro: async (userId, days, now) => {
         if (!isId(userId)) return null;
         // Pipeline update: new end = max(now, current end) + days, in one atomic write.
@@ -200,10 +275,14 @@ export function createMongoStore(): Store {
       findById: async (id) => (isId(id) ? recOrNull(await Institution.findById(id)) : null),
       findByIds: async (ids) => recs(await Institution.find({ _id: { $in: ids.filter(isId) } })),
       slugExists: async (slug) => Boolean(await Institution.exists({ slug })),
+      findBySlug: async (slug) => recOrNull(await Institution.findOne({ slug })),
+      findByEmailDomain: async (domain) => recs(await Institution.find({ emailDomains: domain, status: "active" }).limit(20)),
       setLicence: async (id, until, seats) =>
         isId(id)
           ? recOrNull(await Institution.findByIdAndUpdate(id, { $set: { licenceUntil: until, licenceSeats: seats } }, { new: true }))
           : null,
+      update: async (id, patch) =>
+        isId(id) ? recOrNull(await Institution.findByIdAndUpdate(id, { $set: patch }, { new: true })) : null,
       search: async (query, limit) => {
         const filter = query
           ? { $or: [{ name: new RegExp(escapeRegex(query), "i") }, { slug: new RegExp(escapeRegex(query), "i") }] }
@@ -215,6 +294,11 @@ export function createMongoStore(): Store {
       create: async (data) => rec(await Membership.create({ ...data, roleRank: ROLE_RANK[data.role] })),
       find: async (userId, institutionId) =>
         recOrNull(await Membership.findOne({ userId, institutionId })),
+      findByRollNumber: async (institutionId, rollNumber) => recOrNull(await Membership.findOne({ institutionId, rollNumber })),
+      findByRollNumbers: async (institutionId, rollNumbers) =>
+        rollNumbers.length ? recs(await Membership.find({ institutionId, rollNumber: { $in: rollNumbers } })) : [],
+      findForUsers: async (institutionId, userIds) =>
+        userIds.length ? recs(await Membership.find({ institutionId, userId: { $in: userIds } })) : [],
       listForUser: async (userId) => recs(await Membership.find({ userId }).sort({ createdAt: 1 })),
       countForInstitutions: async (institutionIds) => {
         const rows = await Membership.aggregate<{ _id: string; n: number }>([
@@ -223,12 +307,38 @@ export function createMongoStore(): Store {
         ]);
         return Object.fromEntries(rows.map((r) => [r._id, r.n]));
       },
-      pageForInstitution: async (institutionId, { limit, cursor, role, userIds, batchId }) => {
+      roleCounts: async (institutionIds) => {
+        const rows = await Membership.aggregate<{ _id: { i: string; r: string }; n: number }>([
+          { $match: { institutionId: { $in: institutionIds } } },
+          { $group: { _id: { i: "$institutionId", r: "$role" }, n: { $sum: 1 } } },
+        ]);
+        const out: Record<string, Record<string, number>> = {};
+        for (const row of rows) (out[row._id.i] ??= {})[row._id.r] = row.n;
+        return out;
+      },
+      activeSince: async (institutionIds, since) => {
+        const rows = await Membership.aggregate<{ _id: string; n: number }>([
+          { $match: { institutionId: { $in: institutionIds } } },
+          {
+            $lookup: {
+              from: "users",
+              let: { uid: { $toObjectId: "$userId" } },
+              pipeline: [{ $match: { $expr: { $and: [{ $eq: ["$_id", "$$uid"] }, { $gte: ["$lastSeenAt", since] }] } } }],
+              as: "active",
+            },
+          },
+          { $match: { "active.0": { $exists: true } } },
+          { $group: { _id: "$institutionId", n: { $sum: 1 } } },
+        ]);
+        return Object.fromEntries(rows.map((r) => [r._id, r.n]));
+      },
+      pageForInstitution: async (institutionId, { limit, cursor, role, userIds, batchId, batchIds }) => {
         const after = decodeCursor(cursor, isMembershipCursor);
         const filter: Record<string, unknown> = { institutionId };
         if (role) filter.role = role;
         if (userIds) filter.userId = { $in: userIds };
         if (batchId) filter.batchIds = batchId;
+        else if (batchIds) filter.batchIds = { $in: batchIds };
         if (after) {
           const [rank, id] = after;
           filter.$or = [
@@ -263,6 +373,20 @@ export function createMongoStore(): Store {
         await Membership.deleteOne({ _id: id });
       },
       countByRole: (institutionId, role) => Membership.countDocuments({ institutionId, role }),
+      countSeatedStudents: (institutionId, archived) =>
+        Membership.countDocuments({
+          institutionId,
+          role: "student",
+          $or: [{ batchIds: { $size: 0 } }, { batchIds: { $elemMatch: { $nin: archived } } }],
+        }),
+      moveBatch: async (institutionId, from, to, userIds) => {
+        const filter = { institutionId, role: "student", batchIds: from, ...(userIds ? { userId: { $in: userIds } } : {}) };
+        const ids = (await Membership.find(filter, { _id: 1 })).map((d) => d._id);
+        if (!ids.length) return 0;
+        await Membership.updateMany({ _id: { $in: ids } }, { $addToSet: { batchIds: to } });
+        await Membership.updateMany({ _id: { $in: ids } }, { $pull: { batchIds: from } });
+        return ids.length;
+      },
     },
     batches: {
       create: async (data) => rec(await Batch.create(data)),
@@ -273,6 +397,19 @@ export function createMongoStore(): Store {
         ),
       listForInstitution: async (institutionId) =>
         recs(await Batch.find({ institutionId }).sort({ name: 1 })),
+      update: async (id, patch) =>
+        isId(id) ? recOrNull(await Batch.findByIdAndUpdate(id, { $set: patch }, { new: true })) : null,
+    },
+    departments: {
+      create: async (data) => rec(await Department.create(data)),
+      findById: async (id) => (isId(id) ? recOrNull(await Department.findById(id)) : null),
+      listForInstitution: async (institutionId) =>
+        recs(await Department.find({ institutionId }).collation({ locale: "en", strength: 2 }).sort({ name: 1 })),
+      update: async (id, patch) =>
+        isId(id) ? recOrNull(await Department.findByIdAndUpdate(id, { $set: patch }, { new: true })) : null,
+      delete: async (id) => {
+        await Department.deleteOne({ _id: id });
+      },
     },
     invites: {
       create: async (data) => rec(await Invite.create(data)),
@@ -293,6 +430,23 @@ export function createMongoStore(): Store {
       revoke: async (id) => {
         await Invite.updateOne({ _id: id }, { revokedAt: new Date() });
       },
+    },
+    joinRequests: {
+      create: async (data) => rec(await JoinRequest.create(data)),
+      findById: async (id) => (isId(id) ? recOrNull(await JoinRequest.findById(id)) : null),
+      listForInstitution: async (institutionId, status, limit) =>
+        recs(await JoinRequest.find({ institutionId, status }).sort({ _id: -1 }).limit(limit)),
+      pendingForUser: async (userId) => recs(await JoinRequest.find({ userId, status: "pending" })),
+      decide: async (id, status, by, at) =>
+        isId(id)
+          ? recOrNull(
+              await JoinRequest.findOneAndUpdate(
+                { _id: id, status: "pending" },
+                { $set: { status, decidedBy: by, decidedAt: at } },
+                { new: true },
+              ),
+            )
+          : null,
     },
     audit: {
       record: async (event) => {

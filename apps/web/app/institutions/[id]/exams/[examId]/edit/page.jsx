@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { AlertCircle, ChevronLeft, Code2, ListChecks, ListTodo } from "lucide-react";
+import { AlertCircle, AlignLeft, ChevronLeft, Code2, Library, ListChecks, ListTodo, PenLine, Plus, X } from "lucide-react";
 import {
   Button,
   Card,
@@ -26,8 +26,10 @@ import RequireAuth from "@/app/components/layout/RequireAuth";
 import { examApi } from "@/app/lib/api/exams";
 import { identityApi } from "@/app/lib/api/identity";
 import { useApi } from "@/app/lib/api/useApi";
-import { fromLocalInput, toLocalInput } from "@/app/lib/exams/format";
+import { cloneQuestion, fromLocalInput, isMcq, newId, toLocalInput } from "@/app/lib/exams/format";
+import BankBrowser from "../../_components/BankBrowser";
 import QuestionEditor, { createQuestion } from "../../_components/QuestionEditor";
+import SaveToBankPanel from "../../_components/SaveToBankPanel";
 
 const VISIBILITY = {
   after_submit: "As soon as they submit",
@@ -43,8 +45,59 @@ const toDraft = (exam) => ({
   endsAt: exam.endsAt,
   batchIds: exam.batchIds,
   settings: exam.settings,
+  sections: exam.sections ?? [],
   questions: exam.questions,
 });
+
+/** Exam sections: titled parts (e.g. "Part A: answer any five"). Questions pick their section. */
+function SectionsCard({ sections, onChange, questions }) {
+  const count = (id) => questions.filter((q) => q.sectionId === id).length;
+  const set = (id, patch) => onChange(sections.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  return (
+    <Card className="space-y-4 p-5">
+      <div>
+        <h2 className="text-base font-semibold">Sections</h2>
+        <p className="text-xs text-muted-foreground">
+          Optional. Students see questions grouped by section, in this order; shuffling stays inside a section.
+          Results show a subtotal per section.
+        </p>
+      </div>
+      {sections.map((s, i) => (
+        <div key={s.id} className="grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-[1fr_2fr_auto]">
+          <Input
+            aria-label={`Section ${i + 1} title`}
+            placeholder={`Section ${i + 1} title`}
+            value={s.title}
+            onChange={(e) => set(s.id, { title: e.target.value })}
+          />
+          <Input
+            aria-label={`Section ${i + 1} instructions`}
+            placeholder="Instructions (optional)"
+            value={s.instructions ?? ""}
+            onChange={(e) => set(s.id, { instructions: e.target.value })}
+          />
+          <div className="flex items-center gap-2">
+            <span className="text-xs whitespace-nowrap text-muted-foreground">{count(s.id)} questions</span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove section ${i + 1}`}
+              onClick={() => onChange(sections.filter((x) => x.id !== s.id), s.id)}
+            >
+              <X />
+            </Button>
+          </div>
+        </div>
+      ))}
+      {sections.length < 20 ? (
+        <Button size="sm" onClick={() => onChange([...sections, { id: newId(), title: "", instructions: "" }])}>
+          <Plus />
+          Add section
+        </Button>
+      ) : null}
+    </Card>
+  );
+}
 
 function Problems({ problems }) {
   if (!problems?.length) return null;
@@ -63,7 +116,13 @@ function Problems({ problems }) {
   );
 }
 
-function Builder({ institutionId, exam, batches }) {
+function Builder({ institutionId, exam, batches, access, features }) {
+  const wide = access?.scope?.all ?? true;
+  const proctoring = features?.proctoring !== false;
+  const subjective = features?.subjective === true;
+  const [bankOpen, setBankOpen] = useState(false);
+  const [banking, setBanking] = useState(null); // question id being saved to the bank
+  const [negative, setNegative] = useState("");
   const router = useRouter();
   const [draft, setDraft] = useState(() => toDraft(exam));
   const [dirty, setDirty] = useState(false);
@@ -79,6 +138,23 @@ function Builder({ institutionId, exam, batches }) {
   const setQuestion = (index, q) =>
     update((d) => ({ questions: d.questions.map((x, i) => (i === index ? q : x)) }));
   const addQuestion = (type) => update((d) => ({ questions: [...d.questions, createQuestion(type)] }));
+  const addFromBank = (rows) => {
+    update((d) => ({ questions: [...d.questions, ...rows.map((r) => cloneQuestion(r.question))] }));
+    setBankOpen(false);
+    toast.success(`Added ${rows.length} ${rows.length === 1 ? "question" : "questions"} from the bank.`);
+  };
+  /** Removing a section moves its questions out of it. */
+  const setSections = (sections, removedId) =>
+    update((d) => ({
+      sections,
+      questions: removedId ? d.questions.map((q) => (q.sectionId === removedId ? { ...q, sectionId: null } : q)) : d.questions,
+    }));
+  const applyNegative = () => {
+    const value = Number(negative);
+    if (!(value >= 0)) return;
+    update((d) => ({ questions: d.questions.map((q) => (isMcq(q.type) ? { ...q, negativeMarks: value } : q)) }));
+    toast.success(value ? `Every multiple-choice question now loses ${value} for a wrong answer.` : "Negative marking removed.");
+  };
   const removeQuestion = (index) =>
     update((d) => ({ questions: d.questions.filter((_, j) => j !== index) }));
   const moveQuestion = (index, dir) =>
@@ -208,11 +284,15 @@ function Builder({ institutionId, exam, batches }) {
         <div>
           <p className="text-sm font-medium">Batches</p>
           <p className="text-xs text-muted-foreground">
-            Leave all unticked to assign every student in the institution.
+            {wide
+              ? "Leave all unticked to assign every student in the institution."
+              : "Pick at least one of your batches."}
           </p>
           <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
             {batches.length === 0 ? (
-              <span className="text-sm text-muted-foreground">No batches yet. Create them on the Batches tab.</span>
+              <span className="text-sm text-muted-foreground">
+                {wide ? "No batches yet. Create them on the Batches tab." : "You aren't in any batch yet. Ask an admin to add you to one."}
+              </span>
             ) : (
               batches.map((b) => (
                 <Checkbox
@@ -246,14 +326,16 @@ function Builder({ institutionId, exam, batches }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <Checkbox
             label="Require fullscreen"
-            description="Leaving fullscreen is recorded."
-            checked={draft.settings.requireFullscreen}
+            description={proctoring ? "Leaving fullscreen is recorded." : "Proctoring isn't part of your institution's plan."}
+            disabled={!proctoring}
+            checked={proctoring && draft.settings.requireFullscreen}
             onChange={(e) => setSetting("requireFullscreen", e.target.checked)}
           />
           <Checkbox
             label="Block copy and paste"
-            description="Attempts are blocked and recorded."
-            checked={draft.settings.blockCopyPaste}
+            description={proctoring ? "Attempts are blocked and recorded." : "Proctoring isn't part of your institution's plan."}
+            disabled={!proctoring}
+            checked={proctoring && draft.settings.blockCopyPaste}
             onChange={(e) => setSetting("blockCopyPaste", e.target.checked)}
           />
           <Checkbox
@@ -267,6 +349,29 @@ function Builder({ institutionId, exam, batches }) {
             checked={draft.settings.shuffleOptions}
             onChange={(e) => setSetting("shuffleOptions", e.target.checked)}
           />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Checkbox
+            label="Show rank and percentile"
+            description="Students see where they stand once results are out."
+            checked={draft.settings.showRank ?? false}
+            onChange={(e) => setSetting("showRank", e.target.checked)}
+          />
+          <Field
+            label="Re-evaluation requests (days)"
+            htmlFor="reevaluation"
+            hint="Students can ask for a question to be re-checked for this many days after the exam closes. 0 = off."
+          >
+            <Input
+              id="reevaluation"
+              type="number"
+              min={0}
+              max={60}
+              value={draft.settings.reevaluationDays ?? 0}
+              onChange={(e) => setSetting("reevaluationDays", Math.max(0, Math.min(60, Number(e.target.value) || 0)))}
+              className="w-28"
+            />
+          </Field>
         </div>
         <Field label="Show students their score" htmlFor="visibility">
           <Select value={draft.settings.resultsVisibility} onValueChange={(v) => setSetting("resultsVisibility", v)}>
@@ -287,24 +392,64 @@ function Builder({ institutionId, exam, batches }) {
         </p>
       </Card>
 
+      <SectionsCard sections={draft.sections} onChange={setSections} questions={draft.questions} />
+
       <div className="space-y-4">
-        <h2 className="text-base font-semibold">Questions</h2>
+        <div className="flex flex-wrap items-end gap-3">
+          <h2 className="mr-auto text-base font-semibold">Questions</h2>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            Negative marks for every MCQ
+            <Input
+              type="number"
+              min={0}
+              step="0.25"
+              value={negative}
+              placeholder="e.g. 0.25"
+              onChange={(e) => setNegative(e.target.value)}
+              className="h-8 w-24"
+            />
+          </label>
+          <Button size="sm" onClick={applyNegative} disabled={negative === ""}>
+            Apply
+          </Button>
+        </div>
         {draft.questions.length === 0 ? (
           <Card>
-            <EmptyState title="Add your first question" description="Mix multiple-choice and coding questions." />
+            <EmptyState
+              title="Add your first question"
+              description="Mix multiple-choice, coding and written questions, or pick some from the question bank."
+            />
           </Card>
         ) : null}
         {draft.questions.map((q, i) => (
-          <QuestionEditor
-            key={q.id}
-            index={i}
-            total={draft.questions.length}
-            question={q}
-            onChange={(next) => setQuestion(i, next)}
-            onRemove={() => removeQuestion(i)}
-            onMove={(dir) => moveQuestion(i, dir)}
-          />
+          <div key={q.id} className="space-y-3">
+            <QuestionEditor
+              index={i}
+              total={draft.questions.length}
+              question={q}
+              sections={draft.sections}
+              subjective={subjective}
+              onChange={(next) => setQuestion(i, next)}
+              onRemove={() => removeQuestion(i)}
+              onMove={(dir) => moveQuestion(i, dir)}
+              onSaveToBank={() => setBanking(banking === q.id ? null : q.id)}
+            />
+            {banking === q.id ? (
+              <SaveToBankPanel institutionId={institutionId} question={q} onDone={() => setBanking(null)} />
+            ) : null}
+          </div>
         ))}
+        {bankOpen ? (
+          <Card className="space-y-3 p-5">
+            <div className="flex items-center">
+              <h3 className="text-sm font-semibold">Add from the question bank</h3>
+              <Button variant="ghost" size="icon-sm" className="ml-auto" aria-label="Close the question bank" onClick={() => setBankOpen(false)}>
+                <X />
+              </Button>
+            </div>
+            <BankBrowser institutionId={institutionId} mode="select" subjective={subjective} onAdd={addFromBank} />
+          </Card>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => addQuestion("mcq_single")}>
             <ListTodo />
@@ -318,7 +463,32 @@ function Builder({ institutionId, exam, batches }) {
             <Code2 />
             Coding
           </Button>
+          <Button
+            onClick={() => addQuestion("short_answer")}
+            disabled={!subjective}
+            title={subjective ? undefined : "Written answers aren't switched on for your institution."}
+          >
+            <PenLine />
+            Short answer
+          </Button>
+          <Button
+            onClick={() => addQuestion("long_answer")}
+            disabled={!subjective}
+            title={subjective ? undefined : "Written answers aren't switched on for your institution."}
+          >
+            <AlignLeft />
+            Long answer
+          </Button>
+          <Button variant="secondary" onClick={() => setBankOpen((o) => !o)}>
+            <Library />
+            From question bank
+          </Button>
         </div>
+        {!subjective ? (
+          <p className="text-xs text-muted-foreground">
+            Short and long answers need the Written answers feature. Contact LogixAI to switch it on.
+          </p>
+        ) : null}
       </div>
 
       <div className="border-t border-border pt-6">
@@ -334,8 +504,9 @@ function BuilderLoader() {
   const { id: institutionId, examId } = useParams();
   const exam = useApi(() => examApi.get(examId), [examId]);
   const batches = useApi(() => identityApi.listBatches(institutionId), [institutionId]);
+  const membership = useApi(() => identityApi.getInstitution(institutionId), [institutionId]);
 
-  if (exam.loading || batches.loading) {
+  if (exam.loading || batches.loading || membership.loading) {
     return (
       <Container className="space-y-3 py-10">
         <Skeleton className="h-8 w-1/2" />
@@ -369,7 +540,20 @@ function BuilderLoader() {
       </Container>
     );
   }
-  return <Builder institutionId={institutionId} exam={exam.data} batches={batches.data ?? []} />;
+  const access = membership.data?.access;
+  // Your own batches (all of them for admins); archived batches only if the exam already uses them.
+  const choices = (batches.data ?? []).filter(
+    (b) => exam.data.batchIds.includes(b.id) || (!b.archived && (!access || access.scope.all || access.scope.batchIds.includes(b.id))),
+  );
+  return (
+    <Builder
+      institutionId={institutionId}
+      exam={exam.data}
+      batches={choices}
+      access={access}
+      features={membership.data?.institution?.features}
+    />
+  );
 }
 
 export default function EditExamPage() {

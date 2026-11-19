@@ -2,7 +2,8 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Clock } from "lucide-react";
+import toast from "react-hot-toast";
+import { Clock, PenLine, Trophy } from "lucide-react";
 import { Badge, Button, Card, Container, EmptyState, Skeleton, Spinner } from "@logixai/ui";
 import AppHeader from "@/app/components/layout/AppHeader";
 import RequireAuth from "@/app/components/layout/RequireAuth";
@@ -16,7 +17,9 @@ function Result() {
   const result = useApi(() => examApi.myResult(examId), [examId]);
   const exam = useApi(() => examApi.get(examId), [examId]);
   const data = result.data;
-  const judging = data?.released && data.score === null;
+  const grading = Boolean(data?.released && data.questions.some((q) => q.awaitingGrading));
+  // Coding answers still being judged (written answers wait for a person, so no polling for those).
+  const judging = data?.released && data.score === null && !grading;
 
   // Coding answers still being judged: check again shortly.
   const { reload } = result;
@@ -44,6 +47,15 @@ function Result() {
 
   const percent = data.score !== null && data.maxScore ? Math.round((data.score / data.maxScore) * 100) : null;
 
+  const requestReevaluation = async (questionId, reason) => {
+    const request = await examApi.requestReevaluation(examId, questionId, reason);
+    result.setData((d) => ({
+      ...d,
+      questions: d.questions.map((q) => (q.questionId === questionId ? { ...q, reevaluation: request } : q)),
+    }));
+    toast.success("Request sent. You'll see the reply here.");
+  };
+
   return (
     <Container size="md" className="space-y-6 py-10">
       <div>
@@ -65,6 +77,16 @@ function Result() {
               </p>
             </div>
           </div>
+        ) : grading ? (
+          <div className="flex items-start gap-3">
+            <PenLine className="mt-0.5 size-5 text-muted-foreground" />
+            <div>
+              <p className="font-semibold">Your written answers are being graded</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Marks for the other questions are below. Your total appears once a teacher grades the rest.
+              </p>
+            </div>
+          </div>
         ) : judging ? (
           <div className="flex items-center gap-3">
             <Spinner className="size-5" />
@@ -80,11 +102,27 @@ function Result() {
               </p>
             </div>
             <p className="pb-1 text-lg font-semibold text-muted-foreground">{percent}%</p>
+            {data.rank ? (
+              <div className="ml-auto flex items-center gap-3 rounded-lg bg-primary-soft px-4 py-2 text-primary-soft-foreground">
+                <Trophy className="size-5" />
+                <div>
+                  <p className="text-sm font-semibold">
+                    Rank {data.rank.position} of {data.rank.outOf}
+                  </p>
+                  <p className="text-xs">Better than {data.rank.percentile}% of others</p>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
+        {data.released && data.reevaluation?.open ? (
+          <p className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
+            Think a question was marked wrongly? You can ask for a re-check until {formatDateTime(data.reevaluation.until)}.
+          </p>
+        ) : null}
       </Card>
 
-      {data.released ? <AttemptBreakdown result={data} /> : null}
+      {data.released ? <AttemptBreakdown result={data} onRequest={requestReevaluation} /> : null}
 
       {exam.data ? (
         <Button asChild>

@@ -174,23 +174,3 @@ export const EntitlementGrantSchema = z.object({
   source: z.enum(["purchase", "trial", "admin"]),
 });
 export type EntitlementGrantInput = z.infer<typeof EntitlementGrantSchema>;
-
-/** Platform admin view of an institution and its licence. */
-export interface AdminInstitutionView {
-  id: string;
-  name: string;
-  slug: string;
-  type: string;
-  memberCount: number;
-  licenceUntil: string | null;
-  licenceSeats: number | null;
-  createdAt: string;
-}
-
-export const InstitutionLicenceSchema = z.object({
-  /** null removes the licence. */
-  until: z.string().datetime().nullable(),
-  /** Seats bought (informational for now); null = unlimited. */
-  seats: z.number().int().min(1).max(1_000_000).nullable().default(null),
-});
-export type InstitutionLicenceInput = z.infer<typeof InstitutionLicenceSchema>;

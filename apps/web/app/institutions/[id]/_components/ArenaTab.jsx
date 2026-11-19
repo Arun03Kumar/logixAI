@@ -26,7 +26,7 @@ import { arenaApi } from "@/app/lib/api/arena";
 import { identityApi } from "@/app/lib/api/identity";
 import { useApi } from "@/app/lib/api/useApi";
 import { MasteryBar } from "@/app/arena/_components/bits";
-import { canView, formatDate } from "../../labels";
+import { can, formatDate, inScope } from "../../labels";
 
 const pct = (v) => `${Math.round((v ?? 0) * 100)}%`;
 
@@ -201,8 +201,11 @@ function Report({ institutionId, batches, assignments }) {
   );
 }
 
-function StaffView({ institutionId }) {
-  const batches = useApi(() => identityApi.listBatches(institutionId), [institutionId]);
+function StaffView({ institutionId, access }) {
+  const allBatches = useApi(() => identityApi.listBatches(institutionId), [institutionId]);
+  // Staff with a batch scope (department heads, instructors, assistants) work on their own batches.
+  const batches = { ...allBatches, data: allBatches.data?.filter((b) => inScope(access, b.id)) };
+  const assigns = can(access, "practice.assign");
   const tracks = useApi(() => arenaApi.tracks(), []);
   const assignments = useApi(() => arenaApi.assignments(institutionId), [institutionId]);
 
@@ -239,20 +242,22 @@ function StaffView({ institutionId }) {
     <div className="space-y-6">
       <Card className="space-y-4 p-5">
         <div>
-          <h2 className="font-semibold">Assign practice</h2>
+          <h2 className="font-semibold">{assigns ? "Assign practice" : "Assigned practice"}</h2>
           <p className="text-sm text-muted-foreground">
             Students in the batch see the track on their ML Arena page, and you can follow their progress below.
           </p>
         </div>
-        {batches.data?.length ? (
+        {!assigns ? null : batches.data?.some((b) => !b.archived) ? (
           <AssignForm
             institutionId={institutionId}
-            batches={batches.data}
+            batches={batches.data.filter((b) => !b.archived)}
             tracks={tracks.data}
             onAssigned={(a) => assignments.setData((list) => [a, ...(list ?? [])])}
           />
         ) : (
-          <p className="text-sm text-muted-foreground">Create a batch first, in the Batches tab.</p>
+          <p className="text-sm text-muted-foreground">
+            {access.scope.all ? "Create a batch first, in the Batches tab." : "You aren't in any batch yet. Ask an admin to add you to one."}
+          </p>
         )}
         {rows.length ? (
           <ul className="divide-y divide-border rounded-lg border border-border">
@@ -263,9 +268,11 @@ function StaffView({ institutionId }) {
                 </Link>
                 <span className="text-muted-foreground">→ {batchName(a.batchId)}</span>
                 <span className="text-muted-foreground">{a.dueAt ? `due ${formatDate(a.dueAt)}` : "no due date"}</span>
-                <Button variant="ghost" size="icon-sm" className="ml-auto" aria-label={`Remove ${a.trackTitle}`} onClick={() => remove(a)}>
-                  <Trash2 />
-                </Button>
+                {assigns ? (
+                  <Button variant="ghost" size="icon-sm" className="ml-auto" aria-label={`Remove ${a.trackTitle}`} onClick={() => remove(a)}>
+                    <Trash2 />
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -313,6 +320,10 @@ function StudentView({ institutionId }) {
 }
 
 /** ML Arena inside an institution: staff assign tracks and see reports; students see their assignments. */
-export default function ArenaTab({ institutionId, myRole }) {
-  return canView(myRole) ? <StaffView institutionId={institutionId} /> : <StudentView institutionId={institutionId} />;
+export default function ArenaTab({ institutionId, access }) {
+  return can(access, "reports.view") ? (
+    <StaffView institutionId={institutionId} access={access} />
+  ) : (
+    <StudentView institutionId={institutionId} />
+  );
 }

@@ -79,6 +79,15 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/** A temporary password staff hand out (import, reset): 10 easy-to-read characters, ~50 bits. */
+export function newTempPassword(): string {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = randomBytes(10);
+  let out = "";
+  for (let i = 0; i < 10; i++) out += alphabet[bytes[i]! % alphabet.length];
+  return out;
+}
+
 /** Short human-friendly invite code, e.g. "K7QM-2XPA". No 0/O/1/I. */
 export function newInviteCode(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

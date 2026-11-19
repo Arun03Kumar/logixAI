@@ -30,6 +30,30 @@ export const examApi = {
   },
   review: (examId, attemptId) => call(`/exams/${examId}/attempts/${attemptId}`),
 
+  // Grading (graders: instructors, department heads, assistants)
+  gradingOverview: (examId) => call(`/exams/${examId}/grading`),
+  /** show: "ungraded" | "all" */
+  gradingQueue: (examId, questionId, { show = "ungraded", cursor, limit = 20 } = {}) =>
+    call(`/exams/${examId}/grading/${questionId}?${pageQuery({ show, cursor, limit })}`),
+  /** marks null = back to the automatic score. */
+  grade: (examId, attemptId, questionId, body) =>
+    call(`/exams/${examId}/attempts/${attemptId}/grades/${questionId}`, { method: "PUT", body }),
+  setExtraTime: (examId, userId, minutes) =>
+    call(`/exams/${examId}/extra-time`, { method: "PUT", body: { userId, minutes } }),
+  reevaluations: (examId, status) => call(`/exams/${examId}/reevaluations${status ? `?status=${status}` : ""}`),
+  resolveReevaluation: (examId, requestId, body) =>
+    call(`/exams/${examId}/reevaluations/${requestId}/resolve`, { method: "POST", body }),
+
+  // Question bank (staff who set exams)
+  /** filters: q, tag, type, difficulty, cursor, limit */
+  bank: (institutionId, filters = {}) =>
+    call(`/institutions/${institutionId}/question-bank?${pageQuery({ limit: 20, ...filters })}`),
+  addToBank: (institutionId, body) => call(`/institutions/${institutionId}/question-bank`, { method: "POST", body }),
+  updateBankQuestion: (institutionId, id, body) =>
+    call(`/institutions/${institutionId}/question-bank/${id}`, { method: "PUT", body }),
+  removeBankQuestion: (institutionId, id) =>
+    call(`/institutions/${institutionId}/question-bank/${id}`, { method: "DELETE" }),
+
   // Taking (students)
   start: (examId) => call(`/exams/${examId}/attempts`, { method: "POST" }),
   attempt: (attemptId) => call(`/attempts/${attemptId}`),
@@ -41,4 +65,6 @@ export const examApi = {
     call(`/attempts/${attemptId}/events`, { method: "POST", body: { type } }),
   submit: (attemptId) => call(`/attempts/${attemptId}/submit`, { method: "POST" }),
   myResult: (examId) => call(`/exams/${examId}/my-result`),
+  requestReevaluation: (examId, questionId, reason) =>
+    call(`/exams/${examId}/my-result/reevaluations`, { method: "POST", body: { questionId, reason } }),
 };

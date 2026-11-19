@@ -1,31 +1,25 @@
 "use client";
 import { useState } from "react";
+import toast from "react-hot-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, ChevronRight, Plus } from "lucide-react";
+import { AtSign, Building2, ChevronRight, Settings2 } from "lucide-react";
 import {
   Badge,
   Button,
   Card,
   Container,
   EmptyState,
-  Field,
   Input,
   PageHeader,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Skeleton,
-  Spinner,
 } from "@logixai/ui";
 import AppHeader from "@/app/components/layout/AppHeader";
 import RequireAuth from "@/app/components/layout/RequireAuth";
-import FormError from "@/app/components/forms/FormError";
 import { identityApi } from "@/app/lib/api/identity";
 import { useApi } from "@/app/lib/api/useApi";
-import { ROLE_LABEL, ROLE_TONE, TYPE_LABEL } from "./labels";
+import { useSession } from "@/app/lib/auth/useSession";
+import { ROLE_LABEL, ROLE_TONE, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "./labels";
 
 function JoinWithCode() {
   const router = useRouter();
@@ -52,77 +46,55 @@ function JoinWithCode() {
   );
 }
 
-function CreateInstitutionForm({ onCancel }) {
-  const router = useRouter();
-  const [form, setForm] = useState({ name: "", type: "college" });
-  const [errors, setErrors] = useState({});
-  const [formError, setFormError] = useState(null);
-  const [saving, setSaving] = useState(false);
+/** Institutions that accept people with the caller's email domain (after approval). */
+function DomainSuggestions() {
+  const suggested = useApi(() => identityApi.suggestedInstitutions(), []);
+  const [busy, setBusy] = useState(null);
+  const rows = suggested.data ?? [];
+  if (!rows.length) return null;
 
-  const submit = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setFormError(null);
+  const ask = async (inst) => {
+    setBusy(inst.id);
     try {
-      const created = await identityApi.createInstitution(form);
-      router.push(`/institutions/${created.institution.id}`);
+      await identityApi.requestToJoin(inst.id);
+      suggested.setData((list) => list.map((x) => (x.id === inst.id ? { ...x, pending: true } : x)));
+      toast.success(`Request sent to ${inst.name}.`);
     } catch (err) {
-      setErrors(err.fieldErrors ?? {});
-      setFormError(err.message);
-      setSaving(false);
+      toast.error(err.message);
+    } finally {
+      setBusy(null);
     }
   };
 
   return (
-    <Card className="p-5">
-      <h2 className="text-base font-semibold">Set up an institution</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        You&apos;ll be its owner. Next you can create batches and invite
-        instructors and students.
-      </p>
-      <form onSubmit={submit} className="mt-5 grid gap-4 sm:grid-cols-[1fr_200px]">
-        <div className="sm:col-span-2">
-          <FormError message={formError} />
+    <Card className="divide-y divide-border">
+      {rows.map((inst) => (
+        <div key={inst.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary-soft text-primary">
+            <AtSign className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">{inst.name}</p>
+            <p className="text-sm text-muted-foreground">
+              Your email is from @{inst.domain}.{" "}
+              {inst.pending ? "Your request is waiting for approval." : "Ask to join and a teacher or admin will approve you."}
+            </p>
+          </div>
+          {inst.pending ? (
+            <Badge tone="warning">Waiting</Badge>
+          ) : (
+            <Button size="sm" variant="primary" disabled={busy === inst.id} onClick={() => ask(inst)}>
+              Ask to join
+            </Button>
+          )}
         </div>
-        <Field label="Name" htmlFor="inst-name" error={errors.name}>
-          <Input
-            id="inst-name"
-            placeholder="Delhi Public School, R. K. Puram"
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            aria-invalid={Boolean(errors.name)}
-          />
-        </Field>
-        <Field label="Type" htmlFor="inst-type">
-          <Select value={form.type} onValueChange={(type) => setForm((f) => ({ ...f, type }))}>
-            <SelectTrigger id="inst-type" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(TYPE_LABEL).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <div className="flex gap-2 sm:col-span-2">
-          <Button type="submit" variant="primary" disabled={saving}>
-            {saving ? <Spinner className="text-primary-foreground" /> : null}
-            Create institution
-          </Button>
-          <Button variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-        </div>
-      </form>
+      ))}
     </Card>
   );
 }
 
 function InstitutionsList() {
-  const [creating, setCreating] = useState(false);
+  const { user } = useSession();
   const { data, loading, error } = useApi(() => identityApi.me(), []);
   const memberships = data?.memberships ?? [];
 
@@ -132,18 +104,19 @@ function InstitutionsList() {
         title="Institutions"
         description="Schools and colleges you belong to. Tests and courses from your institution appear here."
         actions={
-          !creating ? (
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <Plus />
-              Create institution
+          user?.role === "admin" ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href="/admin/institutions">
+                <Settings2 />
+                Institutions console
+              </Link>
             </Button>
           ) : null
         }
       />
 
       <div className="space-y-6">
-        {creating ? <CreateInstitutionForm onCancel={() => setCreating(false)} /> : null}
-
+        <DomainSuggestions />
         <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold">Have an invite code?</h2>
@@ -168,7 +141,7 @@ function InstitutionsList() {
             <EmptyState
               icon={<Building2 />}
               title="You're not part of an institution yet"
-              description="Join with an invite code, or set up your school or college to invite your students."
+              description="Join with an invite code from your teacher or admin. Want LogixAI for your school or college? Write to info@logixai.com and we'll set it up."
             />
           ) : (
             <ul className="divide-y divide-border">
@@ -185,6 +158,9 @@ function InstitutionsList() {
                       <p className="truncate text-sm font-semibold">{institution.name}</p>
                       <p className="text-sm text-muted-foreground">{TYPE_LABEL[institution.type]}</p>
                     </div>
+                    {institution.status && institution.status !== "active" ? (
+                      <Badge tone={STATUS_TONE[institution.status]}>{STATUS_LABEL[institution.status]}</Badge>
+                    ) : null}
                     <Badge tone={ROLE_TONE[role]}>{ROLE_LABEL[role]}</Badge>
                     <ChevronRight className="size-4 text-muted-foreground" />
                   </Link>

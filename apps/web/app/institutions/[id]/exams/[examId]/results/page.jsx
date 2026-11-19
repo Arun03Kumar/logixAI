@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { AlertTriangle, ChevronLeft, Download, Users } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Download, PenLine, Users } from "lucide-react";
 import {
   Badge,
   Button,
@@ -22,7 +22,10 @@ import AppHeader from "@/app/components/layout/AppHeader";
 import RequireAuth from "@/app/components/layout/RequireAuth";
 import LoadMore from "@/app/components/LoadMore";
 import { examApi } from "@/app/lib/api/exams";
+import { identityApi } from "@/app/lib/api/identity";
+import { useApi } from "@/app/lib/api/useApi";
 import { usePagedApi } from "@/app/lib/api/usePagedApi";
+import ExtraTimePanel from "../../_components/ExtraTimePanel";
 import {
   ATTEMPT_STATUS,
   PHASE,
@@ -52,7 +55,10 @@ function Results() {
   const { id: institutionId, examId } = useParams();
   const router = useRouter();
   const results = usePagedApi((cursor) => examApi.results(examId, { cursor }), [examId]);
+  const detail = useApi(() => examApi.get(examId), [examId]);
+  const membership = useApi(() => identityApi.getInstitution(institutionId), [institutionId]);
   const [exporting, setExporting] = useState(false);
+  const capabilities = membership.data?.access?.capabilities ?? [];
 
   if (results.loading) {
     return (
@@ -112,7 +118,16 @@ function Results() {
             {formatWindow(exam.startsAt, exam.endsAt)} · {exam.durationMinutes} min · {exam.totalMarks} marks
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {(exam.hasWritten || summary.openReevaluations > 0) && capabilities.includes("tests.grade") ? (
+            <Button asChild variant="primary">
+              <Link href={`/institutions/${institutionId}/exams/${examId}/grade`}>
+                <PenLine />
+                Grade
+                {summary.openReevaluations ? ` · ${summary.openReevaluations} re-check${summary.openReevaluations === 1 ? "" : "s"}` : ""}
+              </Link>
+            </Button>
+          ) : null}
           {summary.attempts === 0 && exam.phase !== "ended" ? (
             <Button onClick={unpublish}>Unpublish to edit</Button>
           ) : null}
@@ -130,8 +145,15 @@ function Results() {
         />
         <Stat label="Average score" value={summary.averageScore ?? "—"} />
         <Stat label="Highest score" value={summary.highestScore ?? "—"} />
-        <Stat label="With integrity events" value={summary.flagged} />
+        <Stat
+          label={summary.awaitingScore ? "Waiting for marks" : "With integrity events"}
+          value={summary.awaitingScore ? `${summary.awaitingScore} (${summary.flagged} flagged)` : summary.flagged}
+        />
       </div>
+
+      {detail.data?.extraTime && capabilities.includes("tests.manage") && exam.phase !== "ended" ? (
+        <ExtraTimePanel institutionId={institutionId} exam={detail.data} />
+      ) : null}
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
@@ -163,7 +185,7 @@ function Results() {
                 <TableRow key={r.attemptId}>
                   <TableCell>
                     <p className="font-medium">{r.name}</p>
-                    <p className="text-xs text-muted-foreground">{r.email}</p>
+                    <p className="text-xs text-muted-foreground">{[r.rollNumber, r.email].filter(Boolean).join(" · ")}</p>
                   </TableCell>
                   <TableCell>
                     <Badge tone={ATTEMPT_STATUS[r.status].tone}>{ATTEMPT_STATUS[r.status].label}</Badge>

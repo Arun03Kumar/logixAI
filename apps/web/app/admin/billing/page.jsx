@@ -22,7 +22,6 @@ import AppHeader from "@/app/components/layout/AppHeader";
 import LoadMore from "@/app/components/LoadMore";
 import RequireAuth from "@/app/components/layout/RequireAuth";
 import { billingApi } from "@/app/lib/api/billing";
-import { identityApi } from "@/app/lib/api/identity";
 import { useApi } from "@/app/lib/api/useApi";
 import { usePagedApi } from "@/app/lib/api/usePagedApi";
 import { formatDay, formatRupees } from "@/app/lib/billing/plan";
@@ -240,124 +239,10 @@ function GrantPro() {
   );
 }
 
-function Licences() {
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const list = useApi(() => identityApi.adminInstitutions(search), [search]);
-  const [edit, setEdit] = useState(null);
-
-  const save = async (inst, until, seats) => {
-    try {
-      const updated = await identityApi.setInstitutionLicence(inst.id, {
-        until: until ? new Date(`${until}T23:59:59`).toISOString() : null,
-        seats: seats ? Number(seats) : null,
-      });
-      list.setData((rows) => rows.map((r) => (r.id === inst.id ? updated : r)));
-      setEdit(null);
-      toast.success(until ? `${inst.name} is licensed until ${formatDay(updated.licenceUntil)}.` : `Licence removed from ${inst.name}.`);
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSearch(query.trim());
-        }}
-        className="flex gap-2"
-      >
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name or slug" className="max-w-sm" aria-label="Search institutions" />
-        <Button type="submit">Search</Button>
-      </form>
-      <p className="text-sm text-muted-foreground">
-        While a licence is active, every member of the institution has Pro. Seats are recorded for invoicing and aren&apos;t enforced yet.
-      </p>
-      <Card className="overflow-hidden">
-        {list.loading ? (
-          <Skeleton className="m-5 h-20" />
-        ) : list.error ? (
-          <EmptyState title="Couldn't load institutions" description={list.error.message} />
-        ) : list.data.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Institution</TableHead>
-                <TableHead>Members</TableHead>
-                <TableHead>Licence</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {list.data.map((inst) => (
-                <TableRow key={inst.id}>
-                  <TableCell>
-                    <p className="font-medium">{inst.name}</p>
-                    <p className="text-xs text-muted-foreground">{inst.slug}</p>
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {inst.memberCount}
-                    {inst.licenceSeats ? ` / ${inst.licenceSeats} seats` : ""}
-                  </TableCell>
-                  <TableCell>
-                    {edit?.id === inst.id ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Input type="date" value={edit.until} onChange={(e) => setEdit((x) => ({ ...x, until: e.target.value }))} className="w-40" aria-label="Licence ends" />
-                        <Input type="number" min="1" placeholder="Seats" value={edit.seats} onChange={(e) => setEdit((x) => ({ ...x, seats: e.target.value }))} className="w-24" aria-label="Seats" />
-                        <Button size="sm" variant="primary" disabled={!edit.until} onClick={() => save(inst, edit.until, edit.seats)}>
-                          Save
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : inst.licenceUntil && new Date(inst.licenceUntil) > new Date() ? (
-                      <Badge tone="success">Until {formatDay(inst.licenceUntil)}</Badge>
-                    ) : (
-                      <span className="text-muted-foreground">None</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {edit?.id === inst.id ? null : (
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setEdit({ id: inst.id, until: inst.licenceUntil?.slice(0, 10) ?? "", seats: inst.licenceSeats ?? "" })}
-                        >
-                          {inst.licenceUntil ? "Change" : "Add licence"}
-                        </Button>
-                        {inst.licenceUntil ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => window.confirm(`Remove ${inst.name}'s licence? Members lose Pro at their next sign-in refresh.`) && save(inst, null, null)}
-                          >
-                            Remove
-                          </Button>
-                        ) : null}
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <EmptyState title="No institutions found" />
-        )}
-      </Card>
-    </div>
-  );
-}
-
 const TABS = [
   { value: "payments", label: "Payments" },
   { value: "coupons", label: "Coupons" },
   { value: "grant", label: "Grant Pro" },
-  { value: "licences", label: "Institution licences" },
 ];
 
 export default function BillingAdminPage() {
@@ -367,14 +252,13 @@ export default function BillingAdminPage() {
       <AppHeader />
       <main className="py-10">
         <Container size="xl" className="space-y-6">
-          <PageHeader title="Billing admin" description="Revenue, coupons, complimentary Pro and institution licences." />
+          <PageHeader title="Billing admin" description="Revenue, coupons and complimentary Pro. Institution contracts live in the institutions console." />
           <RequireAuth role="admin">
             <Tabs items={TABS} value={tab} onValueChange={setTab} aria-label="Billing admin sections" />
             <div className="mt-6">
               {tab === "payments" && <Payments />}
               {tab === "coupons" && <Coupons />}
               {tab === "grant" && <GrantPro />}
-              {tab === "licences" && <Licences />}
             </div>
           </RequireAuth>
         </Container>

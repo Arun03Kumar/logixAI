@@ -1,17 +1,11 @@
 /**
  * Who has Pro. identity-service is the source of truth: billing-service grants
- * personal Pro through the internal API, platform admins set institution
- * licences, and the result goes into the session and the access token.
+ * personal Pro through the internal API, institution contracts set licences
+ * (adminInstitutionService), and the result goes into the session and token.
  */
-import {
-  FREE_PLAN,
-  type AdminInstitutionView,
-  type EntitlementGrantInput,
-  type InstitutionLicenceInput,
-  type PlanState,
-} from "@logixai/contracts";
+import { FREE_PLAN, type EntitlementGrantInput, type PlanState } from "@logixai/contracts";
 import { NotFoundError } from "@logixai/service-kit";
-import type { InstitutionRecord, Store, UserRecord } from "../store/types.js";
+import type { Store, UserRecord } from "../store/types.js";
 
 /** Personal Pro, or an institution licence through any membership — whichever ends later. */
 export async function planFor(store: Store, user: UserRecord, now = new Date()): Promise<PlanState> {
@@ -25,6 +19,8 @@ export async function planFor(store: Store, user: UserRecord, now = new Date()):
   if (memberships.length) {
     const institutions = await store.institutions.findByIds(memberships.map((m) => m.institutionId));
     for (const inst of institutions) {
+      // Suspended or archived institutions don't grant Pro.
+      if ((inst.status ?? "active") !== "active") continue;
       if (inst.licenceUntil && inst.licenceUntil > now && inst.licenceUntil.getTime() > bestUntil) {
         best = { tier: "pro", until: inst.licenceUntil.toISOString(), source: "institution" };
         bestUntil = inst.licenceUntil.getTime();
@@ -52,50 +48,6 @@ export class PlanService {
   async userByEmail(email: string): Promise<{ id: string; name: string; email: string }> {
     const user = await this.store.users.findByEmail(email.trim().toLowerCase());
     if (!user) throw new NotFoundError("User", email);
-    return { id: user.id, name: user.name, email: user.email };
-  }
-
-  async listInstitutions(query: string | undefined): Promise<AdminInstitutionView[]> {
-    const rows = await this.store.institutions.search(query?.trim() || undefined, 50);
-    const counts = await this.store.memberships.countForInstitutions(rows.map((r) => r.id));
-    return rows.map((r) => this.view(r, counts[r.id] ?? 0));
-  }
-
-  async setLicence(
-    actorId: string,
-    institutionId: string,
-    input: InstitutionLicenceInput,
-  ): Promise<AdminInstitutionView> {
-    const updated = await this.store.institutions.setLicence(
-      institutionId,
-      input.until ? new Date(input.until) : null,
-      input.until ? input.seats : null,
-    );
-    if (!updated) throw new NotFoundError("Institution", institutionId);
-    await this.store.audit
-      .record({
-        actorId,
-        action: "institution.licence_changed",
-        institutionId,
-        targetType: "institution",
-        targetId: institutionId,
-        meta: { until: input.until, seats: input.until ? input.seats : null },
-      })
-      .catch(() => {});
-    const counts = await this.store.memberships.countForInstitutions([institutionId]);
-    return this.view(updated, counts[institutionId] ?? 0);
-  }
-
-  private view(r: InstitutionRecord, memberCount: number): AdminInstitutionView {
-    return {
-      id: r.id,
-      name: r.name,
-      slug: r.slug,
-      type: r.type,
-      memberCount,
-      licenceUntil: r.licenceUntil ? r.licenceUntil.toISOString() : null,
-      licenceSeats: r.licenceSeats ?? null,
-      createdAt: r.createdAt.toISOString(),
-    };
+    return { id: user.id, name: user.name, email: user.email ?? "" };
   }
 }

@@ -111,9 +111,10 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
   - Platform roles: `user`, `admin`. Creating, editing or deleting problems
     needs `admin`. Emails in identity-service's `BOOTSTRAP_ADMIN_EMAILS` get
     `admin` when they sign up.
-  - Institution roles: `owner` > `admin` > `instructor` > `student`. Owners and
-    admins manage batches and invite codes; students join with a code at
-    `/join/<code>`.
+  - Institution roles: `owner` > `admin` > `dept_head` > `instructor` >
+    `assistant` > `student` (see docs/institutions.md). People join with a
+    code at `/join/<code>`, a CSV import, or their email domain; students
+    without email sign in with institution code + roll number.
   - In production set `JWT_PRIVATE_KEY` (identity-service) and the same
     `INTERNAL_API_TOKEN` in problem-service, submission-service and
     socket-service (they refuse to start without it).
@@ -158,10 +159,19 @@ Run one app only: `npx turbo run dev --filter=@logixai/problem-service`.
   `npm run content:build` after changing it. Code items use the `PYTHON_ML`
   runtime and are compared as JSON with a float tolerance, outside the sandbox.
 - **Plans** ([docs/billing.md](docs/billing.md)): identity-service decides who
-  has Pro (personal pass or institution licence) and puts `plan`/`planUntil`
+  has Pro (personal pass or institution contract) and puts `plan`/`planUntil`
   in the access token; check it with `hasPro(claims)` from
   `@logixai/contracts`. billing-service sells passes via Razorpay and uses a
   mock checkout in development when no keys are set.
+- **Institutions** ([docs/institutions.md](docs/institutions.md)): only
+  platform admins create institutions, from `/admin/institutions`. Six roles
+  with capabilities (`capabilitiesFor` in `@logixai/contracts`); owners and
+  admins see everything, everyone else only their batches. Services read the
+  caller's `access` and the institution's `features` from
+  `GET /institutions/:id`. Onboarding (CSV import, roll-number sign-in,
+  approvals, email domains, QR invites, year rollover) and test features
+  (written answers and grading, question bank, sections, negative marks,
+  extra time, rank, re-evaluation) are in the same doc.
 - **Data** ([docs/database.md](docs/database.md)): one database per service,
   indexes declared in the models, data changes as migrations in
   `src/db/migrations`, lists paged by cursor (`{ items, nextCursor }`), and

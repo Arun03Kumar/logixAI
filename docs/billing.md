@@ -21,7 +21,8 @@ arena-service (and any service) reads `plan` / `planUntil` from the token ◄┘
   `coupons`, `trials`, `counters` (receipt numbers), `audit_events`.
 - **identity-service** is the source of truth for who has Pro. A user has Pro
   while their personal pass (`users.proUntil`) or a licence on any of their
-  institutions (`institutions.licenceUntil`) is in the future. The result is
+  active institutions (`institutions.licenceUntil`, set from the institution's
+  contract) is in the future. The result is
   in the session (`user.plan`) and in every access token as `plan` and
   `planUntil`, so other services check it without a call. Grants are recorded
   in `entitlement_grants` with a unique reference, so a repeated grant (a
@@ -54,10 +55,10 @@ includes, change the checks in arena-service (`requireAccess`, the daily cap).
   can both succeed.
 - **Complimentary Pro** (Billing admin > Grant Pro): adds days to a user, by
   email, with a reason that goes in the audit log.
-- **Institution licences** (Billing admin > Institution licences, platform
-  admins only): set an end date and the seats bought. Every member has Pro
-  until then. Seats are recorded for invoicing; joining isn't blocked when
-  they run out yet.
+- **Institution contracts** live in the institutions console
+  (`/admin/institutions`, see [institutions.md](institutions.md)): per-seat or
+  flat pricing, seats and dates. While the contract runs every member has Pro,
+  and new students can't join once the seats are used.
 
 ## Payments and safety
 

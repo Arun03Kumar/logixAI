@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AlertTriangle, ChevronLeft } from "lucide-react";
@@ -6,6 +7,7 @@ import { Badge, Button, Card, Container, EmptyState, Skeleton } from "@logixai/u
 import AppHeader from "@/app/components/layout/AppHeader";
 import RequireAuth from "@/app/components/layout/RequireAuth";
 import AttemptBreakdown from "@/app/components/exams/AttemptBreakdown";
+import GradeForm from "@/app/components/exams/GradeForm";
 import { examApi } from "@/app/lib/api/exams";
 import { useApi } from "@/app/lib/api/useApi";
 import {
@@ -14,6 +16,32 @@ import {
   formatDateTime,
   formatScore,
 } from "@/app/lib/exams/format";
+
+/** "Mark" / "Change marks" under a question, for graders. */
+function GradeAction({ examId, attemptId, question, onSaved }) {
+  const [open, setOpen] = useState(Boolean(question.awaitingGrading));
+  if (!open) {
+    return (
+      <Button size="sm" variant="ghost" className="px-0" onClick={() => setOpen(true)}>
+        {question.grade ? "Change marks" : "Override marks"}
+      </Button>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <GradeForm
+        examId={examId}
+        attemptId={attemptId}
+        question={question}
+        grade={question.grade}
+        onSaved={() => {
+          setOpen(false);
+          onSaved();
+        }}
+      />
+    </div>
+  );
+}
 
 function Review() {
   const { id: institutionId, examId, attemptId } = useParams();
@@ -49,12 +77,13 @@ function Review() {
         <div>
           <h1 className="text-2xl font-semibold">{r.student.name}</h1>
           <p className="text-sm text-muted-foreground">
-            {r.student.email} · {r.examTitle}
+            {[r.student.rollNumber, r.student.email, r.examTitle].filter(Boolean).join(" · ")}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <Badge tone={ATTEMPT_STATUS[r.status].tone}>{ATTEMPT_STATUS[r.status].label}</Badge>
             <span>Started {formatDateTime(r.startedAt)}</span>
             {r.submittedAt ? <span>· Submitted {formatDateTime(r.submittedAt)}</span> : null}
+            {r.extraMinutes ? <Badge tone="info">+{r.extraMinutes} min extra time</Badge> : null}
           </div>
         </div>
         <div className="text-right">
@@ -85,7 +114,22 @@ function Review() {
         </p>
       </Card>
 
-      <AttemptBreakdown result={r} />
+      <AttemptBreakdown
+        result={r}
+        actions={
+          r.status === "in_progress"
+            ? undefined
+            : (q) => (
+                <GradeAction
+                  key={`${q.questionId}-${q.grade?.gradedAt ?? "none"}`}
+                  examId={examId}
+                  attemptId={attemptId}
+                  question={q}
+                  onSaved={review.reload}
+                />
+              )
+        }
+      />
     </Container>
   );
 }

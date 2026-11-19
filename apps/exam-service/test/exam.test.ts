@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { InstitutionRole, MemberView } from "@logixai/contracts";
 import { UnauthorizedError, type AccessTokenVerifier } from "@logixai/service-kit";
 import { buildApp } from "../src/app.js";
-import type { IdentityClient } from "../src/lib/identity.js";
+import { membershipFromRole, type IdentityClient } from "../src/lib/identity.js";
 import type { AttemptService, JudgeRequest } from "../src/services/attemptService.js";
 import { createMemoryStore } from "../src/store/memoryStore.js";
 
@@ -21,9 +21,16 @@ const verifier: AccessTokenVerifier = {
   },
 };
 
+/** The institution's feature switches, changed by some tests. */
+let features: Record<string, boolean> = {};
+
 const PEOPLE: Record<string, { role: InstitutionRole; batchIds: string[] }> = {
   principal: { role: "admin", batchIds: [] },
-  teacher: { role: "instructor", batchIds: [] },
+  teacher: { role: "instructor", batchIds: ["cse", "ece"] },
+  /** Teaches only ECE. */
+  ecTeacher: { role: "instructor", batchIds: ["ece"] },
+  /** Grades and views, can't author. */
+  ta: { role: "assistant", batchIds: ["cse"] },
   asha: { role: "student", batchIds: ["cse"] },
   ravi: { role: "student", batchIds: ["cse"] },
   meera: { role: "student", batchIds: ["ece"] },
@@ -35,7 +42,8 @@ const lookups: number[] = [];
 const identity: IdentityClient = {
   async getMembership(authorization, institutionId) {
     const user = authorization.replace(/^Bearer /, "");
-    return institutionId === INST ? (PEOPLE[user] ?? null) : null;
+    const p = institutionId === INST ? PEOPLE[user] : undefined;
+    return p ? membershipFromRole(p.role, p.batchIds, features) : null;
   },
   async lookupMembers(_auth, _institutionId, userIds): Promise<MemberView[]> {
     lookups.push(userIds.length);
@@ -354,6 +362,8 @@ describe("results and proctoring", () => {
       averageScore: 1,
       highestScore: 2,
       lowestScore: 0,
+      awaitingScore: 0,
+      openReevaluations: 0,
     });
     const second = (
       await req("teacher", "GET", `/api/v1/exams/${id}/results?limit=1&cursor=${first.nextCursor}`)
@@ -370,9 +380,9 @@ describe("results and proctoring", () => {
     expect(csv.headers["content-type"]).toContain("text/csv");
     expect(csv.headers["content-disposition"]).toBe('attachment; filename="data-structures-mid-term-results.csv"');
     expect(csv.body.trim().split("\r\n")).toEqual([
-      "Rank,Name,Email,Status,Score,Max score,Started at,Submitted at,Proctoring events",
-      expect.stringMatching(/^1,Asha,asha@x\.com,submitted,2,11,/),
-      expect.stringMatching(/^2,Ravi,ravi@x\.com,submitted,0,11,/),
+      "Rank,Name,Roll number,Email,Status,Score,Max score,Started at,Submitted at,Proctoring events",
+      expect.stringMatching(/^1,Asha,,asha@x\.com,submitted,2,11,/),
+      expect.stringMatching(/^2,Ravi,,ravi@x\.com,submitted,0,11,/),
     ]);
     expect((await app.inject({ url: `/api/v1/exams/${id}/results/export`, headers: as("asha") })).statusCode).toBe(403);
   });
@@ -391,5 +401,46 @@ describe("results and proctoring", () => {
       "exam.created",
     ]);
     expect(log.items[0]).toMatchObject({ actorId: "teacher", targetType: "exam", targetId: id });
+  });
+});
+
+describe("roles, scope and features", () => {
+  it("lets assistants view results but not author exams", async () => {
+    await setup();
+    const id = await publishedExam();
+    expect((await req("ta", "POST", `/api/v1/institutions/${INST}/exams`, { title: "Mine" })).status).toBe(403);
+    expect((await req("ta", "GET", `/api/v1/exams/${id}/results`)).status).toBe(200);
+    expect((await req("ta", "POST", `/api/v1/exams/${id}/unpublish`)).status).toBe(403);
+  });
+
+  it("keeps instructors to their own batches", async () => {
+    await setup();
+    const cseExam = await publishedExam(); // set for "cse" by the teacher
+    // The ECE instructor doesn't see or open the CSE exam.
+    const list = (await req("ecTeacher", "GET", `/api/v1/institutions/${INST}/exams`)).body.data;
+    expect(list.map((e: { id: string }) => e.id)).not.toContain(cseExam);
+    expect((await req("ecTeacher", "GET", `/api/v1/exams/${cseExam}/results`)).status).toBe(404);
+
+    const own = (await req("ecTeacher", "POST", `/api/v1/institutions/${INST}/exams`, { title: "ECE quiz" })).body.data.id;
+    expect((await req("ecTeacher", "PUT", `/api/v1/exams/${own}`, draft({ batchIds: ["cse"] }))).status).toBe(403);
+    expect((await req("ecTeacher", "PUT", `/api/v1/exams/${own}`, draft({ batchIds: [] }))).status).toBe(400);
+    expect((await req("ecTeacher", "PUT", `/api/v1/exams/${own}`, draft({ batchIds: ["ece"] }))).status).toBe(200);
+    // Admins see everything.
+    const all = (await req("principal", "GET", `/api/v1/institutions/${INST}/exams`)).body.data;
+    expect(all.map((e: { id: string }) => e.id)).toEqual(expect.arrayContaining([cseExam, own]));
+  });
+
+  it("follows the institution's feature switches", async () => {
+    await setup();
+    features = { proctoring: false };
+    const id = (await req("teacher", "POST", `/api/v1/institutions/${INST}/exams`, { title: "No proctoring" })).body.data.id;
+    const saved = (await req("teacher", "PUT", `/api/v1/exams/${id}`, draft({ settings: { requireFullscreen: true, blockCopyPaste: true } }))).body.data;
+    expect(saved.settings).toMatchObject({ requireFullscreen: false, blockCopyPaste: false });
+
+    features = { exams: false };
+    const off = await req("teacher", "GET", `/api/v1/institutions/${INST}/exams`);
+    expect(off.status).toBe(403);
+    expect(off.body.message).toMatch(/switched on/);
+    features = {};
   });
 });

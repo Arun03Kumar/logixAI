@@ -97,38 +97,46 @@ describe("plans", () => {
   });
 });
 
-describe("institution licences", () => {
-  it("gives every member Pro while the licence lasts; platform admins only", async () => {
+describe("institution contracts", () => {
+  it("give every member Pro while the contract runs; platform admins only", async () => {
     const { app } = await setup();
     const owner = await signUp(app, "owner@x.com");
     const boss = await signUp(app, "boss@logixai.com");
     const inst = await app.inject({
       method: "POST",
-      url: "/api/v1/institutions",
-      headers: bearer(owner.token),
-      payload: { name: "Delhi Public School", type: "school" },
+      url: "/api/v1/admin/institutions",
+      headers: bearer(boss.token),
+      payload: { name: "Delhi Public School", type: "school", ownerEmails: ["owner@x.com"] },
     });
     const id = inst.json().data.institution.id;
-    const until = new Date(Date.now() + 90 * 86_400_000).toISOString();
+    const contract = {
+      model: "per_seat",
+      seats: 100,
+      pricePaise: 50_000,
+      startsAt: new Date(Date.now() - 86_400_000).toISOString(),
+      endsAt: new Date(Date.now() + 90 * 86_400_000).toISOString(),
+    };
 
-    const denied = await app.inject({ method: "PUT", url: `/api/v1/admin/institutions/${id}/licence`, headers: bearer(owner.token), payload: { until, seats: 100 } });
+    const denied = await app.inject({ method: "PUT", url: `/api/v1/admin/institutions/${id}/contract`, headers: bearer(owner.token), payload: contract });
     expect(denied.statusCode).toBe(403);
 
-    const list = await app.inject({ url: "/api/v1/admin/institutions?q=delhi", headers: bearer(boss.token) });
-    expect(list.json().data).toEqual([expect.objectContaining({ id, memberCount: 1, licenceUntil: null })]);
-
-    const set = await app.inject({ method: "PUT", url: `/api/v1/admin/institutions/${id}/licence`, headers: bearer(boss.token), payload: { until, seats: 100 } });
-    expect(set.json().data).toMatchObject({ licenceUntil: until, licenceSeats: 100 });
+    const set = await app.inject({ method: "PUT", url: `/api/v1/admin/institutions/${id}/contract`, headers: bearer(boss.token), payload: contract });
+    expect(set.json().data.contract).toMatchObject({ model: "per_seat", seats: 100, endsAt: contract.endsAt });
 
     const { session } = await refresh(app, owner.cookie);
-    expect(session.user.plan).toEqual({ tier: "pro", until, source: "institution" });
+    expect(session.user.plan).toEqual({ tier: "pro", until: contract.endsAt, source: "institution" });
 
-    // Removing the licence takes Pro away at the next refresh.
-    await app.inject({ method: "PUT", url: `/api/v1/admin/institutions/${id}/licence`, headers: bearer(boss.token), payload: { until: null } });
-    const after = await app.inject({ url: "/api/v1/auth/me", headers: bearer(session.accessToken) });
-    expect(after.json().data.user.plan.tier).toBe("free");
+    // Suspending stops the licence; removing the contract does too.
+    await app.inject({ method: "PATCH", url: `/api/v1/admin/institutions/${id}`, headers: bearer(boss.token), payload: { status: "suspended" } });
+    expect((await app.inject({ url: "/api/v1/auth/me", headers: bearer(session.accessToken) })).json().data.user.plan.tier).toBe("free");
+    await app.inject({ method: "PATCH", url: `/api/v1/admin/institutions/${id}`, headers: bearer(boss.token), payload: { status: "active" } });
+    expect((await app.inject({ url: "/api/v1/auth/me", headers: bearer(session.accessToken) })).json().data.user.plan.tier).toBe("pro");
+    await app.inject({ method: "PUT", url: `/api/v1/admin/institutions/${id}/contract`, headers: bearer(boss.token), payload: { contract: null } });
+    expect((await app.inject({ url: "/api/v1/auth/me", headers: bearer(session.accessToken) })).json().data.user.plan.tier).toBe("free");
 
     const audit = await app.inject({ url: `/api/v1/institutions/${id}/audit`, headers: bearer(owner.token) });
-    expect(audit.json().data.items.filter((e: { action: string }) => e.action === "institution.licence_changed")).toHaveLength(2);
+    const actions = audit.json().data.items.map((e: { action: string }) => e.action);
+    expect(actions.filter((a: string) => a === "institution.contract_changed")).toHaveLength(2);
+    expect(actions.filter((a: string) => a === "institution.status_changed")).toHaveLength(2);
   });
 });

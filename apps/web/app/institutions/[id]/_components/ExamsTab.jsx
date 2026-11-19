@@ -22,7 +22,7 @@ import {
 import { examApi } from "@/app/lib/api/exams";
 import { useApi } from "@/app/lib/api/useApi";
 import { ATTEMPT_STATUS, PHASE, formatScore, formatWindow } from "@/app/lib/exams/format";
-import { canView } from "../../labels";
+import { can } from "../../labels";
 
 function CreateExam({ institutionId }) {
   const router = useRouter();
@@ -94,6 +94,7 @@ function StaffExams({ institutionId, exams }) {
               <p className="font-medium">{exam.title}</p>
               <p className="text-xs text-muted-foreground">
                 {exam.durationMinutes} min · {exam.totalMarks} marks
+                {exam.hasWritten ? " · written answers" : ""}
               </p>
             </TableCell>
             <TableCell>
@@ -184,13 +185,13 @@ function StudentExams({ exams }) {
   );
 }
 
-export default function ExamsTab({ institutionId, myRole }) {
+export default function ExamsTab({ institutionId, access }) {
   const exams = useApi(() => examApi.list(institutionId), [institutionId]);
-  const staff = canView(myRole);
+  const staff = can(access, "reports.view");
 
   return (
     <div className="space-y-4">
-      {staff ? <CreateExam institutionId={institutionId} /> : null}
+      {can(access, "tests.manage") ? <CreateExam institutionId={institutionId} /> : null}
       <Card className="overflow-hidden">
         {exams.loading ? (
           <div className="space-y-3 p-5">

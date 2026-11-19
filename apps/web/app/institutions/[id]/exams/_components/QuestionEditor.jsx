@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Library, Plus, Trash2, X } from "lucide-react";
 import {
   Badge,
   Button,
@@ -16,10 +16,21 @@ import {
   Textarea,
 } from "@logixai/ui";
 import { LANGUAGES, listLanguages } from "@logixai/languages";
-import { QUESTION_TYPE, newId } from "@/app/lib/exams/format";
+import { QUESTION_TYPE, isMcq, isWritten, newId } from "@/app/lib/exams/format";
 import TestCaseList from "./TestCaseList";
 
 export function createQuestion(type) {
+  if (isWritten(type)) {
+    return {
+      id: newId(),
+      type,
+      prompt: "",
+      marks: type === "long_answer" ? 10 : 2,
+      modelAnswer: "",
+      rubric: [],
+      maxWords: type === "long_answer" ? 300 : 50,
+    };
+  }
   if (type === "coding") {
     return {
       id: newId(),
@@ -42,7 +53,100 @@ export function createQuestion(type) {
       { id: newId(), text: "" },
     ],
     correctOptionIds: [],
+    negativeMarks: 0,
   };
+}
+
+/** Switching type: MCQ kinds and written kinds convert in place; across groups the content is rebuilt. */
+function changeType(question, type) {
+  if (isMcq(question.type) && isMcq(type)) {
+    return {
+      ...question,
+      type,
+      correctOptionIds: type === "mcq_single" ? question.correctOptionIds.slice(0, 1) : question.correctOptionIds,
+    };
+  }
+  if (isWritten(question.type) && isWritten(type)) return { ...question, type };
+  const fresh = createQuestion(type);
+  return { ...fresh, id: question.id, prompt: question.prompt, marks: question.marks, sectionId: question.sectionId };
+}
+
+const num = (value) => (value === "" ? 0 : Number(value));
+
+function WrittenFields({ question, onChange }) {
+  const rubric = question.rubric ?? [];
+  const rubricTotal = rubric.reduce((s, r) => s + (Number(r.marks) || 0), 0);
+  const setItem = (id, patch) => onChange({ ...question, rubric: rubric.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
+  return (
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Model answer</p>
+        <p className="text-xs text-muted-foreground">For graders. Students see it with their result.</p>
+        <Textarea
+          value={question.modelAnswer ?? ""}
+          onChange={(e) => onChange({ ...question, modelAnswer: e.target.value })}
+          className="min-h-20"
+        />
+      </div>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <p className="text-sm font-medium">Rubric</p>
+          <p className="text-xs text-muted-foreground">
+            Points graders tick. {rubric.length ? `Adds up to ${rubricTotal} of ${question.marks}.` : "Optional."}
+          </p>
+        </div>
+        {rubric.map((item, i) => (
+          <div key={item.id} className="flex items-center gap-2">
+            <Input
+              aria-label={`Rubric point ${i + 1}`}
+              placeholder="e.g. States the base case"
+              value={item.label}
+              onChange={(e) => setItem(item.id, { label: e.target.value })}
+            />
+            <Input
+              aria-label={`Marks for rubric point ${i + 1}`}
+              type="number"
+              min={0}
+              step="0.5"
+              value={item.marks}
+              onChange={(e) => setItem(item.id, { marks: num(e.target.value) })}
+              className="w-20 shrink-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove rubric point ${i + 1}`}
+              onClick={() => onChange({ ...question, rubric: rubric.filter((r) => r.id !== item.id) })}
+            >
+              <X />
+            </Button>
+          </div>
+        ))}
+        {rubric.length < 20 ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onChange({ ...question, rubric: [...rubric, { id: newId(), label: "", marks: 1 }] })}
+          >
+            <Plus />
+            Add rubric point
+          </Button>
+        ) : null}
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        Word limit
+        <Input
+          type="number"
+          min={1}
+          value={question.maxWords ?? ""}
+          placeholder="None"
+          onChange={(e) => onChange({ ...question, maxWords: e.target.value ? Number(e.target.value) : null })}
+          className="h-8 w-24"
+        />
+        <span className="text-xs text-muted-foreground">Shown to students, not enforced.</span>
+      </label>
+    </div>
+  );
 }
 
 function McqFields({ question, onChange }) {
@@ -108,6 +212,18 @@ function McqFields({ question, onChange }) {
           Add option
         </Button>
       ) : null}
+      <label className="flex items-center gap-2 pt-2 text-sm">
+        Negative marks
+        <Input
+          type="number"
+          min={0}
+          step="0.25"
+          value={question.negativeMarks ?? 0}
+          onChange={(e) => onChange({ ...question, negativeMarks: num(e.target.value) })}
+          className="h-8 w-20"
+        />
+        <span className="text-xs text-muted-foreground">Taken off for a wrong answer. Blank answers lose nothing.</span>
+      </label>
     </div>
   );
 }
@@ -206,7 +322,18 @@ function CodingFields({ question, onChange }) {
   );
 }
 
-export default function QuestionEditor({ index, total, question, onChange, onRemove, onMove }) {
+export default function QuestionEditor({
+  index,
+  total,
+  question,
+  onChange,
+  onRemove,
+  onMove,
+  sections = [],
+  subjective = true,
+  onSaveToBank,
+}) {
+  const types = ["mcq_single", "mcq_multi", ...(subjective || isWritten(question.type) ? ["short_answer", "long_answer"] : [])];
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3">
@@ -214,25 +341,37 @@ export default function QuestionEditor({ index, total, question, onChange, onRem
         {question.type === "coding" ? (
           <Badge tone="brand">Coding</Badge>
         ) : (
-          <Select
-            value={question.type}
-            onValueChange={(type) =>
-              onChange({
-                ...question,
-                type,
-                correctOptionIds: type === "mcq_single" ? question.correctOptionIds.slice(0, 1) : question.correctOptionIds,
-              })
-            }
-          >
+          <Select value={question.type} onValueChange={(type) => onChange(changeType(question, type))}>
             <SelectTrigger size="sm" className="w-40" aria-label="Question type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="mcq_single">{QUESTION_TYPE.mcq_single}</SelectItem>
-              <SelectItem value="mcq_multi">{QUESTION_TYPE.mcq_multi}</SelectItem>
+              {types.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {QUESTION_TYPE[t]}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         )}
+        {sections.length ? (
+          <Select
+            value={question.sectionId ?? "none"}
+            onValueChange={(v) => onChange({ ...question, sectionId: v === "none" ? null : v })}
+          >
+            <SelectTrigger size="sm" className="w-44" aria-label="Section">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No section</SelectItem>
+              {sections.map((s, i) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.title.trim() || `Section ${i + 1}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
           Marks
           <Input
@@ -257,6 +396,11 @@ export default function QuestionEditor({ index, total, question, onChange, onRem
           >
             <ArrowDown />
           </Button>
+          {onSaveToBank ? (
+            <Button variant="ghost" size="icon-sm" aria-label="Save to question bank" title="Save to question bank" onClick={onSaveToBank}>
+              <Library />
+            </Button>
+          ) : null}
           <Button variant="ghost" size="icon-sm" aria-label="Delete question" onClick={onRemove}>
             <Trash2 />
           </Button>
@@ -269,12 +413,20 @@ export default function QuestionEditor({ index, total, question, onChange, onRem
           <Textarea
             value={question.prompt}
             onChange={(e) => onChange({ ...question, prompt: e.target.value })}
-            placeholder={question.type === "coding" ? "Given an integer n, print n squared." : "Which data structure is FIFO?"}
+            placeholder={
+              question.type === "coding"
+                ? "Given an integer n, print n squared."
+                : isWritten(question.type)
+                  ? "Explain how a hash map handles collisions."
+                  : "Which data structure is FIFO?"
+            }
             className="min-h-24"
           />
         </div>
         {question.type === "coding" ? (
           <CodingFields question={question} onChange={onChange} />
+        ) : isWritten(question.type) ? (
+          <WrittenFields question={question} onChange={onChange} />
         ) : (
           <McqFields question={question} onChange={onChange} />
         )}

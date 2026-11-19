@@ -12,10 +12,10 @@ busy database move to its own cluster later without code changes.
 
 | Service            | Database              | Collections                                                                 |
 | ------------------ | --------------------- | --------------------------------------------------------------------------- |
-| identity-service   | `logixai-identity`    | users, refreshtokens, institutions, memberships, batches, invites, entitlement_grants, audit_events |
+| identity-service   | `logixai-identity`    | users, refreshtokens, institutions, memberships, departments, batches, invites, join_requests, entitlement_grants, audit_events |
 | problem-service    | `logixai-problems`    | problems, audit_events                                                      |
 | submission-service | `logixai-submissions` | submissions                                                                 |
-| exam-service       | `logixai-exams`       | exams, attempts, audit_events                                               |
+| exam-service       | `logixai-exams`       | exams, attempts, reevaluation_requests, bank_questions, audit_events        |
 | arena-service      | `logixai-arena`       | item_progress, submissions, user_stats, track_assignments, audit_events (content is in the repo) |
 | billing-service    | `logixai-billing`     | orders, coupons, trials, counters, audit_events                                 |
 
@@ -75,7 +75,7 @@ what (`targetType`, `targetId`), when (`at`) and small non-sensitive details
 
 Admins and owners can read them:
 
-- `GET /api/v1/institutions/:id/audit` (identity-service: members, batches, invites)
+- `GET /api/v1/institutions/:id/audit` (identity-service: members, departments, batches, invites, and console changes: status, features, contract, owners, support access)
 - `GET /api/v1/institutions/:id/exam-audit` (exam-service: exams)
 - `GET /api/v1/arena/institutions/:id/audit` (arena-service: track assignments)
 

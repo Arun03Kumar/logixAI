@@ -17,7 +17,35 @@ export const QUESTION_TYPE = {
   mcq_single: "Single choice",
   mcq_multi: "Multiple choice",
   coding: "Coding",
+  short_answer: "Short answer",
+  long_answer: "Long answer",
 };
+
+export const isWritten = (type) => type === "short_answer" || type === "long_answer";
+export const isMcq = (type) => type === "mcq_single" || type === "mcq_multi";
+
+export const DIFFICULTY = {
+  easy: { label: "Easy", tone: "success" },
+  medium: { label: "Medium", tone: "warning" },
+  hard: { label: "Hard", tone: "danger" },
+};
+
+/** Words in a written answer. */
+export const countWords = (text) => (text?.trim() ? text.trim().split(/\s+/).length : 0);
+
+/** The same question with fresh ids, for copying from the bank into an exam (and back). */
+export function cloneQuestion(question, { keepSection = false } = {}) {
+  const q = structuredClone(question);
+  q.id = newId();
+  if (!keepSection) delete q.sectionId;
+  if (q.options) {
+    const map = new Map(q.options.map((o) => [o.id, newId()]));
+    q.options = q.options.map((o) => ({ ...o, id: map.get(o.id) }));
+    q.correctOptionIds = (q.correctOptionIds ?? []).map((id) => map.get(id)).filter(Boolean);
+  }
+  if (q.rubric) q.rubric = q.rubric.map((r) => ({ ...r, id: newId() }));
+  return q;
+}
 
 export const PROCTOR_EVENT = {
   tab_hidden: "Switched tab or window",

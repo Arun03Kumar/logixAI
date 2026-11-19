@@ -4,11 +4,24 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { createLocalJWKSet } from "jose";
 import {
+  AddOwnerSchema,
+  AdminCreateInstitutionSchema,
+  AdminUpdateInstitutionSchema,
+  ContractSchema,
   CreateBatchSchema,
+  CreateDepartmentSchema,
   CreateInstitutionSchema,
   CreateInviteSchema,
+  ChangePasswordSchema,
+  DecideJoinRequestSchema,
   EntitlementGrantSchema,
-  InstitutionLicenceSchema,
+  ImportStudentsSchema,
+  JoinSchema,
+  PromoteBatchSchema,
+  RollSignInSchema,
+  UpdateBatchSchema,
+  UpdateDepartmentSchema,
+  UpdateFeaturesSchema,
   InstitutionRoleSchema,
   PageQuerySchema,
   SignInSchema,
@@ -29,7 +42,9 @@ import {
 } from "@logixai/service-kit";
 import type { TokenIssuer } from "./lib/tokens.js";
 import { AuthService, type IssuedSession } from "./services/authService.js";
+import { AdminInstitutionService } from "./services/adminInstitutionService.js";
 import { InstitutionService } from "./services/institutionService.js";
+import { OnboardingService } from "./services/onboardingService.js";
 import { PlanService } from "./services/planService.js";
 import type { Store } from "./store/types.js";
 
@@ -71,6 +86,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
   const institutions = new InstitutionService(options.store);
   const plans = new PlanService(options.store);
+  const adminInstitutions = new AdminInstitutionService(options.store, institutions);
+  const onboarding = new OnboardingService(options.store, institutions);
   // Verify our own tokens with the same code path other services use.
   const verifier = createAccessTokenVerifier({
     jwksUrl: "http://unused.local",
@@ -129,6 +146,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return sendSession(reply, await authService.signIn(input));
   });
 
+  app.post("/api/v1/auth/login/roll-number", authLimit, async (request, reply) => {
+    const input = parse(RollSignInSchema, request.body, "login");
+    return sendSession(reply, await authService.signInWithRollNumber(input));
+  });
+
+  app.post("/api/v1/auth/password", { ...authLimit, preHandler: authenticate }, async (request, reply) => {
+    const input = parse(ChangePasswordSchema, request.body, "password");
+    return sendSession(reply, await authService.changePassword(userId(request), input));
+  });
+
   app.post("/api/v1/auth/refresh", async (request, reply) => {
     try {
       return sendSession(reply, await authService.refresh(request.cookies[REFRESH_COOKIE]));
@@ -152,7 +179,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const auth = { preHandler: authenticate };
   type IdParams = { Params: { id: string } };
 
+  // Institutions are set up by LogixAI (platform admins); see /api/v1/admin/institutions.
   app.post("/api/v1/institutions", auth, async (request, reply) => {
+    if (request.auth!.role !== "admin") {
+      throw new ForbiddenError("Institutions are set up by LogixAI. Contact us to get started.");
+    }
     const input = parse(CreateInstitutionSchema, request.body, "institution");
     return reply.status(201).send(successResponse(await institutions.create(userId(request), input)));
   });
@@ -216,6 +247,35 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   );
 
+  /* ── Onboarding ── */
+  app.post<IdParams>("/api/v1/institutions/:id/import", auth, async (request) =>
+    successResponse(await onboarding.importStudents(userId(request), request.params.id, parse(ImportStudentsSchema, request.body, "import"))),
+  );
+  app.post<{ Params: { id: string; userId: string } }>("/api/v1/institutions/:id/members/:userId/password", auth, async (request) =>
+    successResponse(await onboarding.resetPassword(userId(request), request.params.id, request.params.userId)),
+  );
+  app.get<IdParams & { Querystring: { status?: string } }>("/api/v1/institutions/:id/join-requests", auth, async (request) => {
+    const { status } = parse(z.object({ status: z.enum(["pending", "approved", "rejected"]).default("pending") }), request.query, "query");
+    return successResponse(await onboarding.listJoinRequests(userId(request), request.params.id, status));
+  });
+  // Ask to join through the institution's email domain.
+  app.post<IdParams>("/api/v1/institutions/:id/join-requests", auth, async (request, reply) =>
+    reply
+      .status(202)
+      .send(successResponse(await onboarding.requestByDomain(userId(request), request.params.id, parse(JoinSchema, request.body, "join")))),
+  );
+  app.post<{ Params: { id: string; requestId: string } }>("/api/v1/institutions/:id/join-requests/:requestId/decision", auth, async (request) =>
+    successResponse(
+      await onboarding.decide(userId(request), request.params.id, request.params.requestId, parse(DecideJoinRequestSchema, request.body, "decision")),
+    ),
+  );
+  app.get("/api/v1/institutions/suggested", auth, async (request) => successResponse(await onboarding.suggested(userId(request))));
+  app.post<{ Params: { id: string; batchId: string } }>("/api/v1/institutions/:id/batches/:batchId/promote", auth, async (request) =>
+    successResponse(
+      await onboarding.promote(userId(request), request.params.id, request.params.batchId, parse(PromoteBatchSchema, request.body, "promote")),
+    ),
+  );
+
   app.get<IdParams>("/api/v1/institutions/:id/batches", auth, async (request) =>
     successResponse(await institutions.listBatches(userId(request), request.params.id)),
   );
@@ -225,6 +285,36 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return reply
       .status(201)
       .send(successResponse(await institutions.createBatch(userId(request), request.params.id, input)));
+  });
+
+  app.patch<{ Params: { id: string; batchId: string } }>("/api/v1/institutions/:id/batches/:batchId", auth, async (request) =>
+    successResponse(
+      await institutions.updateBatch(userId(request), request.params.id, request.params.batchId, parse(UpdateBatchSchema, request.body, "batch")),
+    ),
+  );
+
+  app.get<IdParams>("/api/v1/institutions/:id/departments", auth, async (request) =>
+    successResponse(await institutions.listDepartments(userId(request), request.params.id)),
+  );
+  app.post<IdParams>("/api/v1/institutions/:id/departments", auth, async (request, reply) =>
+    reply
+      .status(201)
+      .send(successResponse(await institutions.createDepartment(userId(request), request.params.id, parse(CreateDepartmentSchema, request.body, "department")))),
+  );
+  type DeptParams = { Params: { id: string; departmentId: string } };
+  app.patch<DeptParams>("/api/v1/institutions/:id/departments/:departmentId", auth, async (request) =>
+    successResponse(
+      await institutions.updateDepartment(
+        userId(request),
+        request.params.id,
+        request.params.departmentId,
+        parse(UpdateDepartmentSchema, request.body, "department"),
+      ),
+    ),
+  );
+  app.delete<DeptParams>("/api/v1/institutions/:id/departments/:departmentId", auth, async (request) => {
+    await institutions.deleteDepartment(userId(request), request.params.id, request.params.departmentId);
+    return successResponse({}, "Department deleted");
   });
 
   app.get<IdParams>("/api/v1/institutions/:id/invites", auth, async (request) =>
@@ -252,12 +342,37 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     await authenticate(request);
     if (request.auth!.role !== "admin") throw new ForbiddenError("Platform admins only.");
   };
-  app.get<{ Querystring: { q?: string } }>("/api/v1/admin/institutions", { preHandler: platformAdmin }, async (request) =>
-    successResponse(await plans.listInstitutions(typeof request.query.q === "string" ? request.query.q.slice(0, 100) : undefined)),
+  const admin = { preHandler: platformAdmin };
+  app.get<{ Querystring: { q?: string } }>("/api/v1/admin/institutions", admin, async (request) =>
+    successResponse(await adminInstitutions.list(typeof request.query.q === "string" ? request.query.q.slice(0, 100) : undefined)),
   );
-  app.put<IdParams>("/api/v1/admin/institutions/:id/licence", { preHandler: platformAdmin }, async (request) =>
+  app.post("/api/v1/admin/institutions", admin, async (request, reply) =>
+    reply
+      .status(201)
+      .send(successResponse(await adminInstitutions.create(userId(request), parse(AdminCreateInstitutionSchema, request.body, "institution")))),
+  );
+  app.get<IdParams>("/api/v1/admin/institutions/:id", admin, async (request) =>
+    successResponse(await adminInstitutions.detail(request.params.id)),
+  );
+  app.patch<IdParams>("/api/v1/admin/institutions/:id", admin, async (request) =>
     successResponse(
-      await plans.setLicence(userId(request), request.params.id, parse(InstitutionLicenceSchema, request.body, "licence")),
+      await adminInstitutions.update(userId(request), request.params.id, parse(AdminUpdateInstitutionSchema, request.body, "institution")),
+    ),
+  );
+  app.put<IdParams>("/api/v1/admin/institutions/:id/features", admin, async (request) =>
+    successResponse(
+      await adminInstitutions.setFeatures(userId(request), request.params.id, parse(UpdateFeaturesSchema, request.body, "features")),
+    ),
+  );
+  // Body: the contract, or { "contract": null } to remove it.
+  app.put<IdParams>("/api/v1/admin/institutions/:id/contract", admin, async (request) => {
+    const body = request.body as { contract?: unknown } | null;
+    const contract = body && "contract" in body && body.contract === null ? null : parse(ContractSchema, request.body, "contract");
+    return successResponse(await adminInstitutions.setContract(userId(request), request.params.id, contract));
+  });
+  app.post<IdParams>("/api/v1/admin/institutions/:id/owners", admin, async (request) =>
+    successResponse(
+      await adminInstitutions.addOwner(userId(request), request.params.id, parse(AddOwnerSchema, request.body, "owner").email),
     ),
   );
 
@@ -277,9 +392,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     successResponse(await institutions.previewInvite(request.params.code)),
   );
 
-  app.post<{ Params: { code: string } }>("/api/v1/invites/:code/accept", auth, async (request) =>
-    successResponse(await institutions.acceptInvite(userId(request), request.params.code)),
-  );
+  // 200 with the membership, or 202 { pending: true } when the invite needs approval.
+  app.post<{ Params: { code: string } }>("/api/v1/invites/:code/accept", auth, async (request, reply) => {
+    const result = await onboarding.acceptInvite(userId(request), request.params.code, parse(JoinSchema, request.body, "join"));
+    return reply.status("pending" in result ? 202 : 200).send(successResponse(result));
+  });
 
   return app;
 }

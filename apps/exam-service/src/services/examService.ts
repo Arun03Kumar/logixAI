@@ -9,10 +9,19 @@ import type {
   ResultRow,
 } from "@logixai/contracts";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@logixai/service-kit";
-import { examPhase, isAssigned, isStaff, totalMarks, validateExam } from "../lib/rules.js";
+import { examPhase, extraMinutes, hasWritten, isAssigned, totalMarks, validateExam } from "../lib/rules.js";
 import type { AttemptRecord, AttemptRow, ExamRecord, Page } from "../store/types.js";
 import { buildResult } from "./results.js";
-import { loadExamFor, requireMember, requireStaff, type Caller, type Deps } from "./context.js";
+import {
+  canSeeExam,
+  isStaffView,
+  loadExamFor,
+  requireCapability,
+  requireExam,
+  requireMember,
+  type Caller,
+  type Deps,
+} from "./context.js";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
@@ -43,6 +52,7 @@ export function toSummary(exam: ExamRecord, attempt?: AttemptRecord | null, now 
       requireFullscreen: exam.settings.requireFullscreen,
       blockCopyPaste: exam.settings.blockCopyPaste,
     },
+    hasWritten: hasWritten(exam),
     createdAt: exam.createdAt.toISOString(),
     ...(attempt
       ? {
@@ -61,7 +71,7 @@ export class ExamService {
   constructor(private readonly deps: Deps) {}
 
   async create(caller: Caller, institutionId: string, title: string): Promise<ExamDetail> {
-    requireStaff(await requireMember(this.deps, caller, institutionId));
+    requireCapability(await requireMember(this.deps, caller, institutionId), "tests.manage");
     const exam = await this.deps.store.exams.create({
       institutionId,
       title,
@@ -76,8 +86,12 @@ export class ExamService {
         requireFullscreen: true,
         blockCopyPaste: true,
         resultsVisibility: "after_end",
+        showRank: false,
+        reevaluationDays: 0,
       },
+      sections: [],
       questions: [],
+      extraTime: {},
       status: "draft",
       createdBy: caller.userId,
       publishedAt: null,
@@ -86,11 +100,13 @@ export class ExamService {
     return this.detail(exam, 0);
   }
 
-  /** Staff see every exam; students see published exams assigned to their batches. */
+  /** Staff see the exams in their scope; students see published exams assigned to their batches. */
   async list(caller: Caller, institutionId: string): Promise<ExamSummary[]> {
     const membership = await requireMember(this.deps, caller, institutionId);
     const exams = await this.deps.store.exams.listForInstitution(institutionId);
-    if (isStaff(membership.role)) return exams.map((e) => toSummary(e));
+    if (isStaffView(membership)) {
+      return exams.filter((e) => canSeeExam(membership, e, caller.userId)).map((e) => toSummary(e));
+    }
 
     const visible = exams.filter(
       (e) => e.status === "published" && isAssigned(e, membership.batchIds),
@@ -105,7 +121,8 @@ export class ExamService {
 
   async get(caller: Caller, examId: string): Promise<ExamSummary | ExamDetail> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    if (isStaff(membership.role)) {
+    if (isStaffView(membership)) {
+      requireExam(membership, exam, caller, "reports.view");
       return this.detail(exam, await this.deps.store.attempts.countForExam(exam.id));
     }
     if (exam.status !== "published" || !isAssigned(exam, membership.batchIds)) {
@@ -117,18 +134,31 @@ export class ExamService {
   /** Replaces the draft. Published exams must be unpublished first. */
   async update(caller: Caller, examId: string, draft: ExamDraftInput): Promise<ExamDetail> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
+    requireExam(membership, exam, caller, "tests.manage");
     if (exam.status !== "draft") {
       throw new ConflictError("Unpublish the exam before editing it.");
     }
+    const batchIds = [...new Set(draft.batchIds)];
+    if (!membership.scope.all) {
+      // Staff limited to some batches can only set exams for those batches.
+      if (!batchIds.length) throw new BadRequestError("batchIds", { reason: "Choose which of your batches take this exam." });
+      if (batchIds.some((b) => !membership.scope.batchIds.includes(b))) {
+        throw new ForbiddenError("You can only set exams for your own batches.");
+      }
+    }
+    // Without the proctoring feature, the browser checks are off.
+    const settings = membership.features.proctoring
+      ? draft.settings
+      : { ...draft.settings, requireFullscreen: false, blockCopyPaste: false };
     const updated = await this.deps.store.exams.update(exam.id, {
       title: draft.title,
       instructions: draft.instructions,
       durationMinutes: draft.durationMinutes,
       startsAt: draft.startsAt ? new Date(draft.startsAt) : null,
       endsAt: draft.endsAt ? new Date(draft.endsAt) : null,
-      batchIds: [...new Set(draft.batchIds)],
-      settings: draft.settings,
+      batchIds,
+      settings,
+      sections: draft.sections,
       questions: draft.questions,
     });
     await this.audit(caller, "exam.updated", updated!, { questionCount: draft.questions.length });
@@ -137,9 +167,12 @@ export class ExamService {
 
   async publish(caller: Caller, examId: string): Promise<ExamDetail> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
+    requireExam(membership, exam, caller, "tests.manage");
     if (exam.status === "published") return this.detail(exam, await this.deps.store.attempts.countForExam(exam.id));
     const problems = validateExam(exam);
+    if (hasWritten(exam) && !membership.features.subjective) {
+      problems.unshift("Written answers aren't switched on for this institution. Remove the short and long answer questions, or contact LogixAI.");
+    }
     if (problems.length) {
       throw new BadRequestError("exam", { reason: problems[0], problems });
     }
@@ -153,7 +186,7 @@ export class ExamService {
 
   async unpublish(caller: Caller, examId: string): Promise<ExamDetail> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
+    requireExam(membership, exam, caller, "tests.manage");
     if ((await this.deps.store.attempts.countForExam(exam.id)) > 0) {
       throw new ConflictError("Students have already started this exam, so it can't be unpublished.");
     }
@@ -164,7 +197,7 @@ export class ExamService {
 
   async remove(caller: Caller, examId: string): Promise<void> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
+    requireExam(membership, exam, caller, "tests.manage");
     if ((await this.deps.store.attempts.countForExam(exam.id)) > 0) {
       throw new ConflictError("This exam has attempts, so it can't be deleted.");
     }
@@ -179,14 +212,15 @@ export class ExamService {
     query: { limit: number; cursor?: string },
   ): Promise<ExamResultsPage> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
-    const [page, summary] = await Promise.all([
+    requireExam(membership, exam, caller, "reports.view");
+    const [page, summary, openReevaluations] = await Promise.all([
       this.deps.store.attempts.pageForExam(exam.id, query),
       this.deps.store.attempts.summarizeExam(exam.id),
+      this.deps.store.reevaluations.countOpen(exam.id),
     ]);
     return {
       exam: toSummary(exam),
-      summary,
+      summary: { ...summary, openReevaluations },
       items: await this.toRows(caller, exam.institutionId, page.items),
       nextCursor: page.nextCursor,
     };
@@ -195,9 +229,9 @@ export class ExamService {
   /** Every result as CSV, read from the database a page at a time. */
   async resultsCsv(caller: Caller, examId: string): Promise<{ filename: string; csv: string }> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
+    requireExam(membership, exam, caller, "reports.view");
     const lines = [
-      ["Rank", "Name", "Email", "Status", "Score", "Max score", "Started at", "Submitted at", "Proctoring events"],
+      ["Rank", "Name", "Roll number", "Email", "Status", "Score", "Max score", "Started at", "Submitted at", "Proctoring events"],
     ];
     let cursor: string | undefined;
     let rank = 0;
@@ -211,6 +245,7 @@ export class ExamService {
         lines.push([
           String(rank),
           row.name,
+          row.rollNumber ?? "",
           row.email,
           row.status,
           row.score === null ? "" : String(row.score),
@@ -229,9 +264,7 @@ export class ExamService {
   /** Exam changes in an institution, newest first. Admins and owners only. */
   async auditLog(caller: Caller, institutionId: string, query: { limit: number; cursor?: string }): Promise<Page<AuditEvent>> {
     const membership = await requireMember(this.deps, caller, institutionId);
-    if (membership.role !== "admin" && membership.role !== "owner") {
-      throw new ForbiddenError("Only admins can see the audit log.");
-    }
+    if (!membership.capabilities.includes("audit.view")) throw new ForbiddenError("Only admins can see the audit log.");
     return this.deps.store.audit.pageForInstitution(institutionId, query);
   }
 
@@ -249,6 +282,7 @@ export class ExamService {
       userId: a.userId,
       name: people.get(a.userId)?.name ?? "Former member",
       email: people.get(a.userId)?.email ?? "",
+      rollNumber: people.get(a.userId)?.rollNumber ?? null,
       status: a.status,
       startedAt: a.startedAt.toISOString(),
       submittedAt: iso(a.submittedAt),
@@ -260,20 +294,23 @@ export class ExamService {
 
   async review(caller: Caller, examId: string, attemptId: string): Promise<AttemptReview> {
     const { exam, membership } = await loadExamFor(this.deps, caller, examId);
-    requireStaff(membership);
+    requireExam(membership, exam, caller, "reports.view");
     const attempt = await this.deps.store.attempts.findById(attemptId);
     if (!attempt || attempt.examId !== exam.id) throw new NotFoundError("Attempt", attemptId);
-    const [person] = await this.deps.identity.lookupMembers(caller.authorization, exam.institutionId, [
-      attempt.userId,
+    const [[person], reevaluations] = await Promise.all([
+      this.deps.identity.lookupMembers(caller.authorization, exam.institutionId, [attempt.userId]),
+      this.deps.store.reevaluations.listForAttempt(attempt.id),
     ]);
     return {
-      ...buildResult(exam, attempt, { includeAnswers: true }),
+      ...buildResult(exam, attempt, { includeAnswers: true, staff: true, reevaluations }),
       student: {
         userId: attempt.userId,
         name: person?.name ?? "Former member",
         email: person?.email ?? "",
+        rollNumber: person?.rollNumber ?? null,
       },
       startedAt: attempt.startedAt.toISOString(),
+      extraMinutes: extraMinutes(exam, attempt.userId),
       proctorEvents: attempt.proctorEvents.map((e) => ({ type: e.type, at: e.at.toISOString() })),
     };
   }
@@ -296,8 +333,10 @@ export class ExamService {
     return {
       ...toSummary(exam),
       instructions: exam.instructions,
-      settings: exam.settings,
+      settings: { ...exam.settings, showRank: exam.settings.showRank ?? false, reevaluationDays: exam.settings.reevaluationDays ?? 0 },
+      sections: exam.sections ?? [],
       questions: exam.questions,
+      extraTime: exam.extraTime ?? {},
       attemptCount,
     };
   }

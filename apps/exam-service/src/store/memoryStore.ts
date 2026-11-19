@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AuditEvent } from "@logixai/contracts";
 import { decodeCursor, encodeCursor } from "@logixai/service-kit";
-import type { AttemptRecord, ExamRecord, Store } from "./types.js";
+import type { AttemptRecord, BankQuestionRecord, ExamRecord, ReevaluationRecord, Store } from "./types.js";
 
 const offsetCursor = (cursor: string | undefined) =>
   decodeCursor(cursor, (v): v is number => Number.isInteger(v) && (v as number) >= 0) ?? 0;
@@ -13,6 +13,10 @@ export function createMemoryStore(): Store {
   const exams = new Map<string, ExamRecord>();
   const attempts = new Map<string, AttemptRecord>();
   const auditLog: AuditEvent[] = [];
+  const reevaluations = new Map<string, ReevaluationRecord>();
+  const bank = new Map<string, BankQuestionRecord>();
+  const isFinal = (a: AttemptRecord) => a.status !== "in_progress";
+  const answered = (a: AttemptRecord, questionId: string) => Boolean(a.answers[questionId]?.text?.trim());
 
   return {
     exams: {
@@ -77,6 +81,7 @@ export function createMemoryStore(): Store {
           .map((a) => a.score!);
         const inProgress = rows.filter((a) => a.status === "in_progress").length;
         return {
+          awaitingScore: rows.filter((a) => isFinal(a) && a.score === null).length,
           attempts: rows.length,
           submitted: rows.length - inProgress,
           inProgress,
@@ -125,6 +130,107 @@ export function createMemoryStore(): Store {
         [...attempts.values()]
           .filter((a) => a.status === "in_progress" && a.deadline < now)
           .map(clone),
+      async setGrade(id, questionId, grade) {
+        const row = attempts.get(id);
+        if (!row || !isFinal(row)) return null;
+        row.grades = { ...(row.grades ?? {}) };
+        if (grade) row.grades[questionId] = clone(grade);
+        else delete row.grades[questionId];
+        return clone(row);
+      },
+      async setDeadline(id, deadline) {
+        const row = attempts.get(id);
+        if (row && row.status === "in_progress") row.deadline = new Date(deadline);
+      },
+      async rankCounts(examId, score) {
+        const scored = [...attempts.values()].filter((a) => a.examId === examId && isFinal(a) && a.score !== null);
+        return {
+          above: scored.filter((a) => a.score! > score).length,
+          below: scored.filter((a) => a.score! < score).length,
+          total: scored.length,
+        };
+      },
+      async gradingCounts(examId, questionIds) {
+        const rows = [...attempts.values()].filter((a) => a.examId === examId && isFinal(a));
+        return Object.fromEntries(
+          questionIds.map((q) => {
+            const withAnswer = rows.filter((a) => answered(a, q));
+            return [q, { answered: withAnswer.length, graded: withAnswer.filter((a) => a.grades?.[q]).length }];
+          }),
+        );
+      },
+      async pageForGrading(examId, questionId, { ungradedOnly, limit, cursor }) {
+        const start = offsetCursor(cursor);
+        const rows = [...attempts.values()].filter(
+          (a) => a.examId === examId && isFinal(a) && answered(a, questionId) && (!ungradedOnly || !a.grades?.[questionId]),
+        );
+        return {
+          items: rows.slice(start, start + limit).map(clone),
+          nextCursor: rows.length > start + limit ? encodeCursor(start + limit) : null,
+        };
+      },
+    },
+    reevaluations: {
+      async create(data) {
+        if ([...reevaluations.values()].some((r) => r.attemptId === data.attemptId && r.questionId === data.questionId)) {
+          throw Object.assign(new Error("duplicate key"), { code: 11000 });
+        }
+        const row = { ...clone(data), id: randomUUID(), createdAt: new Date() };
+        reevaluations.set(row.id, row);
+        return clone(row);
+      },
+      findById: async (id) => (reevaluations.has(id) ? clone(reevaluations.get(id)!) : null),
+      listForExam: async (examId, status) =>
+        [...reevaluations.values()]
+          .filter((r) => r.examId === examId && (!status || r.status === status))
+          .slice(0, 500)
+          .map(clone),
+      listForAttempt: async (attemptId) =>
+        [...reevaluations.values()].filter((r) => r.attemptId === attemptId).map(clone),
+      countOpen: async (examId) =>
+        [...reevaluations.values()].filter((r) => r.examId === examId && r.status === "open").length,
+      async resolve(id, patch) {
+        const row = reevaluations.get(id);
+        if (!row || row.status !== "open") return false;
+        Object.assign(row, clone(patch), { status: "resolved" });
+        return true;
+      },
+    },
+    bank: {
+      async create(data) {
+        const now = new Date();
+        const row = { ...clone(data), id: randomUUID(), createdAt: now, updatedAt: now };
+        bank.set(row.id, row);
+        return clone(row);
+      },
+      findById: async (id) => (bank.has(id) ? clone(bank.get(id)!) : null),
+      async update(id, patch) {
+        const row = bank.get(id);
+        if (!row) return null;
+        Object.assign(row, clone(patch), { updatedAt: new Date() });
+        return clone(row);
+      },
+      async delete(id) {
+        bank.delete(id);
+      },
+      async page(institutionId, { q, tag, type, difficulty, limit, cursor }) {
+        const start = offsetCursor(cursor);
+        const needle = q?.toLowerCase();
+        const rows = [...bank.values()]
+          .filter(
+            (r) =>
+              r.institutionId === institutionId &&
+              (!needle || r.question.prompt.toLowerCase().includes(needle) || r.topic.toLowerCase().includes(needle)) &&
+              (!tag || r.tags.includes(tag)) &&
+              (!type || r.question.type === type) &&
+              (!difficulty || r.difficulty === difficulty),
+          )
+          .reverse();
+        return {
+          items: rows.slice(start, start + limit).map(clone),
+          nextCursor: rows.length > start + limit ? encodeCursor(start + limit) : null,
+        };
+      },
     },
     audit: {
       async record(event) {

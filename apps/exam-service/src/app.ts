@@ -1,10 +1,18 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import {
+  BankQuerySchema,
+  BankQuestionInputSchema,
   CreateExamSchema,
   ExamDraftSchema,
+  ExtraTimeSchema,
+  GradeAnswerSchema,
+  GradingQuerySchema,
   PageQuerySchema,
   ProctorEventSchema,
+  REEVALUATION_STATUSES,
+  RequestReevaluationSchema,
+  ResolveReevaluationSchema,
   SaveAnswerSchema,
 } from "@logixai/contracts";
 import {
@@ -12,10 +20,12 @@ import {
   errorResponse,
   successResponse,
   type AccessTokenVerifier,
-  type z,
+  z,
 } from "@logixai/service-kit";
 import type { IdentityClient } from "./lib/identity.js";
 import { AttemptService, type JudgeGateway } from "./services/attemptService.js";
+import { BankService } from "./services/bankService.js";
+import { GradingService } from "./services/gradingService.js";
 import type { Caller } from "./services/context.js";
 import { ExamService } from "./services/examService.js";
 import type { Store } from "./store/types.js";
@@ -42,6 +52,9 @@ export async function buildApp(
   const deps = { store: options.store, identity: options.identity };
   const exams = new ExamService(deps);
   const attempts = new AttemptService({ ...deps, judge: options.judge });
+  const grading = new GradingService(deps);
+  const bank = new BankService(deps);
+  const StatusQuery = z.object({ status: z.enum(REEVALUATION_STATUSES).optional() });
 
   await app.register(cors, {
     origin: options.corsOrigins,
@@ -122,12 +135,103 @@ export async function buildApp(
     async (req) => ok(await exams.review(caller(req), req.params.examId, req.params.attemptId)),
   );
 
+  /* ── Grading, extra time, re-evaluation (staff) ── */
+  app.get<P<{ examId: string }>>("/api/v1/exams/:examId/grading", async (req) =>
+    ok(await grading.overview(caller(req), req.params.examId)),
+  );
+  // ?show=ungraded|all&limit=&cursor=
+  app.get<P<{ examId: string; questionId: string }>>("/api/v1/exams/:examId/grading/:questionId", async (req) =>
+    ok(
+      await grading.queue(
+        caller(req),
+        req.params.examId,
+        req.params.questionId,
+        parse(GradingQuerySchema, req.query, "query"),
+      ),
+    ),
+  );
+  app.put<P<{ examId: string; attemptId: string; questionId: string }>>(
+    "/api/v1/exams/:examId/attempts/:attemptId/grades/:questionId",
+    async (req) =>
+      ok(
+        await grading.grade(
+          caller(req),
+          req.params.examId,
+          req.params.attemptId,
+          req.params.questionId,
+          parse(GradeAnswerSchema, req.body, "grade"),
+        ),
+      ),
+  );
+  app.put<P<{ examId: string }>>("/api/v1/exams/:examId/extra-time", async (req) =>
+    ok(await grading.setExtraTime(caller(req), req.params.examId, parse(ExtraTimeSchema, req.body, "extraTime"))),
+  );
+  // ?status=open|resolved
+  app.get<P<{ examId: string }>>("/api/v1/exams/:examId/reevaluations", async (req) =>
+    ok(await grading.listReevaluations(caller(req), req.params.examId, parse(StatusQuery, req.query, "query").status)),
+  );
+  app.post<P<{ examId: string; requestId: string }>>(
+    "/api/v1/exams/:examId/reevaluations/:requestId/resolve",
+    async (req) =>
+      ok(
+        await grading.resolveReevaluation(
+          caller(req),
+          req.params.examId,
+          req.params.requestId,
+          parse(ResolveReevaluationSchema, req.body, "reevaluation"),
+        ),
+      ),
+  );
+
+  /* ── Question bank (staff who set exams) ── */
+  // ?q=&tag=&type=&difficulty=&limit=&cursor=
+  app.get<P<{ institutionId: string }>>("/api/v1/institutions/:institutionId/question-bank", async (req) =>
+    ok(await bank.list(caller(req), req.params.institutionId, parse(BankQuerySchema, req.query, "query"))),
+  );
+  app.post<P<{ institutionId: string }>>("/api/v1/institutions/:institutionId/question-bank", async (req, reply) =>
+    reply
+      .status(201)
+      .send(ok(await bank.create(caller(req), req.params.institutionId, parse(BankQuestionInputSchema, req.body, "question")))),
+  );
+  app.put<P<{ institutionId: string; id: string }>>(
+    "/api/v1/institutions/:institutionId/question-bank/:id",
+    async (req) =>
+      ok(
+        await bank.update(
+          caller(req),
+          req.params.institutionId,
+          req.params.id,
+          parse(BankQuestionInputSchema, req.body, "question"),
+        ),
+      ),
+  );
+  app.delete<P<{ institutionId: string; id: string }>>(
+    "/api/v1/institutions/:institutionId/question-bank/:id",
+    async (req) => {
+      await bank.remove(caller(req), req.params.institutionId, req.params.id);
+      return ok({});
+    },
+  );
+
   /* ── Taking (students) ── */
   app.post<P<{ examId: string }>>("/api/v1/exams/:examId/attempts", async (req) =>
     ok(await attempts.start(caller(req), req.params.examId)),
   );
   app.get<P<{ examId: string }>>("/api/v1/exams/:examId/my-result", async (req) =>
     ok(await attempts.myResult(caller(req), req.params.examId)),
+  );
+  app.post<P<{ examId: string }>>("/api/v1/exams/:examId/my-result/reevaluations", async (req, reply) =>
+    reply
+      .status(201)
+      .send(
+        ok(
+          await attempts.requestReevaluation(
+            caller(req),
+            req.params.examId,
+            parse(RequestReevaluationSchema, req.body, "reevaluation"),
+          ),
+        ),
+      ),
   );
   app.get<P<{ attemptId: string }>>("/api/v1/attempts/:attemptId", async (req) =>
     ok(await attempts.get(caller(req), req.params.attemptId)),

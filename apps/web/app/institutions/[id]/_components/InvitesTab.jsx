@@ -1,11 +1,12 @@
 "use client";
 import { useState } from "react";
 import toast from "react-hot-toast";
-import { Copy, Ticket } from "lucide-react";
+import { Copy, QrCode, Ticket } from "lucide-react";
 import {
   Badge,
   Button,
   Card,
+  Checkbox,
   EmptyState,
   Field,
   Input,
@@ -26,7 +27,8 @@ import {
 import FormError from "@/app/components/forms/FormError";
 import { identityApi } from "@/app/lib/api/identity";
 import { useApi } from "@/app/lib/api/useApi";
-import { ROLE_LABEL, formatDate } from "../../labels";
+import { ROLE_LABEL, formatDate, grantableRoles, inScope } from "../../labels";
+import InviteQr from "./InviteQr";
 
 const NO_BATCH = "none";
 
@@ -50,19 +52,24 @@ async function copyLink(code) {
   }
 }
 
-function CreateInviteForm({ institutionId, myRole, batches, onCreated }) {
+function CreateInviteForm({ institutionId, access, batches, onCreated }) {
+  // Scoped staff (department heads) invite into one of their own batches.
+  const wide = access.scope.all;
+  const usable = batches.filter((b) => !b.archived && inScope(access, b.id));
   const [form, setForm] = useState({
     role: "student",
-    batchId: NO_BATCH,
+    batchId: wide ? NO_BATCH : (usable[0]?.id ?? NO_BATCH),
     maxUses: "",
     expiresInDays: "14",
+    requiresApproval: false,
   });
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
   const set = (field) => (value) => setForm((f) => ({ ...f, [field]: value }));
 
-  const roles = myRole === "owner" ? ["student", "instructor", "admin"] : ["student", "instructor"];
+  // Owners are added by LogixAI, so invites stop at admin.
+  const roles = grantableRoles(access.role).filter((r) => r !== "owner").reverse();
 
   const submit = async (e) => {
     e.preventDefault();
@@ -75,6 +82,7 @@ function CreateInviteForm({ institutionId, myRole, batches, onCreated }) {
         ...(form.batchId !== NO_BATCH ? { batchId: form.batchId } : {}),
         maxUses: form.maxUses ? Number(form.maxUses) : null,
         expiresInDays: Number(form.expiresInDays),
+        requiresApproval: form.requiresApproval,
       });
       onCreated(invite);
       toast.success(`Invite ${invite.code} created.`);
@@ -90,8 +98,8 @@ function CreateInviteForm({ institutionId, myRole, batches, onCreated }) {
     <Card className="p-5">
       <h2 className="text-sm font-semibold">Create an invite</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Share the code or link. Anyone who signs in with it joins with the role
-        and batch you choose.
+        Share the code, link or QR code. Anyone who signs in with it joins with
+        the role and batch you choose, or waits for approval if you ask for it.
       </p>
       <form onSubmit={submit} className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="sm:col-span-2 lg:col-span-4">
@@ -117,8 +125,8 @@ function CreateInviteForm({ institutionId, myRole, batches, onCreated }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NO_BATCH}>No batch</SelectItem>
-              {batches.map((b) => (
+              {wide ? <SelectItem value={NO_BATCH}>No batch</SelectItem> : null}
+              {usable.map((b) => (
                 <SelectItem key={b.id} value={b.id}>
                   {b.name}
                 </SelectItem>
@@ -150,8 +158,15 @@ function CreateInviteForm({ institutionId, myRole, batches, onCreated }) {
             </SelectContent>
           </Select>
         </Field>
+        <Checkbox
+          className="sm:col-span-2 lg:col-span-4"
+          label="Approve each person before they join"
+          description="Useful for a code shared widely (a notice board, a class group). They wait in the Requests tab."
+          checked={form.requiresApproval}
+          onChange={(e) => set("requiresApproval")(e.target.checked)}
+        />
         <div className="sm:col-span-2 lg:col-span-4">
-          <Button type="submit" variant="primary" disabled={saving}>
+          <Button type="submit" variant="primary" disabled={saving || (!wide && form.batchId === NO_BATCH)}>
             {saving ? <Spinner className="text-primary-foreground" /> : null}
             Create invite
           </Button>
@@ -161,7 +176,8 @@ function CreateInviteForm({ institutionId, myRole, batches, onCreated }) {
   );
 }
 
-export default function InvitesTab({ institutionId, myRole }) {
+export default function InvitesTab({ institutionId, institutionName, access }) {
+  const [qrFor, setQrFor] = useState(null);
   const invites = useApi(() => identityApi.listInvites(institutionId), [institutionId]);
   const batches = useApi(() => identityApi.listBatches(institutionId), [institutionId]);
   const batchName = new Map((batches.data ?? []).map((b) => [b.id, b.name]));
@@ -181,12 +197,23 @@ export default function InvitesTab({ institutionId, myRole }) {
 
   return (
     <div className="space-y-4">
-      <CreateInviteForm
-        institutionId={institutionId}
-        myRole={myRole}
-        batches={batches.data ?? []}
-        onCreated={(invite) => invites.setData((list) => [invite, ...(list ?? [])])}
-      />
+      {batches.data ? (
+        <CreateInviteForm
+          institutionId={institutionId}
+          access={access}
+          batches={batches.data}
+          onCreated={(invite) => invites.setData((list) => [invite, ...(list ?? [])])}
+        />
+      ) : null}
+      {qrFor ? (
+        <InviteQr
+          key={qrFor.id}
+          invite={qrFor}
+          institutionName={institutionName}
+          batchName={qrFor.batchId ? batchName.get(qrFor.batchId) : null}
+          onClose={() => setQrFor(null)}
+        />
+      ) : null}
       <Card className="overflow-hidden">
         {invites.loading ? (
           <div className="p-5">
@@ -221,18 +248,37 @@ export default function InvitesTab({ institutionId, myRole }) {
                       <div className="flex items-center gap-1">
                         <span className="font-mono text-sm font-medium">{invite.code}</span>
                         {active ? (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Copy link for ${invite.code}`}
-                            onClick={() => copyLink(invite.code)}
-                          >
-                            <Copy />
-                          </Button>
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              title="Copy link"
+                              aria-label={`Copy link for ${invite.code}`}
+                              onClick={() => copyLink(invite.code)}
+                            >
+                              <Copy />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              title="QR code"
+                              aria-label={`QR code for ${invite.code}`}
+                              onClick={() => setQrFor(invite)}
+                            >
+                              <QrCode />
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell>{ROLE_LABEL[invite.role]}</TableCell>
+                    <TableCell>
+                      {ROLE_LABEL[invite.role]}
+                      {invite.requiresApproval ? (
+                        <Badge tone="warning" className="ml-2">
+                          Needs approval
+                        </Badge>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {invite.batchId ? (batchName.get(invite.batchId) ?? "Batch") : "—"}
                     </TableCell>

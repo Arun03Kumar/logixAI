@@ -15,7 +15,7 @@ import { IDENTITY_API_URL } from "@/app/coding-platform/lib/config";
 const EXPIRY_MARGIN_MS = 30_000;
 
 /**
- * @typedef {{ id: string, name: string, email: string, role: "user" | "admin", createdAt: string }} SessionUser
+ * @typedef {{ id: string, name: string, email: string, role: "user" | "admin", mustChangePassword: boolean, createdAt: string }} SessionUser
  * @typedef {{ status: "loading" | "authenticated" | "anonymous", user: SessionUser | null }} SessionState
  */
 
@@ -130,6 +130,21 @@ async function authRequest(path, body) {
 }
 
 export const signIn = (email, password) => authRequest("/auth/login", { email, password });
+/** Students without email: institution code + roll number. */
+export const signInWithRollNumber = (institution, rollNumber, password) =>
+  authRequest("/auth/login/roll-number", { institution, rollNumber, password });
+
+/** Sets a new password; every other session is signed out. */
+export async function changePassword(currentPassword, newPassword) {
+  const res = await authFetch(`${IDENTITY_API_URL}/auth/password`, {
+    method: "POST",
+    credentials: "include",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const session = await readEnvelope(res);
+  applySession(session);
+  return session.user;
+}
 export const signUp = (name, email, password) =>
   authRequest("/auth/signup", { name, email, password });
 

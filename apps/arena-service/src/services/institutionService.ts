@@ -7,6 +7,7 @@ import type {
   AuditAction,
   AuditEvent,
   BatchReport,
+  Capability,
   MyAssignment,
   TrackAssignment,
 } from "@logixai/contracts";
@@ -21,7 +22,6 @@ export interface Caller {
   authorization: string;
 }
 
-const STAFF = new Set(["owner", "admin", "instructor"]);
 
 export class InstitutionArenaService {
   constructor(
@@ -36,13 +36,21 @@ export class InstitutionArenaService {
     const m = await this.deps.identity.getMembership(caller.authorization, institutionId);
     // Same 404 whether the institution doesn't exist or the caller isn't in it.
     if (!m) throw new NotFoundError("Institution", institutionId);
+    if (!m.features.arena) throw new ForbiddenError("ML Arena isn't switched on for this institution. Contact LogixAI to enable it.");
     return m;
   }
 
-  private async staff(caller: Caller, institutionId: string): Promise<Membership> {
+  private async can(caller: Caller, institutionId: string, capability: Capability): Promise<Membership> {
     const m = await this.member(caller, institutionId);
-    if (!STAFF.has(m.role)) throw new ForbiddenError("Only instructors and admins can manage ML Arena for the institution.");
+    if (!m.capabilities.includes(capability)) {
+      throw new ForbiddenError("Only instructors, department heads and admins can manage ML Arena for the institution.");
+    }
     return m;
+  }
+
+  /** Staff limited to some batches act only on those. */
+  private requireBatch(m: Membership, batchId: string) {
+    if (!m.scope.all && !m.scope.batchIds.includes(batchId)) throw new ForbiddenError("That batch isn't one of yours.");
   }
 
   private view(a: AssignmentRecord): TrackAssignment {
@@ -58,23 +66,25 @@ export class InstitutionArenaService {
     };
   }
 
-  /** Staff see every assignment; students only those for their own batches. */
+  /** Owners and admins see every assignment; everyone else those for their batches. */
   async list(caller: Caller, institutionId: string): Promise<TrackAssignment[]> {
     const m = await this.member(caller, institutionId);
+    const staffScope = m.capabilities.includes("reports.view") ? m.scope : null;
     const rows = await this.deps.store.assignments.listForInstitution(
       institutionId,
-      STAFF.has(m.role) ? undefined : m.batchIds,
+      staffScope?.all ? undefined : staffScope ? staffScope.batchIds : m.batchIds,
     );
     return rows.map((a) => this.view(a));
   }
 
   async assign(caller: Caller, institutionId: string, input: AssignTrackInput): Promise<TrackAssignment> {
-    await this.staff(caller, institutionId);
+    const m = await this.can(caller, institutionId, "practice.assign");
     const track = this.deps.catalog.track(input.trackId);
     if (!track) throw new BadRequestError("assignment", { reason: "That track doesn't exist." });
     const batches = await this.deps.identity.listBatches(caller.authorization, institutionId);
     const batch = batches.find((b) => b.id === input.batchId);
     if (!batch) throw new BadRequestError("assignment", { reason: "That batch doesn't exist in this institution." });
+    this.requireBatch(m, batch.id);
     let created: AssignmentRecord;
     try {
       created = await this.deps.store.assignments.create({
@@ -98,9 +108,10 @@ export class InstitutionArenaService {
   }
 
   async unassign(caller: Caller, institutionId: string, assignmentId: string): Promise<void> {
-    await this.staff(caller, institutionId);
+    const m = await this.can(caller, institutionId, "practice.assign");
     const a = await this.deps.store.assignments.get(assignmentId);
     if (!a || a.institutionId !== institutionId) throw new NotFoundError("Assignment", assignmentId);
+    this.requireBatch(m, a.batchId);
     await this.deps.store.assignments.delete(a.id);
     await this.audit(caller, "arena.track_unassigned", institutionId, a.id, { trackId: a.trackId, batchId: a.batchId });
   }
@@ -113,7 +124,7 @@ export class InstitutionArenaService {
     );
     const out: MyAssignment[] = [];
     for (const m of memberships) {
-      if (!m.batchIds.length) continue;
+      if (!m.batchIds.length || m.institution.features?.arena === false) continue;
       for (const a of await this.deps.store.assignments.listForInstitution(m.institution.id, m.batchIds)) {
         const track = this.deps.catalog.track(a.trackId);
         if (!track) continue;
@@ -133,7 +144,8 @@ export class InstitutionArenaService {
 
   /** How a batch is doing on a track: per student, and per topic across the batch. */
   async report(caller: Caller, institutionId: string, batchId: string, trackId: string): Promise<BatchReport> {
-    await this.staff(caller, institutionId);
+    const m = await this.can(caller, institutionId, "reports.view");
+    this.requireBatch(m, batchId);
     const track = this.deps.catalog.track(trackId);
     if (!track) throw new NotFoundError("Track", trackId);
     const members = (await this.deps.identity.listBatchMembers(caller.authorization, institutionId, batchId)).filter(
@@ -184,7 +196,7 @@ export class InstitutionArenaService {
 
   async auditLog(caller: Caller, institutionId: string, query: { limit: number; cursor?: string }): Promise<Page<AuditEvent>> {
     const m = await this.member(caller, institutionId);
-    if (m.role !== "owner" && m.role !== "admin") throw new ForbiddenError("Only admins can see the audit log.");
+    if (!m.capabilities.includes("audit.view")) throw new ForbiddenError("Only admins can see the audit log.");
     return this.deps.store.audit.pageForInstitution(institutionId, query);
   }
 

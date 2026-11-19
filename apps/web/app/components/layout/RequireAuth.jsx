@@ -1,5 +1,7 @@
 "use client";
+import { useEffect } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 import { Button, Container, EmptyState, Spinner } from "@logixai/ui";
 import { useRequireAuth } from "@/app/lib/auth/useSession";
@@ -10,8 +12,15 @@ import { useRequireAuth } from "@/app/lib/auth/useSession";
  */
 export default function RequireAuth({ role, children }) {
   const { status, user } = useRequireAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  // Temporary passwords (from an institution) are replaced before anything else.
+  const mustChange = status === "authenticated" && user.mustChangePassword;
+  useEffect(() => {
+    if (mustChange) router.replace(`/account/password?next=${encodeURIComponent(pathname)}`);
+  }, [mustChange, router, pathname]);
 
-  if (status !== "authenticated") {
+  if (status !== "authenticated" || mustChange) {
     return (
       <div className="grid min-h-[50vh] place-items-center">
         <Spinner className="size-5" />

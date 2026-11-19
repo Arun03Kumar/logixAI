@@ -1,9 +1,36 @@
-import type { InstitutionRole, MemberView } from "@logixai/contracts";
+import {
+  DEFAULT_FEATURES,
+  capabilitiesFor,
+  hasInstitutionWideScope,
+  type AccessScope,
+  type Capability,
+  type FeatureFlags,
+  type InstitutionRole,
+  type MemberView,
+  type MembershipSummary,
+} from "@logixai/contracts";
 import { InternalServerError } from "@logixai/service-kit";
 
 export interface Membership {
   role: InstitutionRole;
   batchIds: string[];
+  /** What identity-service says the caller may do here. */
+  capabilities: Capability[];
+  /** The batches they act on (all, for owners and admins). */
+  scope: AccessScope;
+  /** Which product areas the institution has switched on. */
+  features: FeatureFlags;
+}
+
+/** Capabilities and scope derived from the role (tests, and identity responses without `access`). */
+export function membershipFromRole(role: InstitutionRole, batchIds: string[], features?: Partial<FeatureFlags>): Membership {
+  return {
+    role,
+    batchIds,
+    capabilities: capabilitiesFor(role),
+    scope: { all: hasInstitutionWideScope(role), batchIds, departmentIds: [] },
+    features: { ...DEFAULT_FEATURES.other, ...(features ?? {}) },
+  };
 }
 
 /**
@@ -41,14 +68,20 @@ export function createHttpIdentityClient(baseUrl: string): IdentityClient {
       const hit = cache.get(key);
       if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
 
-      const res = await get<{ role: InstitutionRole; batchIds: string[] }>(
+      const res = await get<MembershipSummary>(
         `/institutions/${encodeURIComponent(institutionId)}`,
         authorization,
       );
       if (res.status !== 200 && res.status !== 404 && res.status !== 403) {
         throw new InternalServerError({ reason: `identity-service answered ${res.status}` });
       }
-      const value = res.data ? { role: res.data.role, batchIds: res.data.batchIds } : null;
+      const d = res.data;
+      const value: Membership | null = d
+        ? {
+            ...membershipFromRole(d.role, d.batchIds, d.institution.features),
+            ...(d.access ? { capabilities: d.access.capabilities, scope: d.access.scope } : {}),
+          }
+        : null;
       cache.set(key, { at: Date.now(), value });
       if (cache.size > 5000) cache.clear();
       return value;

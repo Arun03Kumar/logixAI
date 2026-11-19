@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, CreditCard, LogOut, ShieldCheck, Sparkles } from "lucide-react";
+import { Building2, CreditCard, KeyRound, LogOut, ShieldCheck, Sparkles } from "lucide-react";
 import { Avatar, Badge, Button, Skeleton } from "@logixai/ui";
 import { signOut } from "@/app/lib/auth/session";
 import { useSession } from "@/app/lib/auth/useSession";
@@ -78,7 +78,7 @@ export default function UserMenu() {
                 </Badge>
               ) : null}
             </div>
-            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+            <p className="truncate text-xs text-muted-foreground">{user.email || "Signs in with a roll number"}</p>
           </div>
           <div className="p-1">
             <Link
@@ -99,6 +99,15 @@ export default function UserMenu() {
               <CreditCard className="size-4 text-muted-foreground" />
               Plan and billing
             </Link>
+            <Link
+              role="menuitem"
+              href="/account/password"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
+            >
+              <KeyRound className="size-4 text-muted-foreground" />
+              Change password
+            </Link>
             {user.role === "admin" ? (
               <Link
                 role="menuitem"
@@ -108,6 +117,17 @@ export default function UserMenu() {
               >
                 <ShieldCheck className="size-4 text-muted-foreground" />
                 Billing admin
+              </Link>
+            ) : null}
+            {user.role === "admin" ? (
+              <Link
+                role="menuitem"
+                href="/admin/institutions"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
+              >
+                <Building2 className="size-4 text-muted-foreground" />
+                Institutions console
               </Link>
             ) : null}
             <button
