@@ -1,5 +1,6 @@
 # Curated problem lists, shown on /arena/problems. Items must exist.
 - id: interview-essentials
+  area: ml
   title: Data interview essentials
   summary: "23 problems covering the patterns that come up again and again in data and ML interviews: top-N with ties, anti-joins, running totals, streaks, groupby, pivots and from-scratch NumPy."
   items:
@@ -27,6 +28,7 @@
     - np-cosine-matrix
     - np-attention
 - id: sql-interview-set
+  area: ml
   title: SQL interview set
   summary: Every SQL problem, from filters to recursive CTEs, in learning order.
   items:
@@ -85,6 +87,7 @@
     - sql-total-reports
     - sql-consecutive-month-buyers
 - id: pandas-30
+  area: ml
   title: Pandas 30
   summary: "Thirty Pandas tasks on realistic tables: cleaning, groupby, joins, reshaping and time series."
   items:
@@ -119,6 +122,7 @@
     - pd-fill-missing-days
     - pd-weekday-average
 - id: ml-coding-round
+  area: ml
   title: ML coding round
   summary: "Implement it in NumPy: losses, backprop, BatchNorm, k-NN, k-means, AUC, PCA and attention — the from-scratch questions of ML engineer interviews."
   items:
@@ -141,6 +145,7 @@
     - np-softmax-code
     - bc-pairwise-code
 - id: pytorch-coding-round
+  area: ml
   title: PyTorch coding round
   summary: "27 PyTorch problems judged on hidden tests: tensor tricks, autograd, nn.Modules from scratch, training-loop bugs, optimizers and attention."
   items:
@@ -172,6 +177,7 @@
     - attn-mha
     - attn-greedy-decode
 - id: numpy-25
+  area: ml
   title: NumPy 25
   summary: Twenty-five NumPy problems, from vectorisation tricks to linear algebra for embeddings and transformers.
   items:
@@ -201,6 +207,7 @@
     - np-attention
     - np-causal-attention
 - id: frontend-coding-round
+  area: frontend
   title: Frontend coding round
   summary: "23 JavaScript and React problems judged on hidden tests: debounce, throttle, Promise.all, retries, an LRU cache, an event emitter, forms, tabs, hooks and data fetching."
   items:
@@ -228,6 +235,7 @@
     - react-use-debounced-value
     - react-fetch-race
 - id: system-design-runnable
+  area: system-design
   title: System design you can run
   summary: "20 hands-on system design problems: rate limiters, load balancers, consistent hashing, caches, circuit breakers and IDs judged against simulated traffic, plus design questions with rubrics."
   items:
@@ -252,6 +260,7 @@
     - sd-idempotency-keys
     - sd-design-url-shortener
 - id: llm-agents-set
+  area: ml
   title: LLM apps and agents
   summary: "18 hands-on LLM problems: chunking, retrieval and its metrics, BPE, tool calling, agent loops and real LangGraph graphs with tools, memory and human approval."
   items:

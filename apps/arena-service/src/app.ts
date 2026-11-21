@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import {
+  AREAS,
   AnswerInputSchema,
   AssignTrackSchema,
   CodeRunInputSchema,
@@ -48,6 +49,8 @@ declare module "fastify" {
     userName: string;
   }
 }
+
+const AreaQuerySchema = z.object({ area: z.enum(AREAS).optional() });
 
 function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.infer<S> {
   const result = schema.safeParse(body ?? {});
@@ -122,7 +125,8 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   app.get("/ping", async () => ({ message: "arena service is alive" }));
 
   /* ── Catalog ── */
-  app.get(`${base}/tracks`, async (req) => ok(await arena.listTracks(req.userId)));
+  // ?area=ml|frontend|system-design
+  app.get(`${base}/tracks`, async (req) => ok(await arena.listTracks(req.userId, parse(AreaQuerySchema, req.query, "query").area)));
   app.get<P<{ trackId: string }>>(`${base}/tracks/:trackId`, async (req) =>
     ok(await arena.getTrack(req.userId, req.params.trackId)),
   );
@@ -136,7 +140,9 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   app.get(`${base}/problems`, async (req) =>
     ok(await arena.problems(req.userId, parse(ProblemQuerySchema, req.query, "query"))),
   );
-  app.get(`${base}/lists`, async (req) => ok(await arena.lists(req.userId)));
+  app.get(`${base}/courses`, async (req) => ok(await arena.listCourses(req.userId, parse(AreaQuerySchema, req.query, "query").area)));
+  app.get<P<{ courseId: string }>>(`${base}/courses/:courseId`, async (req) => ok(await arena.getCourse(req.userId, req.params.courseId)));
+  app.get(`${base}/lists`, async (req) => ok(await arena.lists(req.userId, parse(AreaQuerySchema, req.query, "query").area)));
 
   /* ── Practice (signed in) ── */
   app.post<P<{ itemId: string }>>(`${base}/items/:itemId/answer`, async (req) =>
@@ -175,11 +181,16 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   app.get<P<{ id: string }>>(`${base}/submissions/:id`, async (req) =>
     ok(await arena.getSubmission(user(req), req.params.id)),
   );
-  app.get(`${base}/me/dashboard`, async (req) => ok(await arena.dashboard(user(req))));
-  app.get(`${base}/me/review`, async (req) => ok(await arena.reviewQueue(user(req))));
+  // ?area= scopes these to one area (ML Arena shows only ML).
+  const scoped = (req: FastifyRequest) => {
+    const area = parse(AreaQuerySchema, req.query, "query").area;
+    return area ? arena.forArea(area) : arena;
+  };
+  app.get(`${base}/me/dashboard`, async (req) => ok(await scoped(req).dashboard(user(req))));
+  app.get(`${base}/me/review`, async (req) => ok(await scoped(req).reviewQueue(user(req))));
   app.get(`${base}/me/assignments`, async (req) => ok(await institutions.mine(caller(req))));
   // Signed out: the map with no progress.
-  app.get(`${base}/skill-map`, async (req) => ok(await arena.skillMap(req.userId)));
+  app.get(`${base}/skill-map`, async (req) => ok(await scoped(req).skillMap(req.userId)));
 
   /* ── Mock interviews, contests, profiles ── */
   app.get(`${base}/mocks`, async (req) => ok(await practice.mockHub(viewer(req))));

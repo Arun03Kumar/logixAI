@@ -1,10 +1,9 @@
 "use client";
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
-import { ArrowLeft, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { Button, Container, PageHeader, Spinner, cn } from "@logixai/ui";
-import AppHeader from "@/app/components/layout/AppHeader";
+import ArenaShell from "@/app/arena/_components/ArenaShell";
 import { configureJsx, editorOptions, handleEditorMount } from "@/app/coding-platform/components/problem/editorConfig";
 import LivePreview from "@/app/arena/_components/LivePreview";
 
@@ -94,14 +93,8 @@ export default function PlaygroundPage() {
   };
 
   return (
-    <>
-      <AppHeader />
-      <main className="py-6">
+    <ArenaShell>
         <Container size="xl" className="space-y-4">
-          <Link href="/practice" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />
-            Practice
-          </Link>
           <PageHeader
             title="JavaScript and React playground"
             description="A scratchpad that runs in your browser, in an isolated frame. Imports: react and react-dom. Your code is kept on this device only."
@@ -149,7 +142,6 @@ export default function PlaygroundPage() {
             </div>
           </div>
         </Container>
-      </main>
-    </>
+    </ArenaShell>
   );
 }

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { XP_BY_DIFFICULTY, type ArenaDifficulty } from "@logixai/contracts";
+import { XP_BY_DIFFICULTY, type ArenaDifficulty, type Area } from "@logixai/contracts";
 import { parse as parseYaml } from "yaml";
 import {
   GeneratedTestsSchema,
@@ -17,6 +17,7 @@ import {
   type TrackFile,
 } from "./schema.js";
 import { loadDataset, splitDataset, type DatasetSplit } from "./datasets.js";
+import { loadCourses, type CourseConfig } from "./courseConfig.js";
 import { loadPracticeConfig, type PracticeConfig } from "./practiceConfig.js";
 
 export const GENERATED_FILE = "tests.generated.json";
@@ -43,6 +44,8 @@ export interface JudgeTest {
 export type CatalogItem = ItemSource & {
   topicId: string;
   trackId: string;
+  /** The track's area. */
+  area: Area;
   /** Position in the whole catalog (track order, topic order, item order). */
   order: number;
   weight: number;
@@ -54,6 +57,7 @@ export type CatalogItem = ItemSource & {
 
 export interface CatalogTopic extends Omit<TopicFile, "items"> {
   trackId: string;
+  area: Area;
   items: CatalogItem[];
 }
 
@@ -138,7 +142,11 @@ export function readSources(dir: string): ContentSources {
   }
 
   const itemIds = new Set<string>();
+  // item id -> its track's area, for checking lists.
+  const topicArea = new Map(tracks.flatMap((t) => t.topics.map((id) => [id, t.area] as const)));
+  const itemArea = new Map<string, string>();
   for (const topic of topics.values()) {
+    for (const item of topic.items) itemArea.set(item.id, topicArea.get(topic.id) ?? "");
     for (const p of topic.prerequisites) {
       if (!topics.has(p)) problems.push(`topic ${topic.id}: unknown prerequisite ${p}`);
     }
@@ -212,6 +220,9 @@ export function readSources(dir: string): ContentSources {
         if (listIds.has(list.id)) problems.push(`list ${list.id}: duplicate id`);
         listIds.add(list.id);
         for (const id of list.items) if (!itemIds.has(id)) problems.push(`list ${list.id}: unknown item ${id}`);
+        for (const id of list.items) {
+          if (itemIds.has(id) && itemArea.get(id) !== list.area) problems.push(`list ${list.id} (${list.area}): ${id} is from area ${itemArea.get(id)}`);
+        }
         if (new Set(list.items).size !== list.items.length) problems.push(`list ${list.id}: an item is listed twice`);
       }
     }
@@ -227,6 +238,8 @@ export class Catalog {
   readonly lists: ListsFile;
   /** Mock templates and the contest schedule (set by loadCatalog). */
   practice: PracticeConfig = { mocks: [], contests: null };
+  /** Courses: ordered modules over tracks (set by loadCatalog). */
+  courses: CourseConfig[] = [];
   private readonly trackById = new Map<string, CatalogTrack>();
   private readonly topicById = new Map<string, CatalogTopic>();
   private readonly itemById = new Map<string, CatalogItem>();
@@ -249,6 +262,23 @@ export class Catalog {
   item = (id: string) => this.itemById.get(id);
   topics = () => [...this.topicById.values()];
   list = (id: string) => this.lists.find((l) => l.id === id);
+
+  private readonly areaViews = new Map<Area, Catalog>();
+
+  /** The same catalog restricted to one area (tracks, lists, mocks, courses). Memoised. */
+  forArea(area: Area): Catalog {
+    let view = this.areaViews.get(area);
+    if (!view) {
+      view = new Catalog(
+        this.tracks.filter((t) => t.area === area),
+        this.lists.filter((l) => l.area === area),
+      );
+      view.practice = { mocks: this.practice.mocks.filter((m) => m.area === area), contests: this.practice.contests };
+      view.courses = this.courses.filter((c) => c.area === area);
+      this.areaViews.set(area, view);
+    }
+    return view;
+  }
 }
 
 const weightOf = (d: ArenaDifficulty) => XP_BY_DIFFICULTY[d];
@@ -270,8 +300,9 @@ export function buildCatalog(
         return {
           ...topic,
           trackId: track.id,
+          area: track.area,
           items: topic.items.map((item): CatalogItem => {
-            const base = { ...item, topicId, trackId: track.id, order: order++, weight: weightOf(item.difficulty) };
+            const base = { ...item, topicId, trackId: track.id, area: track.area, order: order++, weight: weightOf(item.difficulty) };
             if (!isJudged(item)) return base;
             const data = isCode(item) && item.dataset ? datasetTests(dir, item) : null;
             const built = generated?.items[item.id];
@@ -320,5 +351,6 @@ export function loadCatalog(dir: string): Catalog {
     : { items: {} };
   const catalog = buildCatalog(sources, generated, dir);
   catalog.practice = loadPracticeConfig(dir, catalog);
+  catalog.courses = loadCourses(dir, catalog);
   return catalog;
 }

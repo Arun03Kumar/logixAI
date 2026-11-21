@@ -1,0 +1,245 @@
+id: maths-vectors-matrices
+title: Vectors and matrices
+summary: Vectors as data points, norms and distances, the dot product, angles, cosine similarity and projection, matrix types and operations, and determinants, inverses and solving linear systems.
+prerequisites: [maths-algebra-functions]
+lesson: |
+  ## 2.1 Vectors
+
+  A **vector** is an ordered list of numbers — one data point's features, a word embedding, a model's weights. $\mathbf{x} = (x_1, \dots, x_n)$ lives in $n$-dimensional space. Vectors add element-wise and scale by a number: $2(1, 3) = (2, 6)$. In NumPy, `np.array([1, 3])` does exactly this.
+
+  ## 2.2 Distances and norms
+
+  A **norm** measures length:
+
+  $$\|\mathbf{x}\|_2 = \sqrt{\textstyle\sum x_i^2} \qquad \|\mathbf{x}\|_1 = \textstyle\sum |x_i| \qquad \|\mathbf{x}\|_\infty = \max |x_i|$$
+
+  The **distance** between two points is the norm of their difference: Euclidean ($L_2$) or Manhattan ($L_1$). k-nearest neighbours and k-means are built on distances, which is why features must be on similar **scales** — otherwise the feature with the biggest numbers dominates. L1 and L2 norms of the weights are also the penalties in Lasso and Ridge regularisation.
+
+  ## 2.3 Dot product, angle, cosine similarity and projection
+
+  $$\mathbf{a} \cdot \mathbf{b} = \textstyle\sum a_i b_i = \|\mathbf{a}\|\,\|\mathbf{b}\|\cos\theta$$
+
+  - Dot product 0 ⇔ the vectors are **orthogonal** (perpendicular).
+  - **Cosine similarity** $\cos\theta = \frac{\mathbf{a}\cdot\mathbf{b}}{\|\mathbf{a}\|\|\mathbf{b}\|}$ ranges from −1 to 1 and ignores length — the standard similarity for text embeddings and recommendations.
+  - A linear model's score is a dot product: $\hat y = \mathbf{w} \cdot \mathbf{x} + b$.
+  - The **projection** of $\mathbf{a}$ onto $\mathbf{b}$ is $\frac{\mathbf{a}\cdot\mathbf{b}}{\mathbf{b}\cdot\mathbf{b}}\mathbf{b}$ — the basis of PCA and least squares.
+
+  ## 2.4 Matrices: types and operations
+
+  An $m \times n$ matrix has $m$ rows and $n$ columns — a dataset is a matrix with one row per example. **Transpose** $A^\top$ swaps rows and columns. **Matrix multiplication** $AB$ needs $A$'s columns to equal $B$'s rows: $(m \times n)(n \times p) = m \times p$, and entry $(i, j)$ is row $i$ of $A$ dotted with column $j$ of $B$. It is **not** commutative ($AB \ne BA$ in general). Special matrices: identity $I$ ($AI = A$), diagonal, symmetric ($A = A^\top$, e.g. covariance matrices). Element-wise product (`A * B` in NumPy) differs from matrix product (`A @ B`).
+
+  ## 2.5 Determinant, inverse and solving linear equations
+
+  For $A = \begin{pmatrix} a & b \\ c & d \end{pmatrix}$: $\det A = ad - bc$ and $A^{-1} = \frac{1}{ad - bc}\begin{pmatrix} d & -b \\ -c & a \end{pmatrix}$. $\det A = 0$ means $A$ is **singular**: no inverse, the columns are linearly dependent (e.g. a feature that's a copy or combination of others). A system $A\mathbf{x} = \mathbf{b}$ is solved by $\mathbf{x} = A^{-1}\mathbf{b}$ — in code, `np.linalg.solve(A, b)`, which is faster and more accurate than computing the inverse. Linear regression's normal equation is $\mathbf{w} = (X^\top X)^{-1} X^\top \mathbf{y}$.
+items:
+  - id: m1s2-norms
+    type: numeric
+    title: Length of a vector
+    difficulty: easy
+    tags: [vectors, norms]
+    prompt: |
+      What is the Euclidean ($L_2$) norm of $\mathbf{x} = (3, -4, 12)$?
+    answer: 13
+    tolerance: 0
+    explanation: |
+      $\sqrt{9 + 16 + 144} = \sqrt{169} = 13$. Its $L_1$ norm would be $3 + 4 + 12 = 19$ and its $L_\infty$ norm 12.
+
+  - id: m1s2-distances
+    type: mcq_single
+    title: Euclidean vs Manhattan
+    difficulty: easy
+    tags: [vectors, distances]
+    prompt: |
+      For points $A = (1, 2)$ and $B = (4, 6)$, what are the Euclidean and Manhattan distances?
+    options:
+      - { id: a, text: "Euclidean 5, Manhattan 7" }
+      - { id: b, text: "Euclidean 7, Manhattan 5" }
+      - { id: c, text: "Both 5" }
+      - { id: d, text: "Euclidean 25, Manhattan 7" }
+    answer: a
+    explanation: |
+      The difference is $(3, 4)$. Euclidean: $\sqrt{9 + 16} = 5$ (straight line). Manhattan: $3 + 4 = 7$ (along the grid). Euclidean is never longer than Manhattan.
+
+  - id: m1s2-scaling
+    type: mcq_single
+    title: Why scale features?
+    difficulty: medium
+    tags: [vectors, distances, scaling]
+    prompt: |
+      A k-NN model uses age (20–70) and annual income (2,00,000–50,00,000) as features without scaling. What happens?
+    options:
+      - { id: a, text: "Nothing; distances treat features equally" }
+      - { id: b, text: "Income dominates the distances, so age is effectively ignored" }
+      - { id: c, text: "Age dominates because it has fewer distinct values" }
+      - { id: d, text: "The model can't compute distances with different units" }
+    answer: b
+    explanation: |
+      Income differences are in the lakhs while age differences are tens, so squared income differences swamp everything. Standardising (zero mean, unit variance) or min–max scaling puts features on comparable scales.
+
+  - id: m1s2-dot
+    type: numeric
+    title: Dot product
+    difficulty: easy
+    tags: [vectors, dot-product]
+    prompt: |
+      A linear model has weights $\mathbf{w} = (0.5, -2, 1)$ and bias $b = 3$. What is its score $\mathbf{w}\cdot\mathbf{x} + b$ for $\mathbf{x} = (4, 1, 6)$?
+    answer: 9
+    tolerance: 0
+    explanation: |
+      $0.5 \cdot 4 - 2 \cdot 1 + 1 \cdot 6 + 3 = 2 - 2 + 6 + 3 = 9$. Every linear model, and every neuron before its activation, computes exactly this.
+
+  - id: m1s2-cosine
+    type: numeric
+    title: Cosine similarity
+    difficulty: medium
+    tags: [vectors, cosine-similarity]
+    prompt: |
+      What is the cosine similarity of $\mathbf{a} = (1, 2, 2)$ and $\mathbf{b} = (2, 0, 1)$? (Three decimals.)
+    answer: 0.596
+    tolerance: 0.001
+    explanation: |
+      $\mathbf{a}\cdot\mathbf{b} = 2 + 0 + 2 = 4$; $\|\mathbf{a}\| = 3$; $\|\mathbf{b}\| = \sqrt 5 \approx 2.236$. So $4 / (3 \times 2.236) \approx 0.596$. Scaling either vector doesn't change it — that's why it compares meaning, not length, of embeddings.
+
+  - id: m1s2-orthogonal
+    type: mcq_single
+    title: Orthogonal vectors
+    difficulty: easy
+    tags: [vectors, dot-product]
+    prompt: |
+      For which value of $k$ are $(2, k)$ and $(3, -6)$ orthogonal?
+    options:
+      - { id: a, text: "$k = 1$" }
+      - { id: b, text: "$k = -1$" }
+      - { id: c, text: "$k = 4$" }
+      - { id: d, text: "$k = 0$" }
+    answer: a
+    explanation: |
+      Orthogonal means the dot product is 0: $6 - 6k = 0$, so $k = 1$. Uncorrelated (centred) features are orthogonal vectors.
+
+  - id: m1s2-shapes
+    type: mcq_single
+    title: Matrix product shapes
+    difficulty: easy
+    tags: [matrices, shapes]
+    prompt: |
+      $X$ is a $100 \times 5$ data matrix and $W$ is $5 \times 3$. What is the shape of $XW$, and is $WX$ defined?
+    options:
+      - { id: a, text: "$100 \\times 3$; $WX$ is not defined" }
+      - { id: b, text: "$5 \\times 5$; $WX$ is $3 \\times 100$" }
+      - { id: c, text: "$100 \\times 3$; $WX$ is $5 \\times 5$" }
+      - { id: d, text: "$3 \\times 100$; $WX$ is not defined" }
+    answer: a
+    explanation: |
+      $(100 \times 5)(5 \times 3) = 100 \times 3$: the inner sizes match and the outer ones remain. $WX$ would be $(5 \times 3)(100 \times 5)$ — inner sizes 3 and 100 don't match. This is one neural-network layer mapping 5 features to 3 outputs for 100 examples.
+
+  - id: m1s2-matmul
+    type: code
+    title: Matrix multiplication by hand
+    difficulty: medium
+    tags: [matrices, numpy]
+    prompt: |
+      Implement `matmul(A, B)` with plain Python loops (no `@`, no `np.dot`): return the product as a list of lists, or raise `ValueError` if the shapes don't match.
+    function:
+      name: matmul
+      params:
+        - { name: A, type: list }
+        - { name: B, type: list }
+      returns: "list of lists"
+    starter: |
+      def matmul(A, B):
+          return [[a * b for a, b in zip(ra, rb)] for ra, rb in zip(A, B)]
+    solution: |
+      def matmul(A, B):
+          n = len(B)
+          if any(len(row) != n for row in A):
+              raise ValueError("A's columns must equal B's rows")
+          p = len(B[0])
+          return [[sum(A[i][k] * B[k][j] for k in range(n)) for j in range(p)] for i in range(len(A))]
+    tests:
+      sample:
+        - args: [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+      hidden:
+        - args: [[[1, 0, 2]], [[1], [2], [3]]]
+        - args: [[[2]], [[3, 4]]]
+    explanation: |
+      Entry $(i, j)$ is row $i$ of $A$ dotted with column $j$ of $B$. The starter multiplies element-wise — what `A * B` does in NumPy — which is a different operation (and only defined for equal shapes).
+
+  - id: m1s2-determinant
+    type: numeric
+    title: Determinant and invertibility
+    difficulty: easy
+    tags: [matrices, determinant]
+    prompt: |
+      What is the determinant of $\begin{pmatrix} 4 & 6 \\ 2 & 3 \end{pmatrix}$?
+    answer: 0
+    tolerance: 0
+    explanation: |
+      $4 \cdot 3 - 6 \cdot 2 = 0$: the matrix is singular. The second column is 1.5 times the first — like two perfectly correlated features — so it has no inverse, and linear regression's $X^\top X$ breaks down the same way (multicollinearity).
+
+  - id: m1s2-solve
+    type: code
+    title: Solve a linear system
+    difficulty: medium
+    tags: [matrices, linear-systems, numpy]
+    prompt: |
+      Write `solve(A, b)` returning the solution $\mathbf{x}$ of $A\mathbf{x} = \mathbf{b}$ for a square matrix, using `np.linalg.solve`. If $A$ is singular, return `None`.
+    function:
+      name: solve
+      params:
+        - { name: A, type: ndarray }
+        - { name: b, type: ndarray }
+      returns: "ndarray or None"
+    starter: |
+      import numpy as np
+
+      def solve(A, b):
+          return np.linalg.inv(A) * b
+    solution: |
+      import numpy as np
+
+      def solve(A, b):
+          try:
+              return np.linalg.solve(A, b)
+          except np.linalg.LinAlgError:
+              return None
+    tests:
+      sample:
+        - args: [[[2, 1], [1, 3]], [3, 5]]
+      hidden:
+        - args: [[[1, 2], [2, 4]], [1, 2]]
+        - args: [[[3, 0, 0], [0, 2, 0], [0, 0, 1]], [3, 4, 5]]
+    tolerance: { abs: 1.0e-6, rel: 1.0e-6 }
+    explanation: |
+      `np.linalg.solve` is the right tool: more accurate and faster than forming the inverse, and it raises `LinAlgError` for singular matrices. The starter also uses `*` (element-wise) where a matrix–vector product `@` was needed.
+
+  - id: m1s2-projection
+    type: code
+    title: Project onto a direction
+    difficulty: medium
+    tags: [vectors, projection, numpy]
+    prompt: |
+      Write `project(a, b)` returning the projection of vector $\mathbf{a}$ onto vector $\mathbf{b}$: $\frac{\mathbf{a}\cdot\mathbf{b}}{\mathbf{b}\cdot\mathbf{b}}\,\mathbf{b}$.
+    function:
+      name: project
+      params:
+        - { name: a, type: ndarray }
+        - { name: b, type: ndarray }
+      returns: "ndarray"
+    starter: |
+      import numpy as np
+
+      def project(a, b):
+          return (a @ b) * b
+    solution: |
+      import numpy as np
+
+      def project(a, b):
+          return (a @ b) / (b @ b) * b
+    tests:
+      sample:
+        - args: [[3, 4], [1, 0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=4), rng.normal(size=4) * 5]]
+    explanation: |
+      Dividing by $\mathbf{b}\cdot\mathbf{b} = \|\mathbf{b}\|^2$ makes the result independent of $\mathbf{b}$'s length. The starter's answer grows with $\|\mathbf{b}\|^2$. PCA projects data onto its top directions; least squares projects $\mathbf{y}$ onto the space of the features.

@@ -9,9 +9,14 @@ import { isPro } from "@/app/lib/billing/plan";
 
 type NavItem = { label: string; href: string; when?: "signedIn" | "admin" | "notPro"; also?: string[] };
 
+// One entry per area (ML Arena, DSA, Frontend, System design), then Practice:
+// mock interviews, contests and profiles across all of them.
 const NAV: NavItem[] = [
-  { label: "Practice", href: "/practice", also: ["/problems"] },
   { label: "ML Arena", href: "/arena" },
+  { label: "DSA", href: "/problems" },
+  { label: "Frontend", href: "/frontend" },
+  { label: "System design", href: "/system-design" },
+  { label: "Practice", href: "/practice", also: ["/u"] },
   { label: "Institutions", href: "/institutions", when: "signedIn" },
   { label: "Create problem", href: "/create-problem", when: "admin" },
   { label: "Pricing", href: "/pricing", when: "notPro" },

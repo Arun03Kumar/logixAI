@@ -162,7 +162,8 @@ once and inlines it into an iframe's `srcdoc` with `sandbox="allow-scripts"`
 only, so learner code gets an opaque origin and can't read the app's cookies,
 storage or page (checked). It's inlined because some browsers refuse script
 requests from an opaque origin. React items show it as a "Live
-preview" tab; `/practice/playground` is a free-form React / JavaScript
+preview" tab; `/frontend/playground` (formerly `/practice/playground`, which
+now redirects) is a free-form React / JavaScript
 scratchpad built on it (drafts stay in the browser). An infinite loop can still
 freeze the tab; the restart button reloads the frame.
 
@@ -216,6 +217,56 @@ time and 12 runs per minute (`CODE_RUNS_PER_MINUTE`).
   asks identity-service for roles and batch members with the caller's own token
   (`IDENTITY_API_URL`). Assignments are recorded in `audit_events`
   (`GET /api/v1/arena/institutions/:id/audit`, admins).
+
+## Areas
+
+Content is split into three **areas** (`AREAS` in `@logixai/contracts`):
+`ml`, `frontend` (JavaScript, React, the playground) and `system-design`. Every
+track, curated list and mock template declares its `area`; a list or mock may
+only use items from its own area (checked at load time).
+
+| Area | Web home | Covers |
+| --- | --- | --- |
+| `ml` | `/arena` | maths, Python, NumPy, Pandas, SQL, ML, PyTorch, LLMs, the course |
+| `frontend` | `/frontend` | JS and React tracks, `/frontend/playground` |
+| `system-design` | `/system-design` | system-design problems |
+
+Item, track, topic and problem pages are shared and re-exported under each
+area's prefix; `apps/web/app/lib/areas.js` builds links (`itemHref`,
+`topicHref`, `trackHref`) and redirects a page opened under the wrong prefix
+(`/arena/items/react-keys` → `/frontend/items/react-keys`). The API takes
+`?area=` on `/tracks`, `/lists`, `/courses`, `/problems`, `/me/dashboard`,
+`/me/review` and `/skill-map`, so each area's dashboard, review queue, solved
+count and skill map show only its own material.
+
+## Courses
+
+`content/courses.yaml` defines guided courses (currently *Machine learning,
+from zero*, area `ml`, shown on `/arena` and `/arena/course/:courseId`). A
+course is an ordered list of **modules**:
+
+- an available module points to a track (`track: course-m1-maths`) whose
+  topics are the module's **sections**, in order;
+- a planned module has `status: planned` and no track yet;
+- either kind can list existing tracks to practise with (`practice: [...]`).
+
+`GET /api/v1/arena/courses?area=ml` lists courses; `GET /courses/:courseId`
+returns modules with progress and the next section to study. Course tracks
+are hidden from the general "Practice tracks" list (they carry `courseId`).
+
+**Adding material from new PDFs:**
+
+- *A new section in an existing module*: write
+  `content/course-mN-<name>/<topic>.yaml` (lesson plus items, same format as
+  any topic) and add its id to that folder's `track.yaml`, in order.
+- *A new module*: create a `content/course-mN-<name>/` track folder (with
+  `area: ml` and a negative `order` so it sorts with the course), then in
+  `courses.yaml` replace the planned module's `status: planned` with
+  `track: course-mN-<name>` (or add a new module with the next number).
+
+Then run `npm run content:build`. Lessons are written in our own words from
+the source material, never copied text. Numeric and multiple-choice answers
+aren't checked by the build, so work them out by hand.
 
 ## Adding or changing content
 

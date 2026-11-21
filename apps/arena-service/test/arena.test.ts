@@ -71,7 +71,7 @@ const SUCCESS = (n: number) => Array.from({ length: n }, () => ({ status: "SUCCE
 describe("catalog", () => {
   it("lists tracks, topics and items without signing in", async () => {
     const tracks = await req(null, "GET", "/tracks");
-    expect(tracks.data.map((t: { id: string }) => t.id)).toEqual(["math-for-ml", "python-numpy", "ml-fundamentals", "sql-interview", "pandas-interview", "numpy-interview", "pytorch-interview", "frontend-interview", "system-design", "llm-agents"]);
+    expect(tracks.data.map((t: { id: string }) => t.id)).toEqual(["course-m1-maths", "course-m2-python", "math-for-ml", "python-numpy", "ml-fundamentals", "sql-interview", "pandas-interview", "numpy-interview", "pytorch-interview", "frontend-interview", "system-design", "llm-agents"]);
     expect(tracks.data[0]).toMatchObject({ solvedCount: 0, mastery: 0 });
 
     const topic = await req(null, "GET", "/topics/vectors");
@@ -227,7 +227,7 @@ describe("dashboard", () => {
     expect(d.totalItems).toBe(catalog.items.length);
     expect(d.activity).toHaveLength(84);
     expect(d.activity.at(-1)).toEqual({ day: "2026-11-20", solved: 1 });
-    expect(d.tracks[0].solvedCount).toBe(2);
+    expect(d.tracks.find((t: { id: string }) => t.id === "math-for-ml").solvedCount).toBe(2);
     expect(d.weakestTopics[0]).toMatchObject({ id: "vectors" });
     expect(d.continueItem).toMatchObject({ id: "vec-cosine-mcq", topicTitle: "Vectors and the dot product" });
     expect(d.dailyItem).toHaveProperty("difficulty");

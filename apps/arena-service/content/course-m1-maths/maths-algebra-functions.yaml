@@ -1,0 +1,277 @@
+id: maths-algebra-functions
+title: Algebra, functions and logarithms
+summary: Functions and their graphs, exponents and exponential growth, logarithms and log transforms, sigma and product notation, absolute value and piecewise functions — the algebra every ML formula is written in.
+lesson: |
+  ## 1.1 Functions and graphs
+
+  A **function** takes an input and gives exactly one output: $f(x) = 2x + 3$. In machine learning a model *is* a function — it maps features to a prediction — and training means finding the function's parameters.
+
+  - **Linear** $f(x) = mx + c$: slope $m$ (change in output per unit of input), intercept $c$ (output at $x = 0$). Linear regression fits exactly this.
+  - **Quadratic** $f(x) = ax^2 + bx + c$: a U-shaped parabola. Squared-error loss is quadratic in the prediction, which is why it has one clear minimum.
+  - **Domain** is the set of allowed inputs, **range** the set of possible outputs. $\sqrt{x}$ needs $x \ge 0$; $\ln x$ needs $x > 0$.
+  - **Composition** $f(g(x))$ feeds one function into another — a neural network is a long composition of simple functions.
+
+  ## 1.2 Exponents and exponential functions
+
+  $$a^m a^n = a^{m+n} \qquad \frac{a^m}{a^n} = a^{m-n} \qquad (a^m)^n = a^{mn} \qquad a^0 = 1 \qquad a^{-n} = \frac{1}{a^n} \qquad a^{1/n} = \sqrt[n]{a}$$
+
+  An **exponential** $f(x) = a \cdot b^x$ multiplies by the same factor each step: growth when $b > 1$, decay when $0 < b < 1$. Compound growth at rate $r$ for $t$ periods gives $P(1 + r)^t$. The number $e \approx 2.718$ is the natural base: $e^x$ is its own derivative, and the **sigmoid** $\sigma(z) = \frac{1}{1 + e^{-z}}$ squashes any number into $(0, 1)$ — the heart of logistic regression.
+
+  ## 1.3 Logarithms
+
+  A logarithm answers "which power gives this number?": $\log_a x = y \iff a^y = x$. So $\log_2 8 = 3$.
+
+  $$\log(xy) = \log x + \log y \qquad \log\frac{x}{y} = \log x - \log y \qquad \log x^n = n\log x \qquad \log_a x = \frac{\ln x}{\ln a}$$
+
+  - $\ln = \log_e$ (used in nearly all ML formulas), $\log_{10}$ (orders of magnitude), $\log_2$ (bits, entropy).
+  - Logs exist only for **positive** inputs; data with zeros is usually transformed with $\ln(1 + x)$.
+  - Logs **compress** large values: 10, 1,000 and 1,000,000 become 1, 3 and 6 in $\log_{10}$. That's why a log transform tames right-skewed data like incomes or prices.
+  - **Log loss** for one prediction is $-\ln(\text{probability given to the true class})$: confidently wrong predictions are punished hard.
+  - **Odds** $= \frac{p}{1-p}$ and **log-odds** (logit) $= \ln\frac{p}{1-p}$; logistic regression models the log-odds as a straight line.
+
+  ## 1.4 Sigma and product notation
+
+  $$\sum_{i=1}^{n} x_i = x_1 + x_2 + \dots + x_n \qquad \prod_{i=1}^{n} x_i = x_1 x_2 \cdots x_n$$
+
+  The mean is $\bar x = \frac{1}{n}\sum x_i$; mean squared error is $\frac{1}{n}\sum (y_i - \hat y_i)^2$. Useful rules: $\sum c\,x_i = c\sum x_i$, $\sum (x_i + y_i) = \sum x_i + \sum y_i$, $\sum_{i=1}^n c = nc$. A **likelihood** is a product of probabilities; taking the log turns it into a sum, $\ln \prod p_i = \sum \ln p_i$, which is easier to work with and doesn't underflow.
+
+  ## 1.5 Absolute value, inequalities and piecewise functions
+
+  - $|x|$ is the distance from 0. **Mean absolute error** $\frac{1}{n}\sum |y_i - \hat y_i|$ uses it and is less sensitive to outliers than squared error.
+  - $|x - a| < d$ means $a - d < x < a + d$. Multiplying or dividing an inequality by a **negative** number flips its direction.
+  - A **piecewise** function uses different rules on different ranges. **ReLU** is $\max(0, x)$: $0$ for $x < 0$, $x$ otherwise — the most common activation in neural networks. Clipping a value to a range is piecewise too.
+items:
+  - id: m1s1-linear-slope
+    type: numeric
+    title: Read a linear model
+    difficulty: easy
+    tags: [functions, linear]
+    prompt: |
+      A model predicts rent as $f(x) = 1200x + 5000$ rupees, where $x$ is the area in hundreds of square feet. By how much does the predicted rent rise when the area grows by 300 square feet?
+    answer: 3600
+    tolerance: 0
+    answerFormat: "rupees"
+    explanation: |
+      300 square feet is $x$ growing by 3, and each unit adds the slope, 1,200: $3 \times 1200 = 3600$. The intercept (5,000) doesn't affect *changes* in the prediction — a common confusion when reading regression coefficients.
+
+  - id: m1s1-domain
+    type: mcq_single
+    title: Where is it defined?
+    difficulty: easy
+    tags: [functions, domain, logarithms]
+    prompt: |
+      Which values of $x$ can be fed to $f(x) = \ln(x - 2)$?
+    options:
+      - { id: a, text: "All real numbers" }
+      - { id: b, text: "$x \\ge 2$" }
+      - { id: c, text: "$x > 2$" }
+      - { id: d, text: "$x > 0$" }
+    answer: c
+    explanation: |
+      A logarithm needs a strictly positive input, so $x - 2 > 0$, i.e. $x > 2$. At $x = 2$ the input is $\ln 0$, which is undefined (it heads to $-\infty$) — the reason pipelines use $\ln(1 + x)$ for data that contains zeros.
+
+  - id: m1s1-exponent-rules
+    type: numeric
+    title: Simplify the powers
+    difficulty: easy
+    tags: [exponents]
+    prompt: |
+      Evaluate $\dfrac{2^{5} \cdot 2^{-2}}{2^{0}} \cdot 8^{1/3}$.
+    answer: 16
+    tolerance: 0
+    explanation: |
+      $2^5 \cdot 2^{-2} = 2^3 = 8$, and $2^0 = 1$. $8^{1/3}$ is the cube root of 8, which is 2. So $8 \times 2 = 16$.
+
+  - id: m1s1-compound-growth
+    type: numeric
+    title: Compound growth
+    difficulty: medium
+    tags: [exponents, growth]
+    prompt: |
+      A platform has 2,000 users and grows by 10% a month. How many users does it have after 3 months? (Round to the nearest whole number.)
+    answer: 2662
+    tolerance: 0.5
+    explanation: |
+      $2000 \times 1.1^3 = 2000 \times 1.331 = 2662$. Growth compounds: each month's 10% applies to the larger base, so it's more than $2000 + 3 \times 200 = 2600$.
+
+  - id: m1s1-sigmoid
+    type: numeric
+    title: The sigmoid at zero
+    difficulty: easy
+    tags: [exponents, sigmoid, logistic-regression]
+    prompt: |
+      What is $\sigma(0)$, where $\sigma(z) = \dfrac{1}{1 + e^{-z}}$?
+    answer: 0.5
+    tolerance: 0.001
+    explanation: |
+      $e^{0} = 1$, so $\sigma(0) = \frac{1}{1 + 1} = 0.5$. A logistic regression score of 0 means "50/50"; positive scores push the probability towards 1 and negative ones towards 0.
+
+  - id: m1s1-log-laws
+    type: mcq_single
+    title: Expand with the log laws
+    difficulty: medium
+    tags: [logarithms]
+    prompt: |
+      Which expression equals $\log\left(\dfrac{x^2 y}{z}\right)$?
+    options:
+      - { id: a, text: "$2\\log x + \\log y - \\log z$" }
+      - { id: b, text: "$\\log(2x) + \\log y - \\log z$" }
+      - { id: c, text: "$2\\log x \\cdot \\log y / \\log z$" }
+      - { id: d, text: "$(\\log x)^2 + \\log y - \\log z$" }
+    answer: a
+    explanation: |
+      Quotient law: $\log(x^2 y) - \log z$. Product law: $\log x^2 + \log y - \log z$. Power law: $2\log x + \log y - \log z$. Note $\log x^2 = 2\log x$, not $(\log x)^2$ — a classic slip.
+
+  - id: m1s1-doubling-time
+    type: numeric
+    title: When does it double?
+    difficulty: medium
+    tags: [logarithms, growth]
+    prompt: |
+      Something grows 10% per year. How many years until it doubles? Solve $1.1^t = 2$ and give $t$ to two decimals.
+    answer: 7.27
+    tolerance: 0.01
+    explanation: |
+      Take natural logs: $t \ln 1.1 = \ln 2$, so $t = \frac{0.6931}{0.0953} \approx 7.27$ years. Logs are the tool for solving any equation where the unknown is an exponent. (The "rule of 70" estimate, $70 / 10 = 7$, comes from $\ln 2 \approx 0.7$.)
+
+  - id: m1s1-log-loss
+    type: numeric
+    title: Log loss of a confident mistake
+    difficulty: medium
+    tags: [logarithms, log-loss, classification]
+    prompt: |
+      The true label is 1 (spam). The model predicts $p = 0.1$ for spam. What is the log loss $-\ln p$ for this example? (Two decimals.)
+    answer: 2.30
+    tolerance: 0.01
+    explanation: |
+      $-\ln 0.1 = 2.303$. A confident correct prediction ($p = 0.9$) would cost only $-\ln 0.9 = 0.105$, about 22 times less. Log loss rewards calibrated confidence and punishes confident errors.
+
+  - id: m1s1-log-odds
+    type: numeric
+    title: Probability to log-odds
+    difficulty: medium
+    tags: [logarithms, odds, logistic-regression]
+    prompt: |
+      A customer's churn probability is 0.8. What are the log-odds $\ln\frac{p}{1-p}$? (Three decimals.)
+    answer: 1.386
+    tolerance: 0.002
+    explanation: |
+      Odds $= 0.8 / 0.2 = 4$ ("4 to 1"), and $\ln 4 \approx 1.386$. Probabilities live in $(0, 1)$ but log-odds cover the whole number line, which is why logistic regression can model them with a straight line.
+
+  - id: m1s1-log-transform-code
+    type: code
+    title: Log-transform a skewed column
+    difficulty: easy
+    tags: [logarithms, numpy, feature-engineering]
+    prompt: |
+      Implement `log_transform(values)`: return `ln(1 + x)` for each non-negative value (as a NumPy array). Using `1 + x` keeps zeros valid.
+    function:
+      name: log_transform
+      params:
+        - { name: values, type: ndarray }
+      returns: "ndarray"
+    starter: |
+      import numpy as np
+
+      def log_transform(values):
+          return np.log(values)
+    solution: |
+      import numpy as np
+
+      def log_transform(values):
+          return np.log1p(values)
+    tests:
+      sample:
+        - args: [[0, 1, 9, 99]]
+      hidden:
+        - args: [[0]]
+      generate: |
+        def cases(rng):
+            return [[rng.exponential(50000, size=8)]]
+    explanation: |
+      `np.log1p(x)` computes $\ln(1 + x)$, and is more accurate than `np.log(1 + x)` for tiny `x`. Plain `np.log(0)` gives `-inf`, which silently breaks a model. After the transform, an income column from 0 to millions spans roughly 0 to 15.
+
+  - id: m1s1-sigma-mean
+    type: numeric
+    title: Read the sigma
+    difficulty: easy
+    tags: [summation, statistics]
+    prompt: |
+      With $x = [2, 4, 6, 8]$, evaluate $\dfrac{1}{n}\displaystyle\sum_{i=1}^{n} (x_i - 5)^2$.
+    answer: 5
+    tolerance: 0
+    explanation: |
+      The deviations from 5 are $-3, -1, 1, 3$; their squares are $9, 1, 1, 9$, summing to 20; divided by $n = 4$ gives 5. This is exactly the (population) variance of $x$, since its mean is 5.
+
+  - id: m1s1-mse-code
+    type: code
+    title: Mean squared and absolute error
+    difficulty: easy
+    tags: [summation, absolute-value, metrics]
+    prompt: |
+      Implement `errors(y, y_hat)` returning `[mse, mae]`: the mean squared error $\frac{1}{n}\sum (y_i - \hat y_i)^2$ and the mean absolute error $\frac{1}{n}\sum |y_i - \hat y_i|$.
+    function:
+      name: errors
+      params:
+        - { name: y, type: ndarray }
+        - { name: y_hat, type: ndarray }
+      returns: "[mse, mae]"
+    starter: |
+      import numpy as np
+
+      def errors(y, y_hat):
+          diff = y - y_hat
+          return [float(diff.mean() ** 2), float(diff.mean())]
+    solution: |
+      import numpy as np
+
+      def errors(y, y_hat):
+          diff = y - y_hat
+          return [float(np.mean(diff ** 2)), float(np.mean(np.abs(diff)))]
+    tests:
+      sample:
+        - args: [[3, 5, 2], [2, 5, 4]]
+      generate: |
+        def cases(rng):
+            y = rng.normal(size=10)
+            return [[y, y + rng.normal(size=10)]]
+    explanation: |
+      Square (or take the absolute value of) **each** error before averaging. Averaging first lets positive and negative errors cancel — the starter would call a model that's off by $+1$ and $-1$ perfect. MSE punishes big errors more; MAE treats all errors linearly and is more robust to outliers.
+
+  - id: m1s1-relu-piecewise
+    type: output
+    title: ReLU and clipping
+    difficulty: easy
+    tags: [piecewise, relu, python]
+    prompt: |
+      What does this print?
+    snippet: |
+      def relu(x):
+          return max(0, x)
+
+      def clip(x, low, high):
+          return min(max(x, low), high)
+
+      print([relu(v) for v in [-2, 0, 3]])
+      print([clip(v, 0, 10) for v in [-5, 4, 12]])
+    answer: |
+      [0, 0, 3]
+      [0, 4, 10]
+    explanation: |
+      ReLU keeps positives and zeroes negatives. Clipping is piecewise with three pieces: below the range → `low`, inside → unchanged, above → `high`. `min(max(x, low), high)` is the idiom.
+
+  - id: m1s1-inequality-flip
+    type: mcq_single
+    title: Solve the inequality
+    difficulty: easy
+    tags: [inequalities]
+    prompt: |
+      Solve $-3x + 6 > 0$.
+    options:
+      - { id: a, text: "$x > 2$" }
+      - { id: b, text: "$x < 2$" }
+      - { id: c, text: "$x > -2$" }
+      - { id: d, text: "$x < -2$" }
+    answer: b
+    explanation: |
+      $-3x > -6$; dividing by $-3$ **flips** the sign: $x < 2$. Check with $x = 0$: $6 > 0$ is true, and $0 < 2$. Forgetting the flip is the most common inequality mistake.

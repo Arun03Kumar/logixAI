@@ -1,0 +1,21 @@
+# Module 2 of the "Machine learning, from zero" course (content/courses.yaml).
+# Each topic is one section of the module. To add a section: write
+# <topic>.yaml in this folder and add its id below, in order.
+id: course-m2-python
+title: "Module 2: Python programming"
+summary: Python from the first line to clean, structured code — types, control flow, strings, data structures, comprehensions, functions, generators, classes, exceptions and files — with every example drawn from data work.
+level: foundations
+area: ml
+order: -1
+topics:
+  - py-basics
+  - py-control-flow
+  - py-strings
+  - py-data-structures
+  - py-comprehensions
+  - py-functions
+  - py-functional
+  - py-iterators-generators
+  - py-oop-1
+  - py-oop-2
+  - py-exceptions-files

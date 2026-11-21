@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import { useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
@@ -163,7 +164,7 @@ export default function AnswerPlayer({ item, signedIn, onItemChange, reviewMode 
             </Button>
           ) : (
             <Button asChild variant="primary">
-              <Link href={`/login?next=/arena/items/${item.id}`}>Sign in to answer</Link>
+              <Link href={`/login?next=${itemHref(item.area, item.id)}`}>Sign in to answer</Link>
             </Button>
           )}
           {item.hints.length > hints ? (
@@ -203,7 +204,7 @@ export default function AnswerPlayer({ item, signedIn, onItemChange, reviewMode 
           <MathMarkdown>{item.explanation}</MathMarkdown>
           {item.nextItem ? (
             <Button asChild size="sm">
-              <Link href={`/arena/items/${item.nextItem.id}`}>
+              <Link href={itemHref(item.area, item.nextItem.id)}>
                 Next: {item.nextItem.title}
                 <ArrowRight />
               </Link>

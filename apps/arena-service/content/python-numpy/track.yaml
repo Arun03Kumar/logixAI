@@ -2,6 +2,7 @@ id: python-numpy
 title: Python and NumPy for ML
 summary: Arrays, broadcasting and vectorised code — how to write the fast, loop-free NumPy that ML code is made of.
 level: foundations
+area: ml
 order: 2
 topics:
   - numpy-arrays

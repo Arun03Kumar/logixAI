@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -152,7 +153,7 @@ export default function ContestPage() {
                       <div key={item.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                         {c.status === "ended" || mine ? (
                           <Link
-                            href={`/arena/items/${item.id}${inProgress ? `?session=${mine.id}` : ""}`}
+                            href={itemHref(item.area, item.id, inProgress ? `?session=${mine.id}` : "")}
                             className="font-medium hover:underline"
                           >
                             {i + 1}. {item.title}

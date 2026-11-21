@@ -126,7 +126,7 @@ function Graph({ map, onOpen, focus, setFocus }) {
 export default function SkillMapPage() {
   const router = useRouter();
   const { status } = useSession();
-  const map = useApi(() => arenaApi.skillMap(), [status], { enabled: status !== "loading" });
+  const map = useApi(() => arenaApi.skillMap("ml"), [status], { enabled: status !== "loading" });
   const [focus, setFocus] = useState(null);
   const struggling = map.data?.topics.filter((t) => t.struggling) ?? [];
 

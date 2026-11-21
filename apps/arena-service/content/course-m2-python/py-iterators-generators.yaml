@@ -1,0 +1,312 @@
+id: py-iterators-generators
+title: Iterators and generators
+summary: How for loops really work — iterables, iterators and the iterator protocol — then generator functions with yield, generator pipelines and yield from, the itertools toolkit, and custom iterator classes.
+prerequisites: [py-functional]
+lesson: |
+  ## 8.1 Iterables, iterators and the protocol
+
+  An **iterable** is anything you can loop over (lists, strings, dicts, files, ranges). Calling `iter(iterable)` gives an **iterator**, an object that hands out one item per `next(it)` call and raises `StopIteration` when it's done. A `for` loop does exactly that behind the scenes. Iterators are **one-shot**: once exhausted, they stay empty — which is why a second loop over a `map`, a file object or a generator finds nothing.
+
+  ## 8.2 Generator functions with yield
+
+  A function containing `yield` returns a **generator**: calling it runs nothing until you ask for values; each `next` runs to the next `yield`, pauses there and keeps its local state.
+
+  ```python
+  def read_batches(rows, size):
+      for i in range(0, len(rows), size):
+          yield rows[i:i + size]
+  ```
+
+  Generators are **lazy**: they compute values on demand, so they can process files bigger than memory or even infinite streams. This is the pattern behind data loaders that feed a model batch by batch.
+
+  ## 8.3 Generator expressions, pipelines and yield from
+
+  `(f(x) for x in xs if cond)` is a one-line generator. Chaining generators builds a **pipeline** where each record flows through every stage before the next is read:
+
+  ```python
+  lines   = (l.strip() for l in open("log.txt"))
+  errors  = (l for l in lines if "ERROR" in l)
+  first10 = itertools.islice(errors, 10)       # stops reading once it has 10
+  ```
+
+  `yield from other` yields everything from another iterable — useful for recursion (flattening nested data) and for composing generators.
+
+  ## 8.4 itertools
+
+  | Tool | Does |
+  | --- | --- |
+  | `count`, `cycle`, `repeat` | infinite sequences |
+  | `islice(it, n)` | take the first n (slicing for iterators) |
+  | `chain(a, b)` | one after another |
+  | `groupby(sorted_it, key)` | runs of equal keys (sort first!) |
+  | `accumulate(xs)` | running totals |
+  | `product`, `permutations`, `combinations` | combinatorics (grid search over hyperparameters) |
+  | `pairwise`, `batched` (3.12) | neighbours, fixed-size chunks |
+
+  ## 8.5 Custom iterator classes, and lists vs generators
+
+  A class is iterable if `__iter__` returns an iterator; an iterator has `__next__`. Often the simplest way is to make `__iter__` a generator method. Choose a **list** when you need the data more than once, its length, or random access; choose a **generator** for one pass over large or infinite data.
+items:
+  - id: py8-one-shot
+    type: output
+    title: Iterators are one-shot
+    difficulty: easy
+    tags: [python, iterators]
+    prompt: |
+      What does this print?
+    snippet: |
+      squares = (x * x for x in range(4))
+      print(sum(squares))
+      print(sum(squares))
+      it = iter([10, 20])
+      print(next(it), next(it), next(it, "done"))
+    answer: |
+      14
+      0
+      10 20 done
+    explanation: |
+      A generator is used up by the first `sum`; the second sees nothing. `next(it, default)` returns the default instead of raising `StopIteration` when the iterator is exhausted.
+
+  - id: py8-lazy
+    type: output
+    title: When does the body run?
+    difficulty: medium
+    tags: [python, generators]
+    prompt: |
+      What does this print?
+    snippet: |
+      def gen():
+          print("start")
+          yield 1
+          print("middle")
+          yield 2
+          print("end")
+
+      g = gen()
+      print("created")
+      print(next(g))
+      print(next(g))
+      print(list(g))
+    answer: |
+      created
+      start
+      1
+      middle
+      2
+      end
+      []
+    explanation: |
+      Calling `gen()` runs nothing. Each `next` runs until the next `yield` and pauses there. `list(g)` resumes, prints `end`, and finds no more values.
+
+  - id: py8-batches
+    type: code
+    title: A batch generator
+    difficulty: easy
+    tags: [python, generators, data-loading]
+    prompt: |
+      Write a generator `batches(items, size)` that yields consecutive lists of `size` items (the last batch may be smaller). The test collects the batches with `list(...)` and checks your function is a generator.
+    driver: |
+      import inspect
+
+      def check(items, size):
+          return {"batches": list(batches(items, size)), "is_generator": inspect.isgeneratorfunction(batches)}
+    function:
+      name: check
+      params:
+        - { name: items, type: list }
+        - { name: size, type: int }
+      returns: "the batches"
+    starter: |
+      def batches(items, size):
+          return [items[i:i + size] for i in range(0, len(items), size)]
+    solution: |
+      def batches(items, size):
+          for i in range(0, len(items), size):
+              yield items[i:i + size]
+    tests:
+      sample:
+        - args: [[1, 2, 3, 4, 5, 6, 7], 3]
+      hidden:
+        - args: [[], 4]
+        - args: [[1, 2], 5]
+    explanation: |
+      Same output as the list version, but a generator produces each batch only when the consumer asks, so it can feed a training loop from data that doesn't fit in memory.
+
+  - id: py8-flatten
+    type: code
+    title: Flatten with yield from
+    difficulty: medium
+    tags: [python, generators, recursion]
+    prompt: |
+      Write a generator `flatten(nested)` that yields every non-list value from arbitrarily nested lists, in order. The test returns `list(flatten(...))`.
+    driver: |
+      def check(nested):
+          return list(flatten(nested))
+    function:
+      name: check
+      params:
+        - { name: nested, type: list }
+      returns: "flat list"
+    starter: |
+      def flatten(nested):
+          for x in nested:
+              yield x
+    solution: |
+      def flatten(nested):
+          for x in nested:
+              if isinstance(x, list):
+                  yield from flatten(x)
+              else:
+                  yield x
+    tests:
+      sample:
+        - args: [[1, [2, [3, 4]], 5]]
+      hidden:
+        - args: [[]]
+        - args: [[[[["deep"]]], "x"]]
+    explanation: |
+      `yield from flatten(x)` hands over every value the recursive call produces. Nested JSON from APIs often needs exactly this kind of recursive walk.
+
+  - id: py8-pipeline
+    type: code
+    title: A streaming pipeline
+    difficulty: medium
+    tags: [python, generators, pipelines]
+    prompt: |
+      Log lines arrive one by one. Write `first_errors(lines, n)` returning the first `n` lines containing `"ERROR"`, stripped of surrounding spaces, **reading no more lines than needed**. The test passes a generator and records how many lines were read.
+    driver: |
+      def check(lines, n):
+          read = []
+          def source():
+              for line in lines:
+                  read.append(line)
+                  yield line
+          result = first_errors(source(), n)
+          return {"errors": list(result), "lines_read": len(read)}
+    function:
+      name: check
+      params:
+        - { name: lines, type: list }
+        - { name: n, type: int }
+      returns: "the errors and how many lines were read"
+    starter: |
+      def first_errors(lines, n):
+          errors = [l.strip() for l in lines if "ERROR" in l]
+          return errors[:n]
+    solution: |
+      from itertools import islice
+
+      def first_errors(lines, n):
+          stripped = (l.strip() for l in lines)
+          errors = (l for l in stripped if "ERROR" in l)
+          return list(islice(errors, n))
+    tests:
+      sample:
+        - args: [["ok", " ERROR disk ", "ok", "ERROR net", "ERROR cpu", "ok"], 2]
+      hidden:
+        - args: [["ok", "ok"], 3]
+        - args: [["ERROR a", "ok", "ERROR b"], 1]
+    explanation: |
+      Generator stages pass one line at a time through the whole pipeline, and `islice` stops pulling once it has `n` results — so only 4 lines are read in the sample. The list comprehension reads the entire (possibly huge) log first.
+
+  - id: py8-itertools
+    type: output
+    title: itertools in action
+    difficulty: medium
+    tags: [python, itertools]
+    prompt: |
+      What does this print?
+    snippet: |
+      from itertools import accumulate, chain, combinations, groupby, islice, count
+      print(list(accumulate([3, 1, 4, 1])))
+      print(list(islice(count(10, 5), 3)))
+      print(list(chain("ab", [1, 2])))
+      print(len(list(combinations(range(5), 2))))
+      data = ["a", "a", "b", "a"]
+      print([(k, len(list(g))) for k, g in groupby(data)])
+    answer: |
+      [3, 4, 8, 9]
+      [10, 15, 20]
+      ['a', 'b', 1, 2]
+      10
+      [('a', 2), ('b', 1), ('a', 1)]
+    explanation: |
+      `accumulate` gives running totals; `islice` takes from an infinite `count`; `chain` concatenates iterables; there are $\binom{5}{2} = 10$ pairs. `groupby` groups **consecutive** equal keys — the last `a` is a new group, so sort first if you want one group per key.
+
+  - id: py8-grid
+    type: code
+    title: A hyperparameter grid
+    difficulty: medium
+    tags: [python, itertools, ml]
+    prompt: |
+      Write `grid(params)`: `params` maps each hyperparameter name to a list of values. Return every combination as a dict, varying the **last** parameter fastest (the order `itertools.product` gives), with keys in the original order.
+    function:
+      name: grid
+      params:
+        - { name: params, type: dict }
+      returns: "list of dicts"
+    starter: |
+      def grid(params):
+          return [dict(zip(params, values)) for values in zip(*params.values())]
+    solution: |
+      from itertools import product
+
+      def grid(params):
+          names = list(params)
+          return [dict(zip(names, combo)) for combo in product(*params.values())]
+    tests:
+      sample:
+        - args: [{ "lr": [0.1, 0.01], "depth": [3, 5, 7] }]
+      hidden:
+        - args: [{ "a": [1] }]
+        - args: [{ "x": [1, 2], "y": ["p"], "z": [true, false] }]
+    explanation: |
+      `product(*lists)` yields the Cartesian product — the full grid scikit-learn's `GridSearchCV` explores. `zip` pairs values position by position, which gives only as many combinations as the shortest list.
+
+  - id: py8-custom-iterable
+    type: code
+    title: An iterable class
+    difficulty: hard
+    tags: [python, iterators, classes]
+    prompt: |
+      Write a class `Countdown` whose objects can be looped over **more than once**: `Countdown(3)` yields 3, 2, 1. Implement `__iter__` (a generator method is fine).
+    driver: |
+      def check(start):
+          c = Countdown(start)
+          return {"first": list(c), "second": list(c), "total": sum(c)}
+    function:
+      name: check
+      params:
+        - { name: start, type: int }
+      returns: "two passes and a sum"
+    starter: |
+      class Countdown:
+          def __init__(self, start):
+              self.current = start
+
+          def __iter__(self):
+              return self
+
+          def __next__(self):
+              if self.current <= 0:
+                  raise StopIteration
+              self.current -= 1
+              return self.current + 1
+    solution: |
+      class Countdown:
+          def __init__(self, start):
+              self.start = start
+
+          def __iter__(self):
+              n = self.start
+              while n > 0:
+                  yield n
+                  n -= 1
+    tests:
+      sample:
+        - args: [3]
+      hidden:
+        - args: [0]
+        - args: [5]
+    explanation: |
+      The starter is an **iterator** (it returns itself and keeps its position), so a second loop finds it exhausted. Making `__iter__` a generator method returns a fresh iterator every time, so the object behaves like a list or `range` — a reusable iterable.

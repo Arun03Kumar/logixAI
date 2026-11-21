@@ -2,6 +2,7 @@ id: sql-interview
 title: SQL for data interviews
 summary: The SQL that data analyst, data scientist and ML engineer interviews ask — filtering, joins, aggregation, subqueries, window functions and dates — judged on real databases.
 level: interview
+area: ml
 order: 4
 topics:
   - sql-select-filter

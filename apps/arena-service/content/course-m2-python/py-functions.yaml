@@ -1,0 +1,266 @@
+id: py-functions
+title: Functions
+summary: Defining and calling functions, return values, default / keyword / keyword-only / positional-only arguments, *args and **kwargs, scope and how arguments are passed, and docstrings and type hints.
+prerequisites: [py-comprehensions]
+lesson: |
+  ## 6.1 Defining and calling functions
+
+  ```python
+  def bmi(weight_kg, height_m):
+      """Body-mass index."""
+      return weight_kg / height_m ** 2
+  ```
+
+  A function without `return` (or with a bare `return`) returns `None`. `return a, b` returns a tuple, unpacked with `x, y = f()`. Functions turn repeated steps into one tested, named unit — the basis of reusable data pipelines.
+
+  ## 6.2 Default, keyword, keyword-only and positional-only arguments
+
+  - **Defaults**: `def split(data, ratio=0.8)`. Arguments with defaults come after those without.
+  - **Keyword arguments** can be passed in any order by name: `split(data, ratio=0.7)`.
+  - Parameters after a bare `*` are **keyword-only**: `def train(X, y, *, epochs=10, lr=0.01)` — callers must write `epochs=20`, which makes calls self-explanatory.
+  - Parameters before `/` are **positional-only**: `def clip(x, /, low, high)`.
+  - **Defaults are evaluated once**, when the function is defined. A mutable default like `def add(x, items=[])` is shared between calls; use `items=None` and create the list inside.
+
+  ## 6.3 *args and **kwargs
+
+  `*args` collects extra positional arguments into a tuple and `**kwargs` extra keyword arguments into a dict. At the call site, `f(*lst)` and `f(**dct)` unpack them. Used for flexible APIs and for wrappers that pass everything through (decorators, Section 7).
+
+  ## 6.4 Scope and how arguments are passed
+
+  Names are looked up **LEGB**: Local, Enclosing function, Global, Built-in. Assigning to a name inside a function makes it local, unless declared `global` (avoid) or `nonlocal` (for closures). Python passes **references to objects**: if a function mutates a list it received (`items.append(...)`), the caller sees it; rebinding the parameter (`items = [...]`) doesn't affect the caller.
+
+  ## 6.5 Docstrings, type hints and good functions
+
+  A docstring (first string in the body) documents what the function does — `help(f)` shows it. Type hints document expected types: `def mean(xs: list[float]) -> float:`; Python doesn't enforce them, but editors and checkers like mypy do. Good functions do **one thing**, have clear names, avoid hidden side effects, and validate inputs at the boundary.
+items:
+  - id: py6-return-none
+    type: output
+    title: A function without return
+    difficulty: easy
+    tags: [python, functions]
+    prompt: |
+      What does this print?
+    snippet: |
+      def show(x):
+          print("value:", x)
+
+      result = show(5)
+      print(result)
+
+      def stats(xs):
+          return min(xs), max(xs)
+
+      lo, hi = stats([4, 1, 9])
+      print(lo, hi, stats([2]))
+    answer: |
+      value: 5
+      None
+      1 9 (2, 2)
+    explanation: |
+      Printing isn't returning: `show` returns `None`. `return a, b` returns a tuple, which can be unpacked into two names.
+
+  - id: py6-mutable-default
+    type: output
+    title: The mutable default trap
+    difficulty: medium
+    tags: [python, functions, defaults]
+    prompt: |
+      What does this print?
+    snippet: |
+      def add_tag(tag, tags=[]):
+          tags.append(tag)
+          return tags
+
+      print(add_tag("a"))
+      print(add_tag("b"))
+      print(add_tag("c", []))
+    answer: |
+      ['a']
+      ['a', 'b']
+      ['c']
+    explanation: |
+      The default list is created **once**, when `def` runs, and shared by every call that doesn't pass `tags`. Use `tags=None` and `if tags is None: tags = []` inside.
+
+  - id: py6-keyword-only
+    type: mcq_single
+    title: Keyword-only arguments
+    difficulty: medium
+    tags: [python, functions, arguments]
+    prompt: |
+      Given `def train(X, y, *, epochs=10, lr=0.01): ...`, which call is an error?
+    options:
+      - { id: a, text: "`train(X, y)`" }
+      - { id: b, text: "`train(X, y, epochs=20)`" }
+      - { id: c, text: "`train(X, y, 20)`" }
+      - { id: d, text: "`train(y=y, X=X, lr=0.1)`" }
+    answer: c
+    explanation: |
+      Everything after the bare `*` must be passed by name, so `train(X, y, 20)` raises a `TypeError`. Requiring names prevents silent mix-ups like passing a learning rate where the number of epochs was expected.
+
+  - id: py6-args-kwargs
+    type: output
+    title: args and kwargs
+    difficulty: medium
+    tags: [python, functions, arguments]
+    prompt: |
+      What does this print?
+    snippet: |
+      def report(title, *values, sep=", ", **meta):
+          print(title, sep.join(str(v) for v in values), meta)
+
+      report("scores", 1, 2, 3)
+      report("x", *[4, 5], sep="|", unit="cm", ok=True)
+    answer: |
+      scores 1, 2, 3 {}
+      x 4|5 {'unit': 'cm', 'ok': True}
+    explanation: |
+      Extra positional arguments collect into the tuple `values`; extra keyword arguments into the dict `meta`. `*[4, 5]` unpacks a list into separate arguments. `sep` comes after `*values`, so it's keyword-only.
+
+  - id: py6-scope
+    type: output
+    title: Local, global and mutation
+    difficulty: medium
+    tags: [python, scope]
+    prompt: |
+      What does this print?
+    snippet: |
+      count = 0
+      data = [1, 2]
+
+      def change(items):
+          count = 10
+          items.append(3)
+          items = [99]
+          return count
+
+      print(change(data), count, data)
+    answer: |
+      10 0 [1, 2, 3]
+    explanation: |
+      Assigning `count` inside the function creates a local; the global stays 0. The function received a reference to the caller's list, so `append` changes it; rebinding `items` afterwards points the local name elsewhere without touching the caller's list.
+
+  - id: py6-safe-divide
+    type: code
+    title: A function with defaults
+    difficulty: easy
+    tags: [python, functions, defaults]
+    prompt: |
+      Write `safe_ratio(a, b, default=0.0, digits=2)` returning `a / b` rounded to `digits` decimals, or `default` when `b` is zero.
+    function:
+      name: safe_ratio
+      params:
+        - { name: a, type: float }
+        - { name: b, type: float }
+        - { name: default, type: float }
+        - { name: digits, type: int }
+      returns: "float"
+    starter: |
+      def safe_ratio(a, b, default=0.0, digits=2):
+          return round(a / b, 2)
+    solution: |
+      def safe_ratio(a, b, default=0.0, digits=2):
+          if b == 0:
+              return default
+          return round(a / b, digits)
+    tests:
+      sample:
+        - args: [10, 3, 0.0, 2]
+      hidden:
+        - args: [5, 0, -1, 2]
+        - args: [1, 7, 0.0, 4]
+        - args: [0, 5, 0.0, 1]
+    explanation: |
+      Check the zero case before dividing, and use the parameters rather than hard-coding values — the starter ignores both `default` and `digits`. Ratios like click-through rate need exactly this guard for days with zero impressions.
+
+  - id: py6-no-mutable-default
+    type: code
+    title: Fix the shared default
+    difficulty: medium
+    tags: [python, functions, defaults]
+    prompt: |
+      `append_all(new, existing)` should return a list made of `existing` followed by `new`, **without changing `existing`**. When `existing` isn't given, start from an empty list. The driver calls it twice without `existing`, then once with a list it checks afterwards.
+    driver: |
+      def check(first, second, base):
+          a = append_all(first)
+          b = append_all(second)
+          before = list(base)
+          c = append_all(second, base)
+          return {"a": a, "b": b, "c": c, "base_unchanged": base == before}
+    function:
+      name: check
+      params:
+        - { name: first, type: list }
+        - { name: second, type: list }
+        - { name: base, type: list }
+      returns: "results and whether base was left alone"
+    starter: |
+      def append_all(new, existing=[]):
+          existing.extend(new)
+          return existing
+    solution: |
+      def append_all(new, existing=None):
+          result = list(existing) if existing is not None else []
+          result.extend(new)
+          return result
+    tests:
+      sample:
+        - args: [[1, 2], [3], [9]]
+      hidden:
+        - args: [[], ["x"], []]
+    explanation: |
+      Two bugs in one: the default list is shared between calls, and `extend` mutates the caller's list. Using `None` as the default and copying (`list(existing)`) fixes both. Functions that quietly change their inputs are a common source of hard-to-find pipeline bugs.
+
+  - id: py6-describe
+    type: code
+    title: Summary statistics with keyword options
+    difficulty: medium
+    tags: [python, functions, statistics]
+    prompt: |
+      Write `describe(values, *, digits=2, include=None)` that returns a dict of statistics, each rounded to `digits`: `count`, `mean`, `min`, `max`. If `include` is a list of names, return only those keys (in the order given).
+    driver: |
+      def check(values, options):
+          return describe(values, **options)
+    function:
+      name: check
+      params:
+        - { name: values, type: list }
+        - { name: options, type: dict }
+      returns: "dict"
+    starter: |
+      def describe(values, digits=2, include=None):
+          return {"count": len(values), "mean": sum(values) / len(values)}
+    solution: |
+      def describe(values, *, digits=2, include=None):
+          stats = {
+              "count": len(values),
+              "mean": round(sum(values) / len(values), digits),
+              "min": round(min(values), digits),
+              "max": round(max(values), digits),
+          }
+          if include is not None:
+              return {k: stats[k] for k in include}
+          return stats
+    tests:
+      sample:
+        - args: [[3, 1, 4, 1, 5], {}]
+      hidden:
+        - args: [[2.345, 7.891], { "digits": 1 }]
+        - args: [[10, 20, 30], { "include": ["max", "count"] }]
+    explanation: |
+      Keyword-only options keep calls readable (`describe(xs, digits=1)`), and building the full dict then filtering by `include` keeps the logic simple. The test passes options with `**options`, the same way configuration dicts are passed to functions in real code.
+
+  - id: py6-type-hints
+    type: mcq_single
+    title: What type hints do
+    difficulty: easy
+    tags: [python, type-hints]
+    prompt: |
+      `def mean(xs: list[float]) -> float: ...` is called as `mean("abc")`. What happens?
+    options:
+      - { id: a, text: "Python raises a TypeError before running the function, because of the hint" }
+      - { id: b, text: "Python runs it anyway; hints aren't enforced at run time, but editors and type checkers would flag the call" }
+      - { id: c, text: "Python converts the string to a list of floats" }
+      - { id: d, text: "It's a syntax error to annotate parameters" }
+    answer: b
+    explanation: |
+      Type hints are documentation that tools check (mypy, Pyright, your editor), not runtime checks. Libraries such as Pydantic can enforce them when you need validation, for example on API inputs.

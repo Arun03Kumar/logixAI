@@ -2,6 +2,7 @@ id: numpy-interview
 title: NumPy and ML from scratch
 summary: The "implement it in NumPy" round — vectorised tricks, losses, backprop for a layer, k-NN, k-means, PCA and attention, with no loops and no libraries.
 level: interview
+area: ml
 order: 6
 topics:
   - numpy-vectorisation

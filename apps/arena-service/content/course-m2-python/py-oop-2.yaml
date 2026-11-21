@@ -1,0 +1,345 @@
+id: py-oop-2
+title: Object-oriented programming 2
+summary: Inheritance, super() and overriding, polymorphism, duck typing and abstract base classes, dunder methods for printing, equality, hashing, ordering, containers, operators and callables, and dataclasses.
+prerequisites: [py-oop-1]
+lesson: |
+  ## 10.1 Inheritance, super() and overriding
+
+  A subclass reuses and extends a base class: `class LinearModel(BaseModel):`. A method defined in the subclass **overrides** the base version; `super().method(...)` calls the parent's version — always call `super().__init__(...)` when the subclass adds its own `__init__`, or the parent's setup never runs. `isinstance(obj, BaseModel)` is true for subclasses too. Prefer shallow hierarchies; composition (an object holding another) is often simpler than deep inheritance.
+
+  ## 10.2 Polymorphism, duck typing and abstract base classes
+
+  **Polymorphism**: code calls `model.predict(X)` without caring which model it is. Python uses **duck typing** — if an object has the method you call, it works, whatever its class ("if it quacks like a duck…"). That's why scikit-learn pipelines accept any object with `fit` and `transform`. An **abstract base class** (`from abc import ABC, abstractmethod`) declares methods subclasses *must* implement; instantiating a subclass that misses one raises `TypeError` early, instead of failing later.
+
+  ## 10.3 Dunder methods 1: printing, equality, hashing, ordering
+
+  | Method | Used by |
+  | --- | --- |
+  | `__repr__` | the REPL, debugging, containers — aim for something that looks like a constructor call |
+  | `__str__` | `print()` and `str()` (falls back to `__repr__`) |
+  | `__eq__` | `==` (default compares identity) |
+  | `__hash__` | sets and dict keys — objects that are equal must have equal hashes; defining `__eq__` alone makes instances unhashable |
+  | `__lt__` (+ `functools.total_ordering`) | `<`, `sorted()`, `min()` |
+
+  ## 10.4 Dunder methods 2: containers, operators and callables
+
+  `__len__` (`len`), `__getitem__` (`obj[i]`, and iteration if there's no `__iter__`), `__contains__` (`in`), `__iter__`; operators `__add__`, `__mul__`, `__sub__` (return `NotImplemented` for unsupported types); `__call__` makes an object callable like a function — PyTorch modules run `forward` through `__call__`.
+
+  ## 10.5 Dataclasses
+
+  `@dataclass` writes `__init__`, `__repr__` and `__eq__` from type-annotated fields:
+
+  ```python
+  from dataclasses import dataclass, field
+
+  @dataclass(frozen=True, order=True)
+  class Version:
+      major: int
+      minor: int = 0
+  ```
+
+  `order=True` adds comparisons (field by field), `frozen=True` makes instances immutable and hashable, and mutable defaults need `field(default_factory=list)`. Ideal for configuration and records.
+items:
+  - id: py10-super
+    type: output
+    title: super() and overriding
+    difficulty: easy
+    tags: [python, oop, inheritance]
+    prompt: |
+      What does this print?
+    snippet: |
+      class Base:
+          def __init__(self, name):
+              self.name = name
+
+          def describe(self):
+              return f"model {self.name}"
+
+      class Tree(Base):
+          def __init__(self, name, depth):
+              super().__init__(name)
+              self.depth = depth
+
+          def describe(self):
+              return super().describe() + f" (depth {self.depth})"
+
+      t = Tree("dt", 3)
+      print(t.describe(), isinstance(t, Base))
+    answer: |
+      model dt (depth 3) True
+    explanation: |
+      `super().__init__(name)` runs the parent's setup so `self.name` exists; the overriding `describe` extends the parent's result rather than duplicating it. An instance of a subclass is also an instance of its base class.
+
+  - id: py10-duck
+    type: mcq_single
+    title: Duck typing
+    difficulty: easy
+    tags: [python, oop, polymorphism]
+    prompt: |
+      A function calls `step.fit(X)` then `step.transform(X)` on each step of a pipeline. Which objects can be steps?
+    options:
+      - { id: a, text: "Only subclasses of a Transformer base class" }
+      - { id: b, text: "Any object that has fit and transform methods with suitable signatures" }
+      - { id: c, text: "Only objects created by the same library" }
+      - { id: d, text: "Only functions" }
+    answer: b
+    explanation: |
+      Python checks for the method when it's called, not the class. That's how your own class can drop into a scikit-learn `Pipeline` next to built-in transformers, as long as it provides `fit` and `transform`.
+
+  - id: py10-abc
+    type: output
+    title: Abstract base classes
+    difficulty: medium
+    tags: [python, oop, abc]
+    prompt: |
+      What does this print?
+    snippet: |
+      from abc import ABC, abstractmethod
+
+      class Metric(ABC):
+          @abstractmethod
+          def score(self, y, y_hat): ...
+
+      class Accuracy(Metric):
+          def score(self, y, y_hat):
+              return sum(a == b for a, b in zip(y, y_hat)) / len(y)
+
+      class Broken(Metric):
+          pass
+
+      print(Accuracy().score([1, 0, 1, 1], [1, 1, 1, 0]))
+      try:
+          Broken()
+      except TypeError:
+          print("can't create Broken")
+    answer: |
+      0.5
+      can't create Broken
+    explanation: |
+      A subclass that doesn't implement every abstract method can't be instantiated, so the mistake surfaces immediately rather than when `score` is finally called in production.
+
+  - id: py10-eq-hash
+    type: output
+    title: Equality and hashing
+    difficulty: medium
+    tags: [python, oop, dunder]
+    prompt: |
+      What does this print?
+    snippet: |
+      class Plain:
+          def __init__(self, x):
+              self.x = x
+
+      class Value:
+          def __init__(self, x):
+              self.x = x
+          def __eq__(self, other):
+              return isinstance(other, Value) and self.x == other.x
+          def __hash__(self):
+              return hash(self.x)
+
+      print(Plain(1) == Plain(1), Value(1) == Value(1))
+      print(len({Value(1), Value(1), Value(2)}))
+    answer: |
+      False True
+      2
+    explanation: |
+      By default `==` compares identity, so two separate `Plain(1)` objects differ. `Value` defines value equality and a matching hash, so equal values collapse in a set. If you define `__eq__` without `__hash__`, instances become unhashable.
+
+  - id: py10-dataclass
+    type: output
+    title: Dataclasses
+    difficulty: easy
+    tags: [python, dataclasses]
+    prompt: |
+      What does this print?
+    snippet: |
+      from dataclasses import dataclass, field
+
+      @dataclass(order=True)
+      class Run:
+          score: float
+          name: str = "baseline"
+          tags: list = field(default_factory=list)
+
+      a, b = Run(0.91, "rf"), Run(0.85)
+      print(a)
+      print(a > b, sorted([a, b])[0].name)
+    answer: |
+      Run(score=0.91, name='rf', tags=[])
+      True baseline
+    explanation: |
+      `@dataclass` generated `__init__` and a readable `__repr__`. `order=True` compares field by field, starting with `score`. Mutable defaults must use `default_factory`, otherwise all instances would share one list.
+
+  - id: py10-vector
+    type: code
+    title: A Vector with operators
+    difficulty: medium
+    tags: [python, oop, dunder]
+    prompt: |
+      Write `class Vector` holding a list of numbers, with `__len__`, `__getitem__`, `__add__` (element-wise, same length, else `ValueError`), `__mul__` (multiply by a number), `__eq__` and a `__repr__` like `Vector([1, 2])`.
+    driver: |
+      def check(a, b, k):
+          u, v = Vector(a), Vector(b)
+          try:
+              total = list((u + v).values)
+          except ValueError:
+              total = "length mismatch"
+          return {
+              "len": len(u),
+              "first": u[0] if len(u) else None,
+              "sum": total,
+              "scaled": list((u * k).values),
+              "equal_copy": Vector(list(a)) == u,
+              "repr": repr(u),
+          }
+    function:
+      name: check
+      params:
+        - { name: a, type: list }
+        - { name: b, type: list }
+        - { name: k, type: float }
+      returns: "results of the operators"
+    starter: |
+      class Vector:
+          def __init__(self, values):
+              self.values = values
+
+          def __add__(self, other):
+              return Vector(self.values + other.values)
+    solution: |
+      class Vector:
+          def __init__(self, values):
+              self.values = list(values)
+
+          def __len__(self):
+              return len(self.values)
+
+          def __getitem__(self, i):
+              return self.values[i]
+
+          def __add__(self, other):
+              if not isinstance(other, Vector):
+                  return NotImplemented
+              if len(self) != len(other):
+                  raise ValueError("vectors must have the same length")
+              return Vector(a + b for a, b in zip(self.values, other.values))
+
+          def __mul__(self, k):
+              return Vector(x * k for x in self.values)
+
+          def __eq__(self, other):
+              return isinstance(other, Vector) and self.values == other.values
+
+          def __repr__(self):
+              return f"Vector({self.values})"
+    tests:
+      sample:
+        - args: [[1, 2], [3, 4], 3]
+      hidden:
+        - args: [[1, 2, 3], [1], 2]
+        - args: [[], [], 5]
+    explanation: |
+      With dunders a class works with `len`, indexing, `+`, `*` and `==` like a built-in type. On lists, `+` **concatenates** (the starter's bug) — element-wise maths needs an explicit zip, which is exactly what NumPy arrays do for you.
+
+  - id: py10-callable
+    type: code
+    title: A callable object
+    difficulty: medium
+    tags: [python, oop, dunder]
+    prompt: |
+      Write `class Threshold` with `__init__(self, cutoff)` and `__call__(self, prob)` returning `1` if `prob >= cutoff` else `0`, so a `Threshold` can be used wherever a function is expected (for example in `map`). Also count calls in `self.calls`.
+    driver: |
+      def check(cutoff, probs):
+          decide = Threshold(cutoff)
+          labels = list(map(decide, probs))
+          return {"labels": labels, "calls": decide.calls, "callable": callable(decide)}
+    function:
+      name: check
+      params:
+        - { name: cutoff, type: float }
+        - { name: probs, type: list }
+      returns: "labels and call count"
+    starter: |
+      class Threshold:
+          def __init__(self, cutoff):
+              self.cutoff = cutoff
+
+          def predict(self, prob):
+              return 1 if prob >= self.cutoff else 0
+    solution: |
+      class Threshold:
+          def __init__(self, cutoff):
+              self.cutoff = cutoff
+              self.calls = 0
+
+          def __call__(self, prob):
+              self.calls += 1
+              return 1 if prob >= self.cutoff else 0
+    tests:
+      sample:
+        - args: [0.5, [0.2, 0.5, 0.9]]
+      hidden:
+        - args: [0.8, []]
+    explanation: |
+      `__call__` makes instances behave like functions while keeping state between calls — a function with memory. PyTorch's `model(x)` works this way: `nn.Module.__call__` runs hooks and then your `forward`.
+
+  - id: py10-shape-hierarchy
+    type: code
+    title: Polymorphic shapes
+    difficulty: easy
+    tags: [python, oop, inheritance]
+    prompt: |
+      Write an abstract class `Shape` with an abstract `area()` and a concrete `describe()` returning `"<ClassName> with area <area rounded to 2>"`, and subclasses `Circle(r)` and `Rect(w, h)`. The test builds shapes from specs and calls `describe()` on each.
+    driver: |
+      def check(specs):
+          kinds = {"circle": Circle, "rect": Rect}
+          return [kinds[kind](*args).describe() for kind, *args in specs]
+    function:
+      name: check
+      params:
+        - { name: specs, type: list }
+      returns: "descriptions"
+    starter: |
+      class Shape:
+          def describe(self):
+              return "shape"
+
+      class Circle(Shape):
+          def __init__(self, r):
+              self.r = r
+
+      class Rect(Shape):
+          def __init__(self, w, h):
+              self.w, self.h = w, h
+    solution: |
+      import math
+      from abc import ABC, abstractmethod
+
+      class Shape(ABC):
+          @abstractmethod
+          def area(self): ...
+
+          def describe(self):
+              return f"{type(self).__name__} with area {round(self.area(), 2)}"
+
+      class Circle(Shape):
+          def __init__(self, r):
+              self.r = r
+
+          def area(self):
+              return math.pi * self.r ** 2
+
+      class Rect(Shape):
+          def __init__(self, w, h):
+              self.w, self.h = w, h
+
+          def area(self):
+              return self.w * self.h
+    tests:
+      sample:
+        - args: [[["circle", 1], ["rect", 2, 3]]]
+      hidden:
+        - args: [[["rect", 0.5, 0.5]]]
+    explanation: |
+      `describe` is written once in the base class and calls `self.area()`, which resolves to each subclass's version — polymorphism. `type(self).__name__` gives the actual class name.

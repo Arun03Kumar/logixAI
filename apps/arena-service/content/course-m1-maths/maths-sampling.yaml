@@ -1,0 +1,211 @@
+id: maths-sampling
+title: Sampling and estimation
+summary: Populations and samples, sampling methods and bias, point estimates and standard errors, confidence intervals for means and proportions, differences between groups, and planning sample sizes.
+prerequisites: [maths-distributions]
+lesson: |
+  ## 9.1 Populations, samples, sampling methods and bias
+
+  The **population** is everyone you care about; a **sample** is the part you measure. A **parameter** (population mean $\mu$) is estimated by a **statistic** (sample mean $\bar x$).
+
+  - **Simple random**: everyone equally likely. **Stratified**: sample within groups (regions, classes) in proportion — like `train_test_split(..., stratify=y)`, which keeps class balance. **Cluster**: sample whole groups. **Systematic**: every $k$-th item.
+  - **Bias** makes estimates wrong however large the sample: selection bias (only surveying app users), non-response bias, survivorship bias, and in ML, training data that doesn't match production data. More data doesn't fix bias; better sampling does.
+
+  ## 9.2 Point estimates and standard errors
+
+  A point estimate is a single best guess ($\bar x$, $\hat p$). Its **standard error** measures how much it would vary between samples:
+
+  $$SE(\bar x) = \frac{s}{\sqrt n} \qquad SE(\hat p) = \sqrt{\frac{\hat p(1 - \hat p)}{n}}$$
+
+  Quadrupling the sample size halves the standard error.
+
+  ## 9.3 Confidence intervals for a mean
+
+  $$\bar x \pm t^*_{n-1} \cdot \frac{s}{\sqrt n} \qquad (\text{or } \pm z^* \text{ when } \sigma \text{ is known or } n \text{ is large})$$
+
+  For 95% confidence $z^* = 1.96$; $t^*$ is a little larger for small samples. Meaning: if we repeated the sampling many times, 95% of intervals built this way would contain the true mean. It does **not** mean "a 95% probability the true mean is in this particular interval" (the true mean is fixed).
+
+  ## 9.4 Intervals for proportions and differences, and sample size
+
+  - Proportion: $\hat p \pm z^*\sqrt{\hat p(1-\hat p)/n}$ (fine when $n\hat p$ and $n(1-\hat p)$ are both at least ~10).
+  - Difference of two proportions (A/B tests): $(\hat p_1 - \hat p_2) \pm z^*\sqrt{\frac{\hat p_1(1-\hat p_1)}{n_1} + \frac{\hat p_2(1-\hat p_2)}{n_2}}$. If the interval excludes 0, the difference is significant at that level.
+  - **Sample size** for a margin of error $E$: $n = \left(\frac{z^* \sigma}{E}\right)^2$ for a mean, $n = \frac{z^{*2}\,p(1-p)}{E^2}$ for a proportion (use $p = 0.5$ when unknown, the worst case). Halving the margin needs four times the data.
+items:
+  - id: m1s9-bias
+    type: mcq_single
+    title: Spot the bias
+    difficulty: easy
+    tags: [sampling, bias]
+    prompt: |
+      To estimate how satisfied all customers are, a company surveys people who left a review on its app last month. What's the main problem?
+    options:
+      - { id: a, text: "The sample is too small" }
+      - { id: b, text: "Selection bias: reviewers (and app users) aren't representative of all customers" }
+      - { id: c, text: "Nothing, any sample of customers works" }
+      - { id: d, text: "The standard error will be zero" }
+    answer: b
+    explanation: |
+      People who choose to review skew towards the very happy and the very unhappy, and app users differ from other customers. Collecting more of the same responses doesn't remove the bias — sample randomly from all customers instead.
+
+  - id: m1s9-stratified
+    type: mcq_single
+    title: Stratified splits
+    difficulty: medium
+    tags: [sampling, stratified, ml]
+    prompt: |
+      A fraud dataset has 1% fraud cases. Why use a **stratified** train/test split?
+    options:
+      - { id: a, text: "It makes the model more accurate on the training set" }
+      - { id: b, text: "It keeps about 1% fraud in both the training and test sets, so a random split can't leave the test set with almost no fraud cases" }
+      - { id: c, text: "It removes the class imbalance" }
+      - { id: d, text: "It's faster" }
+    answer: b
+    explanation: |
+      With rare classes, a plain random split can by chance put very few positives in the test set, making evaluation unreliable. Stratifying preserves the class proportions in each part; it doesn't change the imbalance itself.
+
+  - id: m1s9-standard-error
+    type: numeric
+    title: Standard error of a mean
+    difficulty: easy
+    tags: [sampling, standard-error]
+    prompt: |
+      A sample of 64 delivery times has standard deviation 12 minutes. What is the standard error of the mean (in minutes)?
+    answer: 1.5
+    tolerance: 0
+    explanation: |
+      $12 / \sqrt{64} = 12/8 = 1.5$. Individual deliveries vary by about 12 minutes, but the *average* of 64 of them is known to within about 1.5.
+
+  - id: m1s9-ci-mean
+    type: mcq_single
+    title: A 95% interval
+    difficulty: medium
+    tags: [sampling, confidence-interval]
+    prompt: |
+      A large sample has mean 50 and standard error 2. What is the approximate 95% confidence interval for the population mean?
+    options:
+      - { id: a, text: "46.08 to 53.92" }
+      - { id: b, text: "48 to 52" }
+      - { id: c, text: "44 to 56" }
+      - { id: d, text: "49.02 to 50.98" }
+    answer: a
+    explanation: |
+      $50 \pm 1.96 \times 2 = 50 \pm 3.92$. Using $\pm 1 \times SE$ gives only about 68% confidence.
+
+  - id: m1s9-ci-interpretation
+    type: mcq_single
+    title: What 95% confidence means
+    difficulty: medium
+    tags: [sampling, confidence-interval]
+    prompt: |
+      A 95% confidence interval for the mean session time is 4.2 to 5.0 minutes. Which interpretation is correct?
+    options:
+      - { id: a, text: "95% of sessions last between 4.2 and 5.0 minutes" }
+      - { id: b, text: "There's a 95% probability the true mean is between 4.2 and 5.0" }
+      - { id: c, text: "If we repeated the study many times, about 95% of intervals made this way would contain the true mean" }
+      - { id: d, text: "The sample mean has a 95% chance of being 4.6" }
+    answer: c
+    explanation: |
+      The confidence is in the *method*. The interval is about the **mean**, not individual sessions (a). Statement (b) is the Bayesian reading — common in everyday speech, but not what a frequentist interval guarantees.
+
+  - id: m1s9-proportion-ci
+    type: code
+    title: Interval for a conversion rate
+    difficulty: medium
+    tags: [sampling, proportions, confidence-interval]
+    prompt: |
+      Write `proportion_ci(successes, n, z)` returning `[low, high]` for $\hat p \pm z\sqrt{\hat p(1-\hat p)/n}$, clipped to $[0, 1]$, each rounded to 4 decimals.
+    function:
+      name: proportion_ci
+      params:
+        - { name: successes, type: int }
+        - { name: n, type: int }
+        - { name: z, type: float }
+      returns: "[low, high]"
+    starter: |
+      import math
+
+      def proportion_ci(successes, n, z):
+          p = successes / n
+          se = math.sqrt(p * (1 - p))
+          return [round(p - z * se, 4), round(p + z * se, 4)]
+    solution: |
+      import math
+
+      def proportion_ci(successes, n, z):
+          p = successes / n
+          se = math.sqrt(p * (1 - p) / n)
+          low, high = max(0.0, p - z * se), min(1.0, p + z * se)
+          return [round(low, 4), round(high, 4)]
+    tests:
+      sample:
+        - args: [120, 1000, 1.96]
+      hidden:
+        - args: [2, 50, 1.96]
+        - args: [500, 1000, 2.576]
+    explanation: |
+      The standard error divides by $n$ inside the square root — without it (the starter) the interval doesn't shrink with more data. With 2 successes in 50 the lower end would go negative, so clip to $[0, 1]$; for small counts like this, the Wilson interval is more accurate.
+
+  - id: m1s9-mean-ci-code
+    type: code
+    title: t-interval for a mean
+    difficulty: medium
+    tags: [sampling, confidence-interval, scipy]
+    prompt: |
+      Write `mean_ci(values, confidence)` returning `[low, high]` for the mean using the t-distribution: $\bar x \pm t^*_{n-1}\,s/\sqrt n$ with the **sample** standard deviation. Round to 4 decimals. (`scipy.stats.t.ppf` gives $t^*$.)
+    function:
+      name: mean_ci
+      params:
+        - { name: values, type: ndarray }
+        - { name: confidence, type: float }
+      returns: "[low, high]"
+    starter: |
+      import numpy as np
+
+      def mean_ci(values, confidence):
+          m, s = values.mean(), values.std()
+          return [round(float(m - 1.96 * s), 4), round(float(m + 1.96 * s), 4)]
+    solution: |
+      import numpy as np
+      from scipy import stats
+
+      def mean_ci(values, confidence):
+          n = len(values)
+          m, s = values.mean(), values.std(ddof=1)
+          t = stats.t.ppf((1 + confidence) / 2, n - 1)
+          half = t * s / np.sqrt(n)
+          return [round(float(m - half), 4), round(float(m + half), 4)]
+    tests:
+      sample:
+        - args: [[12, 15, 11, 14, 13, 16, 12, 15], 0.95]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(50, 10, size=20), 0.99], [rng.exponential(5, size=200), 0.9]]
+    explanation: |
+      Three ingredients: the sample standard deviation (`ddof=1`), the **standard error** $s/\sqrt n$ (not $s$ itself — the starter builds an interval for individual values), and the t critical value for the requested confidence. For 95%, `ppf(0.975)` puts 2.5% in each tail.
+
+  - id: m1s9-sample-size
+    type: numeric
+    title: How many users?
+    difficulty: medium
+    tags: [sampling, sample-size]
+    prompt: |
+      You want to estimate a conversion rate to within ±2 percentage points with 95% confidence, with no prior idea of the rate. How many users do you need? (Use $z = 1.96$, $p = 0.5$, and round **up**.)
+    answer: 2401
+    tolerance: 0
+    explanation: |
+      $n = \frac{1.96^2 \times 0.5 \times 0.5}{0.02^2} = \frac{0.9604}{0.0004} = 2401$. $p = 0.5$ is the worst case (largest variance), so this is enough whatever the true rate.
+
+  - id: m1s9-ab-interval
+    type: mcq_single
+    title: Is the difference real?
+    difficulty: hard
+    tags: [sampling, ab-testing]
+    prompt: |
+      An A/B test gives a 95% confidence interval for (conversion B − conversion A) of −0.4 to +1.8 percentage points. What should you conclude?
+    options:
+      - { id: a, text: "B is better, since most of the interval is positive" }
+      - { id: b, text: "The data are consistent with no difference (0 is inside the interval); the test is inconclusive" }
+      - { id: c, text: "A is better" }
+      - { id: d, text: "B is better by exactly 0.7 points" }
+    answer: b
+    explanation: |
+      Zero is a plausible value, so the difference isn't statistically significant at the 5% level. The interval also shows B could be up to 1.8 points better — collecting more data would narrow it.

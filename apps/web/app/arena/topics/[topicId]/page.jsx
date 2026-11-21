@@ -1,4 +1,5 @@
 "use client";
+import { itemHref, topicHref, trackHref, useArea, useAreaRedirect } from "@/app/lib/areas";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
@@ -12,6 +13,7 @@ import { Crumbs, MasteryBar, StatusIcon } from "../../_components/bits";
 import { ITEM_TYPE } from "../../_components/labels";
 
 function PracticeList({ topic, signedIn }) {
+  const area = topic.area;
   return (
     <Card className="overflow-hidden">
       <div className="space-y-2 border-b border-border px-5 py-4">
@@ -26,7 +28,7 @@ function PracticeList({ topic, signedIn }) {
         {topic.items.map((item) => (
           <li key={item.id}>
             <Link
-              href={`/arena/items/${item.id}`}
+              href={itemHref(area, item.id)}
               className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-accent"
             >
               <StatusIcon status={item.status} />
@@ -49,6 +51,8 @@ export default function TopicPage() {
   const { status } = useSession();
   const topic = useApi(() => arenaApi.topic(topicId), [topicId, status], { enabled: status !== "loading" });
   const t = topic.data;
+  const area = useArea();
+  useAreaRedirect(t?.area);
 
   return (
     <ArenaShell>
@@ -66,8 +70,8 @@ export default function TopicPage() {
           <div className="space-y-6">
             <Crumbs
               items={[
-                { label: "ML Arena", href: "/arena" },
-                { label: t.trackTitle, href: `/arena/tracks/${t.trackId}` },
+                { label: area.title, href: area.base },
+                { label: t.trackTitle, href: trackHref(t.area, t.trackId) },
                 { label: t.title },
               ]}
             />
@@ -82,7 +86,7 @@ export default function TopicPage() {
                       {t.prerequisites.map((p, i) => (
                         <span key={p.id}>
                           {i > 0 ? ", " : ""}
-                          <Link href={`/arena/topics/${p.id}`} className="text-primary underline underline-offset-2">
+                          <Link href={topicHref(t.area, p.id)} className="text-primary underline underline-offset-2">
                             {p.title}
                           </Link>
                         </span>
@@ -99,7 +103,7 @@ export default function TopicPage() {
                 <div className="flex flex-wrap justify-between gap-2">
                   {t.previousTopic ? (
                     <Button asChild variant="ghost" size="sm">
-                      <Link href={`/arena/topics/${t.previousTopic.id}`}>
+                      <Link href={topicHref(t.area, t.previousTopic.id)}>
                         <ArrowLeft />
                         {t.previousTopic.title}
                       </Link>
@@ -109,7 +113,7 @@ export default function TopicPage() {
                   )}
                   {t.nextTopic ? (
                     <Button asChild variant="ghost" size="sm">
-                      <Link href={`/arena/topics/${t.nextTopic.id}`}>
+                      <Link href={topicHref(t.area, t.nextTopic.id)}>
                         {t.nextTopic.title}
                         <ArrowRight />
                       </Link>

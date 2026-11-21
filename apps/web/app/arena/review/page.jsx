@@ -36,7 +36,7 @@ function List({ entries, review }) {
 }
 
 function Queue() {
-  const queue = useApi(() => arenaApi.reviewQueue(), []);
+  const queue = useApi(() => arenaApi.reviewQueue("ml"), []);
   if (queue.loading) return <Skeleton className="h-48" />;
   if (queue.error) return <EmptyState title="Couldn't load your reviews" description={queue.error.message} />;
   const { due, retry, upcomingCount } = queue.data;

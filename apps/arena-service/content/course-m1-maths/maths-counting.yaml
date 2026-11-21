@@ -1,0 +1,204 @@
+id: maths-counting
+title: Permutations and combinations
+summary: Counting principles and factorials, permutations where order matters, combinations where it doesn't, and turning counts into probabilities — with the counts behind hyperparameter grids, feature subsets and A/B tests.
+prerequisites: [maths-algebra-functions]
+lesson: |
+  ## 5.1 Counting principles and factorials
+
+  - **Multiplication rule**: if one choice has $m$ options and another (independent) has $n$, together there are $m \times n$ outcomes. A hyperparameter grid with 4 learning rates, 3 depths and 5 regularisation strengths has $4 \times 3 \times 5 = 60$ combinations.
+  - **Addition rule**: if outcomes come from one of two non-overlapping groups, add the counts.
+  - **Factorial**: $n! = n \times (n-1) \times \dots \times 1$, with $0! = 1$ — the number of ways to arrange $n$ distinct items. Factorials grow faster than exponentials: $10! = 3{,}628{,}800$.
+
+  ## 5.2 Permutations (order matters)
+
+  Arrangements of $r$ items chosen from $n$:
+
+  $$P(n, r) = \frac{n!}{(n - r)!}$$
+
+  Choosing a 1st, 2nd and 3rd place from 10 runners: $10 \times 9 \times 8 = 720$. With repetition allowed (like PIN codes), it's $n^r$. Arrangements of letters with repeats divide by the repeats: "DATA" has $\frac{4!}{2!} = 12$.
+
+  ## 5.3 Combinations (order doesn't matter)
+
+  Selections of $r$ from $n$:
+
+  $$\binom{n}{r} = \frac{n!}{r!\,(n - r)!}$$
+
+  Choosing 3 features from 10 to try: $\binom{10}{3} = 120$. Useful facts: $\binom{n}{r} = \binom{n}{n-r}$; $\binom{n}{0} = \binom{n}{n} = 1$; there are $2^n$ subsets in total — why exhaustive feature selection is infeasible beyond a few dozen features. Combinations with repetition: $\binom{n + r - 1}{r}$.
+
+  ## 5.4 From counting to probability
+
+  When all outcomes are equally likely: $P(\text{event}) = \frac{\text{favourable outcomes}}{\text{total outcomes}}$. Example: drawing 2 cards from a deck, the probability both are aces is $\binom{4}{2} / \binom{52}{2} = 6 / 1326 \approx 0.0045$. Counting complements often helps: $P(\text{at least one}) = 1 - P(\text{none})$. The **birthday problem**: with 23 people, the probability two share a birthday is over 50% — the same reason hash collisions arrive sooner than intuition suggests.
+items:
+  - id: m1s5-grid
+    type: numeric
+    title: Size of a hyperparameter grid
+    difficulty: easy
+    tags: [counting, multiplication-rule]
+    prompt: |
+      A grid search tries learning rates {0.1, 0.01, 0.001}, depths {3, 5, 7, 9} and two optimisers, each with 5-fold cross-validation. How many models are trained in total?
+    answer: 120
+    tolerance: 0
+    explanation: |
+      $3 \times 4 \times 2 = 24$ combinations, each trained 5 times: $24 \times 5 = 120$. Grids grow multiplicatively, which is why random search or Bayesian optimisation is used for large spaces.
+
+  - id: m1s5-factorial
+    type: numeric
+    title: Arrangements
+    difficulty: easy
+    tags: [counting, factorial]
+    prompt: |
+      In how many orders can 6 different tasks be scheduled?
+    answer: 720
+    tolerance: 0
+    explanation: |
+      $6! = 6 \times 5 \times 4 \times 3 \times 2 \times 1 = 720$.
+
+  - id: m1s5-permutation
+    type: numeric
+    title: Podium places
+    difficulty: easy
+    tags: [counting, permutations]
+    prompt: |
+      12 teams compete. In how many ways can the gold, silver and bronze be awarded?
+    answer: 1320
+    tolerance: 0
+    explanation: |
+      Order matters: $P(12, 3) = 12 \times 11 \times 10 = 1320$.
+
+  - id: m1s5-combination
+    type: numeric
+    title: Choose features
+    difficulty: easy
+    tags: [counting, combinations]
+    prompt: |
+      How many different sets of 4 features can be chosen from 10?
+    answer: 210
+    tolerance: 0
+    explanation: |
+      Order doesn't matter: $\binom{10}{4} = \frac{10 \times 9 \times 8 \times 7}{4 \times 3 \times 2 \times 1} = 210$.
+
+  - id: m1s5-perm-or-comb
+    type: mcq_multi
+    title: Order matters?
+    difficulty: medium
+    tags: [counting]
+    prompt: |
+      Which of these are counted with **combinations** (order doesn't matter)? Select all that apply.
+    options:
+      - { id: a, text: "Picking 5 customers out of 200 for a survey" }
+      - { id: b, text: "Assigning first, second and third prize" }
+      - { id: c, text: "Choosing a 3-person committee" }
+      - { id: d, text: "Setting a 4-digit PIN" }
+      - { id: e, text: "Selecting 2 of 8 models to ensemble" }
+    answer: [a, c, e]
+    explanation: |
+      Surveys, committees and ensembles are sets — rearranging the same members gives the same selection. Prizes are ranked (permutations), and a PIN is an ordered sequence with repetition ($10^4$).
+
+  - id: m1s5-anagram
+    type: numeric
+    title: Letters with repeats
+    difficulty: medium
+    tags: [counting, permutations]
+    prompt: |
+      How many distinct arrangements are there of the letters of **STATISTICS**?
+    answer: 50400
+    tolerance: 0
+    explanation: |
+      10 letters with S×3, T×3, I×2, A×1, C×1: $\frac{10!}{3!\,3!\,2!} = \frac{3{,}628{,}800}{72} = 50{,}400$. Dividing removes arrangements that only swap identical letters.
+
+  - id: m1s5-subsets
+    type: numeric
+    title: Every subset of features
+    difficulty: medium
+    tags: [counting, subsets]
+    prompt: |
+      A dataset has 20 features. How many non-empty subsets of features are there?
+    answer: 1048575
+    tolerance: 0
+    explanation: |
+      Each feature is in or out: $2^{20} = 1{,}048{,}576$ subsets, minus the empty one. Training a model on each is infeasible, which is why feature selection uses greedy or regularisation-based methods.
+
+  - id: m1s5-probability
+    type: numeric
+    title: Probability by counting
+    difficulty: medium
+    tags: [counting, probability]
+    prompt: |
+      A box has 5 defective and 15 good parts. Pick 3 at random without replacement. What is the probability that **none** is defective? (Four decimals.)
+    answer: 0.3991
+    tolerance: 0.0001
+    explanation: |
+      $\binom{15}{3} / \binom{20}{3} = 455 / 1140 \approx 0.3991$. So the chance of at least one defective is $1 - 0.3991 \approx 0.60$ — counting the complement is often easier.
+
+  - id: m1s5-ncr-code
+    type: code
+    title: Compute n choose r
+    difficulty: easy
+    tags: [counting, combinations, python]
+    prompt: |
+      Implement `n_choose_r(n, r)` exactly for large values (e.g. $\binom{100}{50}$) without floating-point error. Return 0 when `r < 0` or `r > n`. You may use `math.comb`, or multiply and divide step by step with integers. (The test compares all the digits, as text.)
+    driver: |
+      def check(n, r):
+          return str(n_choose_r(n, r))
+    function:
+      name: check
+      params:
+        - { name: n, type: int }
+        - { name: r, type: int }
+      returns: "the exact value, as text"
+    starter: |
+      import math
+
+      def n_choose_r(n, r):
+          return int(math.factorial(n) / (math.factorial(r) * math.factorial(n - r)))
+    solution: |
+      def n_choose_r(n, r):
+          if r < 0 or r > n:
+              return 0
+          r = min(r, n - r)
+          result = 1
+          for i in range(1, r + 1):
+              result = result * (n - r + i) // i
+          return result
+    tests:
+      sample:
+        - args: [10, 3]
+      hidden:
+        - args: [5, 7]
+        - args: [100, 50]
+        - args: [30, 0]
+    explanation: |
+      True division `/` converts the huge factorials to floats, which only hold about 16 significant digits — so $\binom{100}{50}$ comes out wrong. Integer arithmetic with `//` stays exact (each partial product is itself a binomial coefficient, so the division is exact). It also skips computing 100! entirely.
+
+  - id: m1s5-birthday
+    type: code
+    title: The birthday problem
+    difficulty: medium
+    tags: [counting, probability]
+    prompt: |
+      Write `shared_birthday(n)`: the probability that at least two of `n` people share a birthday (365 equally likely days, ignore leap years), rounded to 4 decimals.
+    function:
+      name: shared_birthday
+      params:
+        - { name: n, type: int }
+      returns: "float"
+    starter: |
+      def shared_birthday(n):
+          return round(n / 365, 4)
+    solution: |
+      def shared_birthday(n):
+          if n > 365:
+              return 1.0
+          p_distinct = 1.0
+          for i in range(n):
+              p_distinct *= (365 - i) / 365
+          return round(1 - p_distinct, 4)
+    tests:
+      sample:
+        - args: [23]
+      hidden:
+        - args: [1]
+        - args: [50]
+        - args: [400]
+    explanation: |
+      Count the complement: all birthdays distinct has probability $\frac{365}{365}\cdot\frac{364}{365}\cdots\frac{365-n+1}{365}$. With 23 people it's already 0.5073. With more than 365 people a repeat is certain (pigeonhole principle).

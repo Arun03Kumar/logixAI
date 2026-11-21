@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -422,7 +423,7 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
             <MathMarkdown>{item.explanation}</MathMarkdown>
             {item.nextItem ? (
               <Button asChild size="sm">
-                <Link href={`/arena/items/${item.nextItem.id}`}>
+                <Link href={itemHref(item.area, item.nextItem.id)}>
                   Next: {item.nextItem.title}
                   <ArrowRight />
                 </Link>
@@ -456,7 +457,7 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
             </>
           ) : (
             <Button asChild variant="primary" size="sm">
-              <Link href={`/login?next=/arena/items/${item.id}`}>Sign in to run code</Link>
+              <Link href={`/login?next=${itemHref(item.area, item.id)}`}>Sign in to run code</Link>
             </Button>
           )}
         </div>

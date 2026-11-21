@@ -1,0 +1,273 @@
+id: py-strings
+title: Strings in depth
+summary: Strings as immutable sequences — indexing and slicing, the methods you use daily, f-string formatting, and cleaning messy text for data work with a first look at regular expressions.
+prerequisites: [py-control-flow]
+lesson: |
+  ## 3.1 String basics and indexing
+
+  A string is an **immutable** sequence of characters. `s[0]` is the first character, `s[-1]` the last. `len(s)` counts characters. Strings can't be changed in place — `s[0] = "X"` is an error — every "change" builds a new string. Quotes: `'...'`, `"..."`, or `"""..."""` for multi-line text; `\n` is a newline and a raw string `r"C:\new"` keeps backslashes.
+
+  ## 3.2 Slicing
+
+  `s[start:stop:step]` takes characters from `start` up to (not including) `stop`. Missing values default to the ends: `s[:3]` (first three), `s[-3:]` (last three), `s[::2]` (every other), `s[::-1]` (reversed). Slices never raise an error for out-of-range indexes — they just return less.
+
+  ## 3.3 String methods
+
+  | Method | Does |
+  | --- | --- |
+  | `strip()`, `lstrip()`, `rstrip()` | remove whitespace (or given characters) at the ends |
+  | `lower()`, `upper()`, `title()` | change case |
+  | `split(sep)`, `"sep".join(parts)` | text ↔ list |
+  | `replace(old, new)` | replace every occurrence |
+  | `startswith()`, `endswith()`, `in` | tests |
+  | `find()` (−1 if missing), `index()` (error), `count()` | search |
+  | `isdigit()`, `isalpha()`, `isalnum()` | character class tests |
+
+  Methods return **new** strings; `s.strip()` alone does nothing to `s` — assign the result. `split()` with no argument splits on any run of whitespace and drops empty pieces.
+
+  ## 3.4 String formatting
+
+  f-strings embed expressions: `f"{name:>10}"` (right-align in 10), `f"{x:.2f}"` (2 decimals), `f"{n:,}"` (thousands), `f"{p:.1%}"` (percentage), `f"{x=}"` (prints `x=` and the value, great for debugging).
+
+  ## 3.5 Text cleaning for data, and regex
+
+  Real text columns are messy: extra spaces, inconsistent case, punctuation, mixed formats. A typical clean-up normalises case, strips, collapses whitespace and removes or standardises symbols.
+
+  The `re` module matches **patterns**: `\d` digit, `\w` word character, `\s` whitespace, `+` one or more, `*` zero or more, `?` optional, `[...]` a set, `^`/`$` start/end. `re.findall(r"\d+", text)` lists every number; `re.sub(r"\s+", " ", text)` collapses whitespace; `re.fullmatch(pattern, s)` checks a whole string. Always use raw strings `r"..."` for patterns.
+items:
+  - id: py3-slicing
+    type: output
+    title: Slicing
+    difficulty: easy
+    tags: [python, strings, slicing]
+    prompt: |
+      What does this print?
+    snippet: |
+      s = "learning"
+      print(s[0], s[-1], s[2:5], s[:3], s[-3:])
+      print(s[::2], s[::-1])
+      print(s[5:100])
+    answer: |
+      l g arn lea ing
+      lann gninrael
+      ing
+    explanation: |
+      `s[2:5]` takes indexes 2, 3 and 4. Negative indexes count from the end. `[::-1]` reverses. A slice past the end just stops at the end — no `IndexError`, unlike `s[100]`.
+
+  - id: py3-immutable
+    type: mcq_single
+    title: Changing a string
+    difficulty: easy
+    tags: [python, strings]
+    prompt: |
+      `name = "  Asha  "` and then `name.strip()` is run on its own line. What is `name` afterwards?
+    options:
+      - { id: a, text: '`"Asha"` — strip() changed it' }
+      - { id: b, text: '`"  Asha  "` — strip() returned a new string that was thrown away' }
+      - { id: c, text: "An error, because strings are immutable" }
+      - { id: d, text: '`None`' }
+    answer: b
+    explanation: |
+      Strings are immutable, so methods return new strings. Write `name = name.strip()`. The same applies to `df["city"].str.strip()` in Pandas: without assigning it back, nothing changes.
+
+  - id: py3-split-join
+    type: output
+    title: split and join
+    difficulty: easy
+    tags: [python, strings]
+    prompt: |
+      What does this print?
+    snippet: |
+      line = "  red,  green ,blue,,  "
+      parts = [p.strip() for p in line.split(",")]
+      print(parts)
+      print("|".join(p for p in parts if p))
+      print("a  b   c".split())
+    answer: |
+      ['red', 'green', 'blue', '', '']
+      red|green|blue
+      ['a', 'b', 'c']
+    explanation: |
+      `split(",")` keeps empty pieces between consecutive commas; filter them out if needed. `split()` with no argument splits on any whitespace run and drops empties. `join` is called on the separator.
+
+  - id: py3-find-vs-index
+    type: output
+    title: Searching
+    difficulty: easy
+    tags: [python, strings]
+    prompt: |
+      What does this print?
+    snippet: |
+      email = "asha.k@example.com"
+      print(email.find("@"), email.find("#"))
+      print(email.count("a"), email.endswith(".com"), "example" in email)
+      print(email[email.find("@") + 1:])
+    answer: |
+      6 -1
+      3 True True
+      example.com
+    explanation: |
+      `find` returns −1 when the text is missing, while `index` would raise `ValueError`. Slicing from the position after `@` extracts the domain — a common feature-engineering step.
+
+  - id: py3-format
+    type: output
+    title: Format specifiers
+    difficulty: medium
+    tags: [python, strings, formatting]
+    prompt: |
+      What does this print?
+    snippet: |
+      acc, n, name = 0.91234, 1234567, "rf"
+      print(f"{name:>6}|{acc:.2f}|{acc:.1%}|{n:,}")
+      x = 42
+      print(f"{x=}")
+    answer: |2
+          rf|0.91|91.2%|1,234,567
+      x=42
+    explanation: |
+      `>6` right-aligns in 6 characters, `.2f` rounds to 2 decimals, `.1%` multiplies by 100 and adds `%`, `,` groups thousands. `{x=}` prints the expression and its value — handy for quick debugging.
+
+  - id: py3-normalise
+    type: code
+    title: Normalise a city name
+    difficulty: easy
+    tags: [python, strings, cleaning]
+    prompt: |
+      Write `normalise(name)`: strip the ends, collapse any run of whitespace inside to a single space, and convert to title case. `"  new   DELHI "` → `"New Delhi"`.
+    function:
+      name: normalise
+      params:
+        - { name: name, type: str }
+      returns: "str"
+    starter: |
+      def normalise(name):
+          return name.strip().title()
+    solution: |
+      def normalise(name):
+          return " ".join(name.split()).title()
+    tests:
+      sample:
+        - args: ["  new   DELHI "]
+      hidden:
+        - args: ["mumbai"]
+        - args: ["\tpune\n"]
+        - args: [""]
+        - args: ["navi   mumbai  east"]
+    explanation: |
+      `" ".join(name.split())` both strips the ends and collapses inner whitespace (tabs and newlines included), because `split()` with no argument splits on any whitespace run. Without it, "New   Delhi" and "New Delhi" count as different cities in a groupby.
+
+  - id: py3-is-palindrome
+    type: code
+    title: Palindromes, ignoring punctuation
+    difficulty: easy
+    tags: [python, strings, slicing]
+    prompt: |
+      Write `is_palindrome(text)`: `True` if the text reads the same backwards when you ignore case and keep only letters and digits. `"A man, a plan, a canal: Panama"` → `True`.
+    function:
+      name: is_palindrome
+      params:
+        - { name: text, type: str }
+      returns: "bool"
+    starter: |
+      def is_palindrome(text):
+          return text == text[::-1]
+    solution: |
+      def is_palindrome(text):
+          cleaned = "".join(ch.lower() for ch in text if ch.isalnum())
+          return cleaned == cleaned[::-1]
+    tests:
+      sample:
+        - args: ["A man, a plan, a canal: Panama"]
+      hidden:
+        - args: ["race a car"]
+        - args: [""]
+        - args: ["No 'x' in Nixon"]
+        - args: ["12321"]
+    explanation: |
+      Clean first (keep `isalnum()` characters, lower-case them), then compare with the reverse `[::-1]`. Comparing the raw text fails on case, spaces and punctuation.
+
+  - id: py3-regex-numbers
+    type: code
+    title: Extract amounts with regex
+    difficulty: medium
+    tags: [python, regex, cleaning]
+    prompt: |
+      Write `amounts(text)` returning every amount in rupees as floats, in order. An amount is written `Rs` (optionally with a dot and/or a space) followed by digits, optionally with comma thousands separators and a decimal part: `"Paid Rs. 1,250.50 and Rs 80"` → `[1250.5, 80.0]`. Other numbers (like dates) are ignored.
+    function:
+      name: amounts
+      params:
+        - { name: text, type: str }
+      returns: "list of float"
+    starter: |
+      import re
+
+      def amounts(text):
+          return [float(x) for x in re.findall(r"\d+", text)]
+    solution: |
+      import re
+
+      def amounts(text):
+          found = re.findall(r"Rs\.?\s?([\d,]+(?:\.\d+)?)", text)
+          return [float(x.replace(",", "")) for x in found]
+    tests:
+      sample:
+        - args: ["Paid Rs. 1,250.50 and Rs 80"]
+      hidden:
+        - args: ["On 2024-03-05 we got Rs.99 back"]
+        - args: ["no money here"]
+        - args: ["Rs 1,00,000 total"]
+    explanation: |
+      The pattern anchors on `Rs`, allows an optional `.` and space, then captures digits and commas with an optional decimal part. With one capturing group, `findall` returns just the group. Strip the commas before `float()`. The starter's `\d+` grabs every number, including dates, and splits `1,250.50` into three.
+
+  - id: py3-regex-quiz
+    type: mcq_single
+    title: Read the pattern
+    difficulty: medium
+    tags: [python, regex]
+    prompt: |
+      Which strings does `re.fullmatch(r"[A-Z]{2}\d{2}[A-Z]{1,2}\d{4}", s)` accept?
+    options:
+      - { id: a, text: '"MH12AB1234" and "KA05X9876"' }
+      - { id: b, text: 'Only "MH12AB1234"' }
+      - { id: c, text: '"mh12ab1234" too, since regex ignores case' }
+      - { id: d, text: 'Any string containing "MH12AB1234"' }
+    answer: a
+    explanation: |
+      Two capital letters, two digits, one or two capital letters (`{1,2}`), four digits — both plates fit. Matching is case-sensitive unless you pass `re.IGNORECASE`, and `fullmatch` requires the **whole** string to match (`search` would accept it anywhere inside).
+
+  - id: py3-word-count
+    type: code
+    title: Word frequencies
+    difficulty: medium
+    tags: [python, strings, cleaning, dict]
+    prompt: |
+      Write `top_words(text, k)`: lower-case the text, treat any run of letters (a–z) as a word, and return the `k` most common words as `[word, count]` pairs, most frequent first, ties broken alphabetically.
+    function:
+      name: top_words
+      params:
+        - { name: text, type: str }
+        - { name: k, type: int }
+      returns: "list of [word, count]"
+    starter: |
+      def top_words(text, k):
+          counts = {}
+          for w in text.split():
+              counts[w] = counts.get(w, 0) + 1
+          return sorted(counts.items(), key=lambda p: -p[1])[:k]
+    solution: |
+      import re
+      from collections import Counter
+
+      def top_words(text, k):
+          words = re.findall(r"[a-z]+", text.lower())
+          counts = Counter(words)
+          ranked = sorted(counts.items(), key=lambda p: (-p[1], p[0]))
+          return [[w, c] for w, c in ranked[:k]]
+    tests:
+      sample:
+        - args: ["The cat sat. The CAT ran! a cat", 2]
+      hidden:
+        - args: ["", 3]
+        - args: ["b a c b a", 5]
+    explanation: |
+      Lower-casing and extracting letter runs makes "The", "the" and "the." the same word. Sorting by `(-count, word)` gives most frequent first with alphabetical ties — a deterministic order, which tests (and reproducible reports) need. This is the first step of a bag-of-words text model.

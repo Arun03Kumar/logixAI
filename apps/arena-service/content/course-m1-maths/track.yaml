@@ -1,0 +1,20 @@
+# Module 1 of the "Machine learning, from zero" course (content/courses.yaml).
+# Each topic is one section of the module. To add a section: write
+# <topic>.yaml in this folder and add its id below, in order.
+id: course-m1-maths
+title: "Module 1: Mathematics and statistics"
+summary: The maths and statistics behind machine learning, from functions and logarithms through vectors, calculus and probability to hypothesis testing — each idea tied to where it shows up in ML.
+level: foundations
+area: ml
+order: -2
+topics:
+  - maths-algebra-functions
+  - maths-vectors-matrices
+  - maths-differentiation
+  - maths-integration
+  - maths-counting
+  - maths-descriptive-stats
+  - maths-probability
+  - maths-distributions
+  - maths-sampling
+  - maths-hypothesis-testing

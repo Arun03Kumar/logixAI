@@ -138,7 +138,8 @@ export function skillMap(catalog: Catalog, progress: ProgressMap): SkillMap {
       rootCauses: isStruggling ? rootCauses(t.id) : [],
     };
   });
-  const edges = topics.flatMap((t) => t.prerequisites.map((p) => ({ from: p, to: t.id })));
+  // Prerequisites from another area aren't on this map.
+  const edges = topics.flatMap((t) => t.prerequisites.filter((p) => catalog.topic(p)).map((p) => ({ from: p, to: t.id })));
   return { topics: nodes, edges };
 }
 

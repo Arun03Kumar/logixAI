@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { ArrowRight, CalendarDays, FlaskConical, Flame, PlayCircle } from "lucide-react";
+import { ArrowRight, CalendarDays, FlaskConical, Flame, GraduationCap, PlayCircle } from "lucide-react";
 import {
   Badge,
   Button,
@@ -85,19 +85,47 @@ function NextUp({ dashboard }) {
   );
 }
 
+/** The beginner course, with progress and a link to continue. */
+function CourseCard({ course, signedIn }) {
+  return (
+    <Link href={`/arena/course/${course.id}`} className="group block">
+      <Card className="flex flex-wrap items-center gap-5 border-primary p-6 transition-colors group-hover:bg-accent">
+        <span className="grid size-14 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <GraduationCap className="size-7" />
+        </span>
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <p className="text-xs font-medium uppercase tracking-wide text-primary">Course</p>
+          <h2 className="text-xl font-semibold">{course.title}</h2>
+          <p className="text-sm text-muted-foreground">{course.summary}</p>
+          <p className="text-xs text-muted-foreground">
+            {course.moduleCount} modules ({course.availableModules} ready) · {course.sectionCount} sections · {course.itemCount} problems
+          </p>
+          {signedIn ? <MasteryBar value={course.mastery} label="Course" /> : null}
+        </div>
+        <span className="inline-flex items-center gap-1 font-medium text-primary">
+          {signedIn && course.solvedCount ? "Continue" : "Start learning"} <ArrowRight className="size-4" />
+        </span>
+      </Card>
+    </Link>
+  );
+}
+
 export default function ArenaHomePage() {
   const { status } = useSession();
   const signedIn = status === "authenticated";
-  const tracks = useApi(() => arenaApi.tracks(), [status], { enabled: status !== "loading" });
-  const dashboard = useApi(() => arenaApi.dashboard(), [status], { enabled: signedIn });
+  const tracks = useApi(() => arenaApi.tracks("ml"), [status], { enabled: status !== "loading" });
+  const dashboard = useApi(() => arenaApi.dashboard("ml"), [status], { enabled: signedIn });
   const assigned = useApi(() => arenaApi.myAssignments(), [status], { enabled: signedIn });
+  const courses = useApi(() => arenaApi.courses("ml"), [status], { enabled: status !== "loading" });
+  // Course modules are shown in the course, not repeated as tracks.
+  const practiceTracks = (tracks.data ?? []).filter((t) => !t.courseId);
 
   return (
     <ArenaShell>
       <Container size="xl" className="space-y-10">
         <PageHeader
           title="ML Arena"
-          description="Practise the maths, Python and machine learning behind real models: short lessons, then problems you solve by calculating, predicting and writing code that's checked against hidden tests."
+          description="Learn machine learning from zero — maths and Python first, then data, ML, deep learning and LLMs — with short lessons and problems checked against hidden tests."
           actions={
             signedIn ? null : (
               <Button asChild variant="primary" size="sm">
@@ -107,6 +135,9 @@ export default function ArenaHomePage() {
           }
         />
 
+        {(courses.data ?? []).map((c) => (
+          <CourseCard key={c.id} course={c} signedIn={signedIn} />
+        ))}
         {signedIn && dashboard.data ? <NextUp dashboard={dashboard.data} /> : null}
         {signedIn ? <Assigned assignments={assigned.data} /> : null}
         {signedIn && dashboard.data ? (
@@ -117,7 +148,7 @@ export default function ArenaHomePage() {
         ) : null}
 
         <section className="space-y-4">
-          <h2 className="text-lg font-semibold">Tracks</h2>
+          <h2 className="text-lg font-semibold">Practice tracks</h2>
           {tracks.loading || status === "loading" ? (
             <div className="grid gap-4 md:grid-cols-3">
               {[0, 1, 2].map((i) => (
@@ -138,7 +169,7 @@ export default function ArenaHomePage() {
             </Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-3">
-              {tracks.data.map((track, i) => (
+              {practiceTracks.map((track, i) => (
                 <Link key={track.id} href={`/arena/tracks/${track.id}`} className="group">
                   <Card className="flex h-full flex-col gap-3 p-5 transition-colors group-hover:border-primary">
                     <div className="flex items-center justify-between">

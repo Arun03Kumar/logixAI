@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -115,7 +116,7 @@ export default function SessionPage() {
                 {s.items.map((item, i) => (
                   <Link
                     key={item.id}
-                    href={`/arena/items/${item.id}?session=${s.id}`}
+                    href={itemHref(item.area, item.id, `?session=${s.id}`)}
                     className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-accent"
                   >
                     {item.solved ? <CheckCircle2 className="size-5 text-success" /> : <Circle className="size-5 text-muted-foreground" />}

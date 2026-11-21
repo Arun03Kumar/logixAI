@@ -1,0 +1,246 @@
+id: maths-descriptive-stats
+title: Descriptive statistics
+summary: Types of data and levels of measurement, mean / median / mode, variance and standard deviation, quartiles, IQR, box plots and outliers, skewness and kurtosis, and covariance and correlation.
+prerequisites: [maths-algebra-functions]
+lesson: |
+  ## 6.1 Types of data and levels of measurement
+
+  - **Categorical**: nominal (no order — city, colour) or ordinal (ordered — low/medium/high, star ratings).
+  - **Numerical**: discrete (counts) or continuous (measurements); interval (differences meaningful, no true zero — °C) or ratio (true zero — income, age).
+
+  The type decides valid summaries and encodings: you can't average cities; ordinal data may be encoded as ordered integers, nominal data with one-hot encoding.
+
+  ## 6.2 Central tendency
+
+  - **Mean** $\bar x = \frac{1}{n}\sum x_i$ — uses every value, but is pulled by outliers.
+  - **Median** — the middle value of the sorted data (average of the two middle ones for even $n$); robust to outliers.
+  - **Mode** — the most frequent value; the only one for nominal data.
+
+  Right-skewed data (incomes, prices) has mean > median. Report the median for skewed data.
+
+  ## 6.3 Dispersion
+
+  - **Range** = max − min (sensitive to extremes).
+  - **Variance** $s^2 = \frac{1}{n-1}\sum (x_i - \bar x)^2$ for a **sample** (divide by $n$ for a whole population); **standard deviation** $s = \sqrt{s^2}$ is in the data's units. Dividing by $n - 1$ (Bessel's correction) corrects the underestimate that comes from measuring spread around the sample's own mean.
+  - **Coefficient of variation** $s / \bar x$ compares spread across different scales.
+
+  ## 6.4 Quartiles, percentiles, IQR, box plots and outliers
+
+  $Q_1$ (25th percentile), median, $Q_3$ (75th). **IQR** $= Q_3 - Q_1$ covers the middle 50%. The **1.5 × IQR rule** flags values below $Q_1 - 1.5\,\text{IQR}$ or above $Q_3 + 1.5\,\text{IQR}$ as outliers — what a box plot's whiskers show. Z-scores $z = (x - \bar x)/s$ flag values more than 3 standard deviations away. (Software uses slightly different percentile interpolation rules; NumPy's default is linear interpolation.)
+
+  ## 6.5 Shape: skewness and kurtosis
+
+  **Skewness** measures asymmetry: positive = long right tail (mean > median), negative = long left tail. **Kurtosis** measures tail heaviness; excess kurtosis 0 for a normal distribution, positive for heavy tails (more extreme values). Log transforms often fix right skew.
+
+  ## 6.6 Covariance and correlation
+
+  $$\text{cov}(x, y) = \frac{1}{n-1}\sum (x_i - \bar x)(y_i - \bar y) \qquad r = \frac{\text{cov}(x, y)}{s_x s_y} \in [-1, 1]$$
+
+  Pearson's $r$ measures **linear** association: ±1 perfectly linear, 0 no linear relation (there may still be a curved one). It's sensitive to outliers; Spearman's rank correlation is a robust alternative. **Correlation is not causation.** Strongly correlated features carry redundant information (multicollinearity).
+items:
+  - id: m1s6-data-types
+    type: mcq_single
+    title: Level of measurement
+    difficulty: easy
+    tags: [statistics, data-types]
+    prompt: |
+      Customer satisfaction is recorded as "very unhappy", "unhappy", "neutral", "happy", "very happy". What kind of data is it?
+    options:
+      - { id: a, text: "Nominal categorical" }
+      - { id: b, text: "Ordinal categorical" }
+      - { id: c, text: "Continuous numerical" }
+      - { id: d, text: "Ratio" }
+    answer: b
+    explanation: |
+      The categories have a natural order but the gaps between them aren't measurable quantities, so it's ordinal. It can be encoded as 0–4 to keep the order, whereas nominal data (like city) needs one-hot encoding.
+
+  - id: m1s6-mean-median
+    type: mcq_single
+    title: Mean or median?
+    difficulty: easy
+    tags: [statistics, central-tendency]
+    prompt: |
+      Salaries (in lakhs) at a small company: 4, 5, 5, 6, 7, 8, 95. Which summary best describes a typical salary, and why?
+    options:
+      - { id: a, text: "The mean, 18.6, because it uses all the data" }
+      - { id: b, text: "The median, 6, because the 95 outlier pulls the mean up" }
+      - { id: c, text: "The mode, 5, because it's the most common" }
+      - { id: d, text: "The range, 91" }
+    answer: b
+    explanation: |
+      The mean is $130/7 \approx 18.6$, higher than six of the seven salaries — one outlier dragged it up. The median (6) is robust. Right-skewed data like incomes is usually summarised by the median.
+
+  - id: m1s6-variance
+    type: numeric
+    title: Sample standard deviation
+    difficulty: medium
+    tags: [statistics, dispersion]
+    prompt: |
+      What is the **sample** standard deviation of 2, 4, 4, 4, 5, 5, 7, 9? (Three decimals.)
+    answer: 2.138
+    tolerance: 0.001
+    explanation: |
+      The mean is 5; squared deviations sum to $9 + 1 + 1 + 1 + 0 + 0 + 4 + 16 = 32$. Sample variance $32/7 \approx 4.571$, so $s \approx 2.138$. The population version ($32/8 = 4$, so $\sigma = 2$) is smaller. In NumPy, `np.std` defaults to the population formula — pass `ddof=1` for the sample one; Pandas defaults to the sample one.
+
+  - id: m1s6-iqr
+    type: numeric
+    title: Outlier fence
+    difficulty: medium
+    tags: [statistics, outliers, iqr]
+    prompt: |
+      A feature has $Q_1 = 20$ and $Q_3 = 35$. Using the 1.5 × IQR rule, above what value is a point an outlier?
+    answer: 57.5
+    tolerance: 0
+    explanation: |
+      IQR $= 35 - 20 = 15$; upper fence $= 35 + 1.5 \times 15 = 57.5$ (and the lower fence $20 - 22.5 = -2.5$). Points beyond the fences are drawn as dots on a box plot.
+
+  - id: m1s6-skew
+    type: mcq_single
+    title: Reading skew
+    difficulty: easy
+    tags: [statistics, skewness]
+    prompt: |
+      A distribution has mean 72, median 60 and a long tail to the right. Which is true?
+    options:
+      - { id: a, text: "It's positively (right) skewed" }
+      - { id: b, text: "It's negatively (left) skewed" }
+      - { id: c, text: "It's symmetric" }
+      - { id: d, text: "Its kurtosis must be negative" }
+    answer: a
+    explanation: |
+      A long right tail pulls the mean above the median: positive skew. Order-of-magnitude data (prices, followers, transaction amounts) usually looks like this, and a log transform makes it more symmetric.
+
+  - id: m1s6-correlation-meaning
+    type: mcq_multi
+    title: Reading a correlation
+    difficulty: medium
+    tags: [statistics, correlation]
+    prompt: |
+      Ice-cream sales and drowning incidents have correlation $r = 0.85$. Which statements are true? Select all that apply.
+    options:
+      - { id: a, text: "There's a strong positive linear association" }
+      - { id: b, text: "Ice cream causes drowning" }
+      - { id: c, text: "A third factor (hot weather) could drive both" }
+      - { id: d, text: "$r = 0$ would mean the two are unrelated in every way" }
+    answer: [a, c]
+    explanation: |
+      $r$ measures linear association only. A confounder (summer) explains both — correlation isn't causation. And $r = 0$ rules out a *linear* relation, not a curved one (e.g. $y = x^2$ on symmetric data has $r = 0$).
+
+  - id: m1s6-summary-code
+    type: code
+    title: Five-number summary
+    difficulty: medium
+    tags: [statistics, numpy]
+    prompt: |
+      Write `summary(values)` returning a dict with `mean`, `median`, `std` (**sample**), `q1`, `q3` and `iqr` — percentiles with NumPy's default linear interpolation — each rounded to 4 decimals.
+    function:
+      name: summary
+      params:
+        - { name: values, type: ndarray }
+      returns: "dict"
+    starter: |
+      import numpy as np
+
+      def summary(values):
+          return {
+              "mean": round(float(values.mean()), 4),
+              "median": round(float(np.median(values)), 4),
+              "std": round(float(values.std()), 4),
+          }
+    solution: |
+      import numpy as np
+
+      def summary(values):
+          q1, q3 = np.percentile(values, [25, 75])
+          stats = {
+              "mean": values.mean(),
+              "median": np.median(values),
+              "std": values.std(ddof=1),
+              "q1": q1,
+              "q3": q3,
+              "iqr": q3 - q1,
+          }
+          return {k: round(float(v), 4) for k, v in stats.items()}
+    tests:
+      sample:
+        - args: [[2, 4, 4, 4, 5, 5, 7, 9]]
+      generate: |
+        def cases(rng):
+            return [[rng.exponential(10, size=50)], [rng.normal(100, 15, size=31)]]
+    explanation: |
+      `np.std` divides by $n$ unless you pass `ddof=1` for the sample standard deviation — a frequent source of mismatches between NumPy and Pandas results. `np.percentile(values, [25, 75])` returns both quartiles at once.
+
+  - id: m1s6-outliers-code
+    type: code
+    title: Flag outliers with the IQR rule
+    difficulty: medium
+    tags: [statistics, outliers, numpy]
+    prompt: |
+      Write `iqr_outliers(values)` returning the **indexes** of values outside $[Q_1 - 1.5\,\text{IQR},\; Q_3 + 1.5\,\text{IQR}]$ (NumPy's default percentiles), in order.
+    function:
+      name: iqr_outliers
+      params:
+        - { name: values, type: ndarray }
+      returns: "list of indexes"
+    starter: |
+      import numpy as np
+
+      def iqr_outliers(values):
+          mean, std = values.mean(), values.std()
+          return [i for i, v in enumerate(values) if abs(v - mean) > 2 * std]
+    solution: |
+      import numpy as np
+
+      def iqr_outliers(values):
+          q1, q3 = np.percentile(values, [25, 75])
+          iqr = q3 - q1
+          lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+          return [int(i) for i in np.where((values < lo) | (values > hi))[0]]
+    tests:
+      sample:
+        - args: [[10, 12, 11, 13, 12, 95, 11, -40]]
+      hidden:
+        - args: [[5, 5, 5, 5]]
+        - args: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 100]]
+    explanation: |
+      The IQR rule uses quartiles, which outliers barely move, so it still works when extreme values inflate the mean and standard deviation — the z-score style starter misses `-40` in the sample because `95` and `-40` inflate the std. `np.where(mask)[0]` returns the matching indexes.
+
+  - id: m1s6-pearson
+    type: code
+    title: Pearson correlation from scratch
+    difficulty: medium
+    tags: [statistics, correlation, numpy]
+    prompt: |
+      Implement `pearson(x, y)` from the definition (no `np.corrcoef`): covariance divided by the product of standard deviations. Return `0.0` if either variable is constant.
+    function:
+      name: pearson
+      params:
+        - { name: x, type: ndarray }
+        - { name: y, type: ndarray }
+      returns: "float"
+    starter: |
+      import numpy as np
+
+      def pearson(x, y):
+          return float(np.mean(x * y))
+    solution: |
+      import numpy as np
+
+      def pearson(x, y):
+          dx, dy = x - x.mean(), y - y.mean()
+          denom = np.sqrt((dx ** 2).sum() * (dy ** 2).sum())
+          if denom == 0:
+              return 0.0
+          return float((dx * dy).sum() / denom)
+    tests:
+      sample:
+        - args: [[1, 2, 3, 4, 5], [2, 4, 5, 4, 5]]
+      hidden:
+        - args: [[1, 2, 3], [7, 7, 7]]
+        - args: [[1, 2, 3], [-2, -4, -6]]
+      generate: |
+        def cases(rng):
+            x = rng.normal(size=40)
+            return [[x, 2 * x + rng.normal(size=40)], [x, x ** 2]]
+    explanation: |
+      Centre both variables, then divide the summed cross-products by the square root of the summed squares — the $n - 1$ factors cancel. The last generated case, $y = x^2$, has a strong relationship but $r$ near 0, because it isn't linear.

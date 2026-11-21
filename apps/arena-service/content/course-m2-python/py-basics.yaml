@@ -1,0 +1,314 @@
+id: py-basics
+title: Setup and Python basics
+summary: Running Python (scripts, REPL, notebooks), variables and dynamic typing, the core types, type conversion and truthiness, input and output, and operators with their precedence.
+lesson: |
+  ## 1.1 Setting up and running Python
+
+  Python is the language of data science because of its libraries (NumPy, Pandas, scikit-learn, PyTorch) and its readable syntax. It's **interpreted**: code runs top to bottom, and an error appears when its line is reached (syntax errors appear before anything runs).
+
+  | Way to run | Good for |
+  | --- | --- |
+  | REPL (`python` in a terminal) | quick checks, one line at a time |
+  | Script (`python analysis.py`) | programs, pipelines, production |
+  | Jupyter / Colab notebook | exploration, charts, teaching |
+
+  - In a notebook, the **last expression** of a cell is displayed automatically; a script prints only what you `print`.
+  - Notebook cells can run in any order — "Restart and run all" before you trust or share one.
+  - `#` starts a comment. **Indentation is syntax**: the indented lines after `if`, `for` or `def` form a block (4 spaces by convention).
+  - Read error messages from the **last line**: the error type and its description (`NameError: name 'total' is not defined`).
+  - Don't name your file `pandas.py` or `random.py` — it hides the real library.
+
+  ## 1.2 Variables, dynamic typing and data types
+
+  A variable is a **name bound to a value**: `price = 499`. Python is **dynamically typed** — the value has a type, the name doesn't, so `x = 5` then `x = "five"` is allowed.
+
+  | Type | Example | Notes |
+  | --- | --- | --- |
+  | `int` | `42`, `1_000_000` | arbitrary size; `_` for readability |
+  | `float` | `3.14`, `1e-3` | 64-bit; **inexact**: `0.1 + 0.2 == 0.30000000000000004` |
+  | `str` | `"Asha"` | text, immutable |
+  | `bool` | `True`, `False` | a subclass of `int`: `True + True == 2` |
+  | `NoneType` | `None` | "no value" |
+
+  `type(x)` shows the type; `isinstance(x, int)` checks it. Names: letters, digits and `_`, not starting with a digit, case-sensitive; don't reuse built-ins like `list`, `sum` or `max`. `a, b = b, a` swaps two values in one line.
+
+  Compare floats with tolerance — `math.isclose(0.1 + 0.2, 0.3)` or `round(x, 2)` — never `==`.
+
+  ## 1.3 Type conversion, truthiness, input and output
+
+  - **Conversion**: `int("42")`, `float("3.5")`, `str(7)`, `bool(0)`. `int(3.9)` **truncates** to 3 (use `round` to round); `int("3.5")` is a `ValueError` — go through `float` first.
+  - `input()` always returns a **string**; convert before doing maths.
+  - **Truthiness**: `False`, `None`, `0`, `0.0`, `""`, `[]`, `{}`, `()` are falsy; almost everything else is truthy. So `if name:` checks for a non-empty string.
+  - **f-strings** format output: `f"{name} scored {score:.1f}% ({rank:,} of {total:,})"`. `print(a, b, sep=", ", end="")` controls separators.
+
+  ## 1.4 Operators and precedence
+
+  | Operator | Meaning | Example |
+  | --- | --- | --- |
+  | `/` | true division (always float) | `7 / 2 == 3.5` |
+  | `//` | floor division | `7 // 2 == 3`, `-7 // 2 == -4` |
+  | `%` | remainder | `7 % 2 == 1` (even/odd tests, wrapping) |
+  | `**` | power | `2 ** 10 == 1024` |
+  | `==`, `!=`, `<`… | comparison | chains: `0 < x < 10` |
+  | `and`, `or`, `not` | logic | short-circuit |
+  | `+=`, `-=`… | update in place | `total += price` |
+
+  **Precedence**, highest first: `**`, unary `-`, `* / // %`, `+ -`, comparisons, `not`, `and`, `or`. So `-2 ** 2 == -4` and `2 + 3 * 4 == 14`. Use parentheses when in doubt.
+
+  `and`/`or` return one of their **operands**, not just `True`/`False`: `name or "Guest"` gives a default for an empty name. `is` checks identity (use it for `None`: `x is None`), `==` checks equality.
+items:
+  - id: py1-notebook-display
+    type: mcq_single
+    title: What does the cell show?
+    difficulty: easy
+    tags: [python, jupyter]
+    prompt: |
+      A notebook cell contains:
+      ```python
+      a = 3
+      a * 4
+      ```
+      What is displayed when it runs? And if the same two lines are a script run with `python file.py`?
+    options:
+      - { id: a, text: "Notebook: 12. Script: nothing." }
+      - { id: b, text: "Notebook: nothing. Script: 12." }
+      - { id: c, text: "Both show 12." }
+      - { id: d, text: "Both raise an error." }
+    answer: a
+    explanation: |
+      Notebooks display the value of a cell's **last expression**. Scripts display only what you `print`. Code moved from a notebook into a script often "goes silent" for this reason — add `print(a * 4)`.
+
+  - id: py1-error-types
+    type: mcq_single
+    title: Name that error
+    difficulty: easy
+    tags: [python, errors]
+    prompt: |
+      Running `print(total)` where `total` was never assigned raises which error?
+    options:
+      - { id: a, text: "SyntaxError" }
+      - { id: b, text: "NameError" }
+      - { id: c, text: "TypeError" }
+      - { id: d, text: "IndentationError" }
+    answer: b
+    explanation: |
+      A `NameError` means Python doesn't know the name — a typo, or a notebook cell that defined it was never run (or was deleted). `SyntaxError` is for code that can't be parsed at all, like an unclosed string.
+
+  - id: py1-float-surprise
+    type: output
+    title: Floating-point surprise
+    difficulty: easy
+    tags: [python, floats]
+    prompt: |
+      What does this print?
+    snippet: |
+      import math
+      print(0.1 + 0.2 == 0.3)
+      print(round(0.1 + 0.2, 2) == 0.3)
+      print(math.isclose(0.1 + 0.2, 0.3))
+    answer: |
+      False
+      True
+      True
+    explanation: |
+      Floats are stored in binary, and 0.1 has no exact binary representation, so `0.1 + 0.2` is `0.30000000000000004`. Compare floats with a tolerance (`math.isclose`, or `np.isclose` for arrays) or after rounding.
+
+  - id: py1-dynamic-types
+    type: output
+    title: Dynamic typing and bool as int
+    difficulty: easy
+    tags: [python, types]
+    prompt: |
+      What does this print?
+    snippet: |
+      x = 5
+      x = "five"
+      print(type(x).__name__)
+      print(True + True + False)
+      print(isinstance(True, int))
+      a, b = 3, 7
+      a, b = b, a
+      print(a, b)
+    answer: |
+      str
+      2
+      True
+      7 3
+    explanation: |
+      The name `x` can point to values of any type. `bool` is a subclass of `int` (`True == 1`), which is why `sum(predictions == labels)` counts correct predictions. Tuple unpacking swaps without a temporary variable.
+
+  - id: py1-conversion
+    type: output
+    title: Converting types
+    difficulty: medium
+    tags: [python, conversion]
+    prompt: |
+      What does this print?
+    snippet: |
+      print(int(3.9), round(3.9), int(float("3.5")))
+      print(str(10) + "5", int("10") + 5)
+      print(bool(""), bool(" "), bool(0.0), bool([0]))
+    answer: |
+      3 4 3
+      105 15
+      False True False True
+    explanation: |
+      `int()` truncates toward zero; `round()` rounds. `int("3.5")` would fail, so go through `float`. `"10" + "5"` joins strings — a classic bug with `input()`, which always returns text. A space is a non-empty string (truthy); `[0]` is a non-empty list (truthy) even though `0` is falsy.
+
+  - id: py1-truthy-default
+    type: output
+    title: or as a default
+    difficulty: medium
+    tags: [python, truthiness, operators]
+    prompt: |
+      What does this print?
+    snippet: |
+      name = ""
+      print(name or "Guest")
+      print(0 or None or "fallback")
+      print(3 and "yes")
+      print([] and "never")
+    answer: |
+      Guest
+      fallback
+      yes
+      []
+    explanation: |
+      `or` returns the first truthy operand (or the last one); `and` returns the first falsy operand (or the last one). So `name or "Guest"` supplies a default, and `[] and ...` stops at `[]`. Careful: `count or 10` also replaces a legitimate `0`.
+
+  - id: py1-division-operators
+    type: output
+    title: The three divisions
+    difficulty: easy
+    tags: [python, operators]
+    prompt: |
+      What does this print?
+    snippet: |
+      print(7 / 2, 7 // 2, 7 % 2)
+      print(-7 // 2, -7 % 2)
+      print(2 ** 10, 10 / 5)
+    answer: |
+      3.5 3 1
+      -4 1
+      1024 2.0
+    explanation: |
+      `/` always returns a float (even `10 / 5` is `2.0`). `//` floors — rounds **down** — so `-7 // 2` is `-4`, not `-3`, and `%` is consistent with it: `-7 == 2 * -4 + 1`.
+
+  - id: py1-precedence
+    type: numeric
+    title: Operator precedence
+    difficulty: medium
+    tags: [python, operators, precedence]
+    prompt: |
+      What is the value of `-2 ** 2 + 10 // 3 * 2`?
+    answer: 2
+    tolerance: 0
+    explanation: |
+      `**` binds tighter than unary minus: `-2 ** 2` is `-(2 ** 2) = -4`. Then `10 // 3 = 3`, `3 * 2 = 6` (left to right), and `-4 + 6 = 2`. When precedence isn't obvious to a reader, add parentheses.
+
+  - id: py1-fstring
+    type: output
+    title: Formatting with f-strings
+    difficulty: easy
+    tags: [python, strings, output]
+    prompt: |
+      What does this print?
+    snippet: |
+      name, score, rank, total = "Asha", 91.456, 3, 12500
+      print(f"{name} scored {score:.1f}% (rank {rank} of {total:,})")
+      print("a", "b", "c", sep="-", end="!\n")
+    answer: |
+      Asha scored 91.5% (rank 3 of 12,500)
+      a-b-c!
+    explanation: |
+      `:.1f` rounds to one decimal and `:,` adds thousands separators. `sep` goes between the arguments and `end` replaces the usual newline.
+
+  - id: py1-is-none
+    type: mcq_single
+    title: Checking for None
+    difficulty: easy
+    tags: [python, operators]
+    prompt: |
+      What's the idiomatic way to check that a variable `value` holds no value?
+    options:
+      - { id: a, text: "`if value == None:`" }
+      - { id: b, text: "`if value is None:`" }
+      - { id: c, text: "`if not value:`" }
+      - { id: d, text: "`if value = None:`" }
+    answer: b
+    explanation: |
+      `None` is a single object, so test identity with `is`. `not value` is also true for `0`, `""` and `[]`, which are real values — treating a score of 0 as "missing" is a classic data bug. `value = None` in an `if` is a syntax error.
+
+  - id: py1-data-card
+    type: code
+    title: A dataset summary line
+    difficulty: easy
+    tags: [python, strings, output]
+    prompt: |
+      Write `data_card(name, rows, missing_pct)` returning a string like `customers.csv: 12,500 rows, 3.1% missing` — rows with thousands separators and the percentage with one decimal.
+    function:
+      name: data_card
+      params:
+        - { name: name, type: str }
+        - { name: rows, type: int }
+        - { name: missing_pct, type: float }
+      returns: "str"
+    starter: |
+      def data_card(name, rows, missing_pct):
+          return name + ": " + str(rows) + " rows, " + str(missing_pct) + "% missing"
+    solution: |
+      def data_card(name, rows, missing_pct):
+          return f"{name}: {rows:,} rows, {missing_pct:.1f}% missing"
+    tests:
+      sample:
+        - args: ["customers.csv", 12500, 3.14159]
+      hidden:
+        - args: ["tiny.csv", 7, 0.0]
+        - args: ["big.parquet", 1234567, 12.25]
+    explanation: |
+      Format specifiers in f-strings do the work: `{rows:,}` adds separators, `{missing_pct:.1f}` rounds to one decimal. String concatenation needs `str()` on every number and can't format them.
+
+  - id: py1-safe-number
+    type: code
+    title: Parse a number safely
+    difficulty: medium
+    tags: [python, conversion, truthiness]
+    prompt: |
+      User input arrives as text. Write `to_number(text)` that:
+
+      - strips surrounding spaces;
+      - returns an `int` if the text is a whole number (`"42"`, `" -7 "`), otherwise a `float` if it parses as one (`"3.5"`, `"1e3"`);
+      - returns `None` for empty or unparseable text.
+    function:
+      name: to_number
+      params:
+        - { name: text, type: str }
+      returns: "int, float or None"
+    starter: |
+      def to_number(text):
+          return int(text)
+    solution: |
+      def to_number(text):
+          text = text.strip()
+          if not text:
+              return None
+          try:
+              return int(text)
+          except ValueError:
+              pass
+          try:
+              return float(text)
+          except ValueError:
+              return None
+    tests:
+      sample:
+        - args: ["42"]
+        - args: ["3.5"]
+      hidden:
+        - args: ["  -7 "]
+        - args: [""]
+        - args: ["abc"]
+        - args: ["1e3"]
+        - args: ["   "]
+    explanation: |
+      `int()` rejects `"3.5"`, so try `int` first and fall back to `float`. Empty text is falsy after `strip()`, so `if not text` catches blanks. Catching `ValueError` (not a bare `except`) handles bad input without hiding real bugs — more on exceptions in Section 11.

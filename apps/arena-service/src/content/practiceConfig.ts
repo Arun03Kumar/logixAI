@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { ARENA_DIFFICULTIES, ARENA_ITEM_TYPES } from "@logixai/contracts";
+import { AREAS, ARENA_DIFFICULTIES, ARENA_ITEM_TYPES } from "@logixai/contracts";
 import { z } from "@logixai/service-kit";
 import type { Catalog, CatalogItem } from "./catalog.js";
 
@@ -28,6 +28,8 @@ export type PracticeSlot = z.infer<typeof SlotSchema>;
 export const MockTemplatesSchema = z.array(
   z.object({
     id: Slug,
+    /** Shown on that area's pages; every slot must draw from tracks in it. */
+    area: z.enum(AREAS),
     title: z.string().min(1),
     summary: z.string().min(1),
     durationMin: z.number().int().min(5).max(240),
@@ -107,6 +109,10 @@ export function loadPracticeConfig(dir: string, catalog: Catalog): PracticeConfi
     if (ids.has(m.id)) problems.push(`mock ${m.id}: duplicate id`);
     ids.add(m.id);
     checkSlots(`mock ${m.id}`, m.slots, false);
+    for (const slot of m.slots) for (const t of slot.tracks) {
+      const track = catalog.track(t);
+      if (track && track.area !== m.area) problems.push(`mock ${m.id} (${m.area}): track ${t} is in area ${track.area}`);
+    }
   }
   if (contests) checkSlots("weekly contest", contests.weekly.slots, true);
 

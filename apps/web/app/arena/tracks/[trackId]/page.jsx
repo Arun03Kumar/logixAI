@@ -1,4 +1,5 @@
 "use client";
+import { topicHref, useArea, useAreaRedirect } from "@/app/lib/areas";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Badge, Card, Container, EmptyState, Skeleton } from "@logixai/ui";
@@ -14,6 +15,8 @@ export default function TrackPage() {
   const { status } = useSession();
   const signedIn = status === "authenticated";
   const track = useApi(() => arenaApi.track(trackId), [trackId, status], { enabled: status !== "loading" });
+  const area = useArea();
+  useAreaRedirect(track.data?.area);
 
   return (
     <ArenaShell>
@@ -29,7 +32,7 @@ export default function TrackPage() {
           )
         ) : (
           <>
-            <Crumbs items={[{ label: "ML Arena", href: "/arena" }, { label: track.data.title }]} />
+            <Crumbs items={[{ label: area.title, href: area.base }, { label: track.data.title }]} />
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-semibold">{track.data.title}</h1>
@@ -42,7 +45,7 @@ export default function TrackPage() {
             <ol className="space-y-3">
               {track.data.topics.map((topic, i) => (
                 <li key={topic.id}>
-                  <Link href={`/arena/topics/${topic.id}`} className="group block">
+                  <Link href={topicHref(track.data.area, topic.id)} className="group block">
                     <Card className="flex gap-4 p-5 transition-colors group-hover:border-primary">
                       <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold tabular-nums">
                         {i + 1}

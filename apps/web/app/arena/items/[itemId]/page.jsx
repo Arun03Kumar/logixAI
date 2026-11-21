@@ -1,4 +1,5 @@
 "use client";
+import { topicHref, useArea, useAreaRedirect } from "@/app/lib/areas";
 import { Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { RotateCcw } from "lucide-react";
@@ -48,6 +49,8 @@ function ItemPage() {
   const session = useApi(() => arenaApi.session(sessionId), [sessionId, status, item.data?.status], { enabled: signedIn && Boolean(sessionId) });
   const inSession = Boolean(session.data && !session.data.over && session.data.items.some((i) => i.id === itemId));
   const it = item.data;
+  const area = useArea();
+  useAreaRedirect(it?.area);
   const code = it && isCodeItem(it.type) && !it.locked;
   // Review mode only makes sense for something already solved.
   const reviewing = reviewMode && it?.status === "solved";
@@ -70,8 +73,8 @@ function ItemPage() {
             <div className="space-y-2">
               <Crumbs
                 items={[
-                  { label: "ML Arena", href: "/arena" },
-                  { label: it.topic.title, href: `/arena/topics/${it.topic.id}` },
+                  { label: area.title, href: area.base },
+                  { label: it.topic.title, href: topicHref(it.area, it.topic.id) },
                   { label: it.title },
                 ]}
               />

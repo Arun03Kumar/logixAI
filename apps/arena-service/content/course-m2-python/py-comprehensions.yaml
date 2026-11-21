@@ -1,0 +1,236 @@
+id: py-comprehensions
+title: Comprehensions and iteration tools
+summary: List, dict and set comprehensions, generator expressions, enumerate and zip, sorting and min/max with a key, and any, all, sum and friends — compact, readable data transformations.
+prerequisites: [py-data-structures]
+lesson: |
+  ## 5.1 List comprehensions
+
+  `[expression for item in iterable if condition]` builds a list in one readable line:
+
+  ```python
+  squares = [x * x for x in range(5)]                 # [0, 1, 4, 9, 16]
+  passed  = [s for s in scores if s >= 40]            # filter
+  labels  = ["pass" if s >= 40 else "fail" for s in scores]   # transform each
+  pairs   = [(r, c) for r in range(2) for c in range(3)]      # nested loops, outer first
+  ```
+
+  Note the two kinds of `if`: a **filter** goes at the end; a **conditional expression** (`a if cond else b`) goes at the front. Keep comprehensions short — if it needs comments, write a loop.
+
+  ## 5.2 Dict and set comprehensions, and generator expressions
+
+  `{k: v for ...}` builds a dict, `{x for ...}` a set. With round brackets you get a **generator expression**, which produces values lazily instead of building a list: `sum(x * x for x in range(10**7))` uses almost no memory.
+
+  ## 5.3 enumerate and zip
+
+  - `for i, row in enumerate(rows, start=1):` gives a counter and the item — no `range(len(...))`.
+  - `zip(a, b)` pairs items up and **stops at the shortest**; `dict(zip(keys, values))` builds a dict; `zip(*matrix)` transposes. `itertools.zip_longest` pads instead of stopping.
+
+  ## 5.4 sorted, min and max with key
+
+  `key` is a function applied to each item to get what to compare: `sorted(people, key=lambda p: p["age"])`, `max(words, key=len)`. `reverse=True` sorts descending. Sort by several fields with a tuple: `key=lambda p: (-p["score"], p["name"])` gives highest score first, ties alphabetically. Python's sort is **stable**: equal items keep their original order.
+
+  ## 5.5 any, all and other helpers
+
+  `any(...)` is true if at least one item is truthy, `all(...)` if every item is (`all([])` is `True`). Both stop early. Also: `sum`, `min`, `max`, `len`, `reversed`, `sorted`, `map`, `filter`, `range` — prefer these built-ins to hand-written loops.
+items:
+  - id: py5-filter-vs-ternary
+    type: output
+    title: Two kinds of if
+    difficulty: easy
+    tags: [python, comprehensions]
+    prompt: |
+      What does this print?
+    snippet: |
+      scores = [35, 80, 52, 20]
+      print([s for s in scores if s >= 40])
+      print(["pass" if s >= 40 else "fail" for s in scores])
+      print([s * 2 for s in scores if s % 2 == 0])
+    answer: |
+      [80, 52]
+      ['fail', 'pass', 'pass', 'fail']
+      [160, 104, 40]
+    explanation: |
+      An `if` at the end **filters**; an `if ... else` at the front **transforms** every item. Note 35 is odd so it's filtered out of the last list, while 20 is kept.
+
+  - id: py5-nested
+    type: output
+    title: Nested comprehension order
+    difficulty: medium
+    tags: [python, comprehensions]
+    prompt: |
+      What does this print?
+    snippet: |
+      print([(r, c) for r in range(2) for c in "ab"])
+      matrix = [[1, 2], [3, 4], [5, 6]]
+      print([x for row in matrix for x in row])
+      print([list(col) for col in zip(*matrix)])
+    answer: |
+      [(0, 'a'), (0, 'b'), (1, 'a'), (1, 'b')]
+      [1, 2, 3, 4, 5, 6]
+      [[1, 3, 5], [2, 4, 6]]
+    explanation: |
+      Multiple `for`s read left to right like nested loops, outer first — that's how you flatten. `zip(*matrix)` passes each row as an argument, so zip pairs up the first elements, then the second: a transpose.
+
+  - id: py5-dict-comp
+    type: output
+    title: Dict and set comprehensions
+    difficulty: easy
+    tags: [python, comprehensions, dict]
+    prompt: |
+      What does this print?
+    snippet: |
+      words = ["ml", "data", "ai", "data"]
+      print({w: len(w) for w in words})
+      print(sorted({len(w) for w in words}))
+      print({v: k for k, v in {"a": 1, "b": 2}.items()})
+    answer: |
+      {'ml': 2, 'data': 4, 'ai': 2}
+      [2, 4]
+      {1: 'a', 2: 'b'}
+    explanation: |
+      Duplicate keys in a dict comprehension keep the last value. A set comprehension keeps unique values. Swapping keys and values inverts a mapping (only safe when values are unique).
+
+  - id: py5-zip-shortest
+    type: output
+    title: zip stops at the shortest
+    difficulty: easy
+    tags: [python, zip, enumerate]
+    prompt: |
+      What does this print?
+    snippet: |
+      names = ["asha", "ravi", "meera"]
+      scores = [91, 78]
+      print(list(zip(names, scores)))
+      for i, name in enumerate(names, start=1):
+          print(i, name, end="; ")
+    answer: |
+      [('asha', 91), ('ravi', 78)]
+      1 asha; 2 ravi; 3 meera;
+    explanation: |
+      `zip` silently drops `meera` because `scores` is shorter — a classic data-alignment bug. Python 3.10+ has `zip(a, b, strict=True)` to raise an error instead. `enumerate(..., start=1)` numbers from 1.
+
+  - id: py5-generator-memory
+    type: mcq_single
+    title: List or generator?
+    difficulty: medium
+    tags: [python, generators]
+    prompt: |
+      What's the difference between `sum([x * x for x in range(10**8)])` and `sum(x * x for x in range(10**8))`?
+    options:
+      - { id: a, text: "None; they're the same code" }
+      - { id: b, text: "The first builds a 100-million-item list in memory first; the second produces values one at a time, using almost no memory" }
+      - { id: c, text: "The second is a syntax error" }
+      - { id: d, text: "The second computes the values in parallel" }
+    answer: b
+    explanation: |
+      Square brackets build the whole list (several GB here) before `sum` starts. A generator expression yields each value on demand. When you only iterate once, prefer the generator.
+
+  - id: py5-sort-key
+    type: code
+    title: Rank the leaderboard
+    difficulty: medium
+    tags: [python, sorting]
+    prompt: |
+      Each entry is `[name, score, seconds]`. Write `rank(entries)` returning the names ordered by **highest score first**, then **fewest seconds**, then name alphabetically.
+    function:
+      name: rank
+      params:
+        - { name: entries, type: list }
+      returns: "list of names"
+    starter: |
+      def rank(entries):
+          return [e[0] for e in sorted(entries, key=lambda e: e[1], reverse=True)]
+    solution: |
+      def rank(entries):
+          ordered = sorted(entries, key=lambda e: (-e[1], e[2], e[0]))
+          return [e[0] for e in ordered]
+    tests:
+      sample:
+        - args: [[["asha", 90, 300], ["ravi", 95, 400], ["meera", 90, 250]]]
+      hidden:
+        - args: [[]]
+        - args: [[["b", 50, 10], ["a", 50, 10], ["c", 50, 5]]]
+    explanation: |
+      A tuple key sorts by its first element, then the second for ties, and so on. Negating the score makes "highest first" work inside an ascending sort, while time and name stay ascending.
+
+  - id: py5-any-all
+    type: output
+    title: any and all
+    difficulty: easy
+    tags: [python, builtins]
+    prompt: |
+      What does this print?
+    snippet: |
+      ages = [23, 31, None, 45]
+      print(any(a is None for a in ages))
+      print(all(a is not None and a >= 18 for a in ages))
+      print(all([]), any([]))
+      print(max(["pear", "fig", "banana"], key=len))
+    answer: |
+      True
+      False
+      True False
+      banana
+    explanation: |
+      `any` answers "is there at least one?" and `all` "is every one?" — readable data checks. `all([])` is `True` (nothing fails) and `any([])` is `False`. `max(..., key=len)` returns the item with the largest key, not the key itself.
+
+  - id: py5-normalise-column
+    type: code
+    title: Min–max scale a column
+    difficulty: easy
+    tags: [python, comprehensions, scaling]
+    prompt: |
+      Write `minmax(values)` returning each value scaled to `(x - min) / (max - min)`. If all values are equal, return a list of zeros. An empty list returns `[]`.
+    function:
+      name: minmax
+      params:
+        - { name: values, type: list }
+      returns: "list of float"
+    starter: |
+      def minmax(values):
+          return [(x - min(values)) / (max(values) - min(values)) for x in values]
+    solution: |
+      def minmax(values):
+          if not values:
+              return []
+          lo, hi = min(values), max(values)
+          if hi == lo:
+              return [0.0 for _ in values]
+          return [(x - lo) / (hi - lo) for x in values]
+    tests:
+      sample:
+        - args: [[10, 20, 15, 30]]
+      hidden:
+        - args: [[]]
+        - args: [[5, 5, 5]]
+        - args: [[-1, 1]]
+    explanation: |
+      Compute `min` and `max` **once** (the starter recomputes them for every item — quadratic time), and handle the edge cases: an empty list and a constant column, which would divide by zero.
+
+  - id: py5-pairwise-diff
+    type: code
+    title: Day-over-day change
+    difficulty: medium
+    tags: [python, zip, comprehensions]
+    prompt: |
+      Write `changes(values)` returning the difference between each value and the previous one (`len(values) - 1` results). `[100, 120, 90]` → `[20, -30]`.
+    function:
+      name: changes
+      params:
+        - { name: values, type: list }
+      returns: "list"
+    starter: |
+      def changes(values):
+          return [values[i] - values[i - 1] for i in range(len(values))]
+    solution: |
+      def changes(values):
+          return [b - a for a, b in zip(values, values[1:])]
+    tests:
+      sample:
+        - args: [[100, 120, 90]]
+      hidden:
+        - args: [[]]
+        - args: [[5]]
+        - args: [[1, 4, 9, 16]]
+    explanation: |
+      Zipping the list with itself shifted by one (`values[1:]`) pairs each value with the next. The starter's first iteration uses `values[-1]` — the last element — a silent wrap-around bug that negative indexes make easy.

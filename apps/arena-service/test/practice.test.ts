@@ -232,7 +232,7 @@ describe("JavaScript and React items", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "arena-js-"));
     try {
       mkdirSync(path.join(dir, "t"));
-      writeFileSync(path.join(dir, "t", "track.yaml"), "id: t\ntitle: T\nsummary: S\nlevel: interview\norder: 1\ntopics: [js]\n");
+      writeFileSync(path.join(dir, "t", "track.yaml"), "id: t\ntitle: T\nsummary: S\nlevel: interview\narea: frontend\norder: 1\ntopics: [js]\n");
       const item = (id: string, extra: string) =>
         `  - id: ${id}\n    type: code\n    language: javascript\n    title: X\n    difficulty: easy\n    prompt: p\n    explanation: e\n` +
         `    starter: "function f(a) {}"\n    solution: "function f(a) { return 1; }"\n    tests: { sample: [{ args: [[1]] }] }\n${extra}`;

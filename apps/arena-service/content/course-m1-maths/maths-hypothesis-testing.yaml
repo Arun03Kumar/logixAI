@@ -1,0 +1,277 @@
+id: maths-hypothesis-testing
+title: Hypothesis testing
+summary: The testing framework — hypotheses, p-values, significance, errors and power — then z-tests, t-tests, chi-square tests, one-way ANOVA, non-parametric tests, choosing the right test, and running an A/B test end to end.
+prerequisites: [maths-sampling]
+lesson: |
+  ## 10.1 The framework
+
+  1. State a **null hypothesis** $H_0$ (no effect: "the new checkout doesn't change conversion") and an **alternative** $H_1$ (two-sided "is different", or one-sided "is higher").
+  2. Pick a **significance level** $\alpha$ (often 0.05) *before* looking at the data.
+  3. Compute a **test statistic** and its **p-value**: the probability, if $H_0$ were true, of results at least as extreme as those observed.
+  4. If $p < \alpha$, reject $H_0$; otherwise you **fail to reject** it (which is not proof that $H_0$ is true).
+
+  | | $H_0$ true | $H_0$ false |
+  | --- | --- | --- |
+  | Reject | **Type I error** (false positive), rate $\alpha$ | correct — **power** $= 1 - \beta$ |
+  | Don't reject | correct | **Type II error** (false negative), rate $\beta$ |
+
+  A p-value is **not** the probability that $H_0$ is true, and statistical significance isn't practical importance — with huge samples, tiny effects become "significant". Running many tests inflates false positives (use corrections like Bonferroni).
+
+  ## 10.2 z-tests
+
+  For a mean with known $\sigma$ (or large samples): $z = \frac{\bar x - \mu_0}{\sigma/\sqrt n}$. For proportions: $z = \frac{\hat p - p_0}{\sqrt{p_0(1-p_0)/n}}$, and for two proportions $z = \frac{\hat p_1 - \hat p_2}{\sqrt{\hat p(1-\hat p)(1/n_1 + 1/n_2)}}$ with the pooled $\hat p$. Two-sided critical values: ±1.96 at 5%, ±2.576 at 1%.
+
+  ## 10.3 t-tests
+
+  With an estimated standard deviation: **one-sample** ($\bar x$ vs a value), **independent two-sample** (two separate groups; Welch's version doesn't assume equal variances — `ttest_ind(a, b, equal_var=False)`), and **paired** (before/after on the same subjects — test the differences). Pairing removes between-subject variation and is much more powerful when it applies.
+
+  ## 10.4 Chi-square tests
+
+  For categorical data: $\chi^2 = \sum \frac{(O - E)^2}{E}$ over cells of observed vs expected counts. **Goodness-of-fit** compares one variable's counts with expected proportions (is a die fair?); the **test of independence** checks whether two categorical variables are related in a contingency table (`scipy.stats.chi2_contingency`). Expected counts should be at least about 5.
+
+  ## 10.5 One-way ANOVA and the F-test
+
+  Compares the means of three or more groups at once with $F = \frac{\text{variance between groups}}{\text{variance within groups}}$. A significant result says *some* means differ, not which — follow up with post-hoc tests (e.g. Tukey). Running many pairwise t-tests instead inflates the Type I error.
+
+  ## 10.6 Non-parametric tests
+
+  When data is skewed, ordinal or has outliers and samples are small: **Mann–Whitney U** (two independent groups, compares ranks) and **Wilcoxon signed-rank** (paired data). They make fewer assumptions but are less powerful when the normal assumptions do hold.
+
+  ## 10.7 Choosing a test, and an A/B test end to end
+
+  | Data | Groups | Test |
+  | --- | --- | --- |
+  | numeric, ~normal | 1 vs value / 2 independent / 2 paired / 3+ | one-sample t / Welch t / paired t / ANOVA |
+  | numeric, skewed or ordinal | 2 independent / 2 paired | Mann–Whitney / Wilcoxon |
+  | categorical counts | 1 variable / 2 variables | χ² goodness-of-fit / χ² independence |
+  | proportions | 2 groups | two-proportion z-test |
+
+  A/B test: choose the metric and minimum effect worth detecting, compute the sample size for the desired power (usually 80%), randomise users, run for the planned duration **without peeking and stopping early**, test, then report the effect size with a confidence interval.
+items:
+  - id: m1s10-p-value
+    type: mcq_single
+    title: What a p-value means
+    difficulty: medium
+    tags: [hypothesis-testing, p-value]
+    prompt: |
+      A test gives $p = 0.03$. Which statement is correct?
+    options:
+      - { id: a, text: "There's a 3% chance the null hypothesis is true" }
+      - { id: b, text: "If the null hypothesis were true, results at least this extreme would occur about 3% of the time" }
+      - { id: c, text: "There's a 97% chance the effect is real" }
+      - { id: d, text: "The effect size is 0.03" }
+    answer: b
+    explanation: |
+      A p-value is computed **assuming** $H_0$; it measures how surprising the data are under it. It isn't the probability of $H_0$, nor the size or importance of the effect.
+
+  - id: m1s10-errors
+    type: mcq_single
+    title: Type I or Type II?
+    difficulty: easy
+    tags: [hypothesis-testing, errors]
+    prompt: |
+      A new feature truly has no effect, but your A/B test reports a significant improvement. What happened?
+    options:
+      - { id: a, text: "A Type I error (false positive)" }
+      - { id: b, text: "A Type II error (false negative)" }
+      - { id: c, text: "Correct rejection" }
+      - { id: d, text: "Low power" }
+    answer: a
+    explanation: |
+      Rejecting a true null is a Type I error; its probability is $\alpha$. Missing a real effect would be a Type II error, whose probability falls as power rises (bigger samples, bigger effects).
+
+  - id: m1s10-z-test
+    type: numeric
+    title: A z statistic
+    difficulty: medium
+    tags: [hypothesis-testing, z-test]
+    prompt: |
+      Historical average order value is ₹500 with $\sigma = ₹120$. After a redesign, 144 orders average ₹520. What is the z statistic for testing whether the mean changed?
+    answer: 2
+    tolerance: 0.001
+    explanation: |
+      $z = \frac{520 - 500}{120/\sqrt{144}} = \frac{20}{10} = 2$. Since $|z| = 2 > 1.96$, the change is significant at the 5% level (two-sided, $p \approx 0.046$).
+
+  - id: m1s10-paired
+    type: mcq_single
+    title: Which t-test?
+    difficulty: medium
+    tags: [hypothesis-testing, t-test]
+    prompt: |
+      You measure the same 25 users' weekly study time before and after adding reminders. Which test fits?
+    options:
+      - { id: a, text: "Independent two-sample t-test" }
+      - { id: b, text: "Paired t-test on the before/after differences" }
+      - { id: c, text: "Chi-square test of independence" }
+      - { id: d, text: "One-way ANOVA" }
+    answer: b
+    explanation: |
+      The two measurements come from the same users, so analyse the per-user differences. Treating them as independent groups ignores the pairing and throws away power, because each user's baseline varies a lot.
+
+  - id: m1s10-chi-square-choice
+    type: mcq_single
+    title: Categorical association
+    difficulty: easy
+    tags: [hypothesis-testing, chi-square]
+    prompt: |
+      Is subscription plan (Free / Plus / Pro) associated with region (North / South / East / West)? Which test?
+    options:
+      - { id: a, text: "Chi-square test of independence on the 3 × 4 table of counts" }
+      - { id: b, text: "Paired t-test" }
+      - { id: c, text: "One-way ANOVA" }
+      - { id: d, text: "Pearson correlation" }
+    answer: a
+    explanation: |
+      Both variables are categorical, so compare observed cell counts with those expected under independence. ANOVA and t-tests need a numeric outcome.
+
+  - id: m1s10-two-proportion
+    type: code
+    title: Two-proportion z-test
+    difficulty: hard
+    tags: [hypothesis-testing, ab-testing, scipy]
+    prompt: |
+      Write `ab_test(conv_a, n_a, conv_b, n_b)` returning `[z, p_value]` (each rounded to 4 decimals) for a two-sided two-proportion z-test of B vs A, using the **pooled** proportion for the standard error. `scipy.stats.norm.sf` gives the upper tail.
+    function:
+      name: ab_test
+      params:
+        - { name: conv_a, type: int }
+        - { name: n_a, type: int }
+        - { name: conv_b, type: int }
+        - { name: n_b, type: int }
+      returns: "[z, p_value]"
+    starter: |
+      import math
+      from scipy import stats
+
+      def ab_test(conv_a, n_a, conv_b, n_b):
+          pa, pb = conv_a / n_a, conv_b / n_b
+          se = math.sqrt(pa * (1 - pa) / n_a + pb * (1 - pb) / n_b)
+          z = (pb - pa) / se
+          return [round(z, 4), round(float(stats.norm.sf(abs(z))), 4)]
+    solution: |
+      import math
+      from scipy import stats
+
+      def ab_test(conv_a, n_a, conv_b, n_b):
+          pa, pb = conv_a / n_a, conv_b / n_b
+          pooled = (conv_a + conv_b) / (n_a + n_b)
+          se = math.sqrt(pooled * (1 - pooled) * (1 / n_a + 1 / n_b))
+          z = (pb - pa) / se
+          p = 2 * stats.norm.sf(abs(z))
+          return [round(z, 4), round(float(p), 4)]
+    tests:
+      sample:
+        - args: [200, 5000, 250, 5000]
+      hidden:
+        - args: [50, 1000, 50, 1000]
+        - args: [30, 400, 45, 380]
+    explanation: |
+      Under $H_0$ both groups share one conversion rate, so the standard error uses the pooled estimate. A two-sided test doubles the tail probability — the starter forgets both. The sample (4% vs 5% on 5,000 users each) gives $z \approx 2.42$, $p \approx 0.016$: significant at 5%.
+
+  - id: m1s10-scipy-tests
+    type: code
+    title: Run the right scipy test
+    difficulty: medium
+    tags: [hypothesis-testing, scipy]
+    prompt: |
+      Write `run_test(kind, a, b)` returning the **p-value** (rounded to 4 decimals) of the test named by `kind`:
+
+      - `"welch"`: independent two-sample t-test without assuming equal variances;
+      - `"paired"`: paired t-test of `a` vs `b`;
+      - `"mannwhitney"`: two-sided Mann–Whitney U test.
+    function:
+      name: run_test
+      params:
+        - { name: kind, type: str }
+        - { name: a, type: list }
+        - { name: b, type: list }
+      returns: "float"
+    starter: |
+      from scipy import stats
+
+      def run_test(kind, a, b):
+          return round(float(stats.ttest_ind(a, b).pvalue), 4)
+    solution: |
+      from scipy import stats
+
+      def run_test(kind, a, b):
+          if kind == "welch":
+              result = stats.ttest_ind(a, b, equal_var=False)
+          elif kind == "paired":
+              result = stats.ttest_rel(a, b)
+          elif kind == "mannwhitney":
+              result = stats.mannwhitneyu(a, b, alternative="two-sided")
+          else:
+              raise ValueError(f"unknown test {kind}")
+          return round(float(result.pvalue), 4)
+    tests:
+      sample:
+        - args: ["paired", [12, 15, 11, 14, 13, 16], [13, 17, 12, 16, 14, 18]]
+      hidden:
+        - args: ["welch", [5.1, 4.9, 5.3, 5.0, 5.2], [6.0, 7.5, 4.0, 8.2, 5.5, 9.1, 3.9]]
+        - args: ["mannwhitney", [1, 2, 3, 4, 5], [6, 7, 8, 9, 10, 40]]
+    explanation: |
+      The same numbers give very different p-values depending on the test. The paired sample's differences are consistently 1–2 units, so the paired test is highly significant while an independent test (the starter) would barely notice. Choosing the test to match the design is the core skill.
+
+  - id: m1s10-chi2-code
+    type: code
+    title: Chi-square test of independence
+    difficulty: medium
+    tags: [hypothesis-testing, chi-square, scipy]
+    prompt: |
+      Write `independence_test(table)` for a contingency table of counts (rows × columns) returning `[chi2, p_value, dof]` from `scipy.stats.chi2_contingency` (default settings), with `chi2` and `p_value` rounded to 4 decimals.
+    function:
+      name: independence_test
+      params:
+        - { name: table, type: list }
+      returns: "[chi2, p, dof]"
+    starter: |
+      def independence_test(table):
+          total = sum(sum(r) for r in table)
+          return [0.0, 1.0, len(table) * len(table[0])]
+    solution: |
+      from scipy import stats
+
+      def independence_test(table):
+          chi2, p, dof, _expected = stats.chi2_contingency(table)
+          return [round(float(chi2), 4), round(float(p), 4), int(dof)]
+    tests:
+      sample:
+        - args: [[[30, 10], [20, 40]]]
+      hidden:
+        - args: [[[25, 25, 25], [25, 25, 25]]]
+        - args: [[[10, 20, 30], [30, 20, 10], [20, 20, 20]]]
+    explanation: |
+      Degrees of freedom are $(r - 1)(c - 1)$. Note that for 2 × 2 tables SciPy applies Yates' continuity correction by default, which slightly lowers $\chi^2$. A perfectly proportional table gives $\chi^2 = 0$ and $p = 1$.
+
+  - id: m1s10-peeking
+    type: mcq_single
+    title: Peeking at an A/B test
+    difficulty: hard
+    tags: [hypothesis-testing, ab-testing]
+    prompt: |
+      A team checks its A/B test p-value every day and stops as soon as $p < 0.05$. What's the problem?
+    options:
+      - { id: a, text: "Nothing — stopping early saves time" }
+      - { id: b, text: "Repeated looks give many chances to cross 0.05 by luck, so the real false-positive rate is far above 5%" }
+      - { id: c, text: "The p-value becomes smaller than it should only if the effect is real" }
+      - { id: d, text: "It lowers the power to zero" }
+    answer: b
+    explanation: |
+      Each look is another test; with daily checks over a few weeks the chance of a spurious "win" can exceed 20%. Fix the sample size in advance, or use sequential methods designed for continuous monitoring.
+
+  - id: m1s10-anova
+    type: mcq_single
+    title: Comparing three groups
+    difficulty: medium
+    tags: [hypothesis-testing, anova]
+    prompt: |
+      You compare average session length across three app versions with three separate t-tests at $\alpha = 0.05$. Why is one-way ANOVA preferred?
+    options:
+      - { id: a, text: "t-tests can't compare means" }
+      - { id: b, text: "Three tests at 5% each raise the chance of at least one false positive to about 14%; ANOVA tests all groups at once at 5%" }
+      - { id: c, text: "ANOVA tells you exactly which version is best" }
+      - { id: d, text: "ANOVA doesn't need any assumptions" }
+    answer: b
+    explanation: |
+      $1 - 0.95^3 \approx 0.14$. ANOVA's F-test controls the overall error rate; if it's significant, post-hoc tests identify which pairs differ. ANOVA still assumes roughly normal groups with similar variances.

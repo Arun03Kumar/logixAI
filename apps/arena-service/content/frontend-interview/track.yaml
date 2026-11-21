@@ -2,6 +2,7 @@ id: frontend-interview
 title: JavaScript and React interviews
 summary: The frontend coding round — closures, debounce and throttle, promises and the event loop, utility classes like an LRU cache, and React components and hooks, judged on hidden tests with a fake clock and a real DOM.
 level: interview
+area: frontend
 order: 8
 topics:
   - js-closures

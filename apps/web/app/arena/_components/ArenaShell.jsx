@@ -3,31 +3,31 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Container, cn } from "@logixai/ui";
 import AppHeader from "@/app/components/layout/AppHeader";
+import { areaFromPath } from "@/app/lib/areas";
 
-const SECTIONS = [
-  { label: "Learn", href: "/arena", match: (p) => p === "/arena" || /^\/arena\/(tracks|topics|items)/.test(p) },
-  { label: "Problems", href: "/arena/problems", match: (p) => p.startsWith("/arena/problems") },
-  { label: "Review", href: "/arena/review", match: (p) => p.startsWith("/arena/review") },
-  { label: "Skill map", href: "/arena/skills", match: (p) => p.startsWith("/arena/skills") },
-  { label: "My progress", href: "/arena/progress", match: (p) => p.startsWith("/arena/progress") },
-  { label: "Lab", href: "/arena/lab/gradient-descent", match: (p) => p.startsWith("/arena/lab") },
-];
-
-/** App header plus ML Arena's own section links. */
+/**
+ * App header plus the current area's own menu (ML Arena, Frontend or System
+ * design), chosen from the URL so shared pages show the right one.
+ */
 export default function ArenaShell({ children, wide = false }) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
+  const area = areaFromPath(pathname);
+  const rest = pathname.slice(area.base.length);
   return (
     <>
       <AppHeader />
       <div className="border-b border-border bg-card">
         <Container size="xl" className="flex h-11 items-center gap-1 overflow-x-auto text-sm">
-          <span className="mr-3 shrink-0 font-semibold">ML Arena</span>
-          {SECTIONS.map((s) => {
-            const active = s.match(pathname);
+          <Link href={area.base} className="mr-3 shrink-0 font-semibold">
+            {area.title}
+          </Link>
+          {area.sections.map((s) => {
+            const href = `${area.base}${s.path}`;
+            const active = s.match ? s.match(rest) : rest.startsWith(s.path);
             return (
               <Link
-                key={s.href}
-                href={s.href}
+                key={href}
+                href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "shrink-0 rounded-md px-3 py-1 transition-colors",

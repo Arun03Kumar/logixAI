@@ -1,0 +1,180 @@
+id: maths-integration
+title: Integration
+summary: Antiderivatives and indefinite integrals, substitution and integration by parts, definite integrals, areas, average values and AUC, and how integrals turn densities into probabilities and expectations.
+prerequisites: [maths-differentiation]
+lesson: |
+  ## 4.1 Antiderivatives and indefinite integrals
+
+  Integration reverses differentiation: $\int f(x)\,dx = F(x) + C$ where $F' = f$. The constant $C$ appears because constants differentiate to zero.
+
+  | $f(x)$ | $\int f(x)\,dx$ |
+  | --- | --- |
+  | $x^n$ ($n \ne -1$) | $\frac{x^{n+1}}{n+1} + C$ |
+  | $1/x$ | $\ln|x| + C$ |
+  | $e^{ax}$ | $\frac{1}{a}e^{ax} + C$ |
+  | $\sin x$, $\cos x$ | $-\cos x$, $\sin x$ |
+
+  Integrals are linear: $\int (af + bg) = a\int f + b\int g$.
+
+  ## 4.2 Techniques: substitution and by parts
+
+  - **Substitution** undoes the chain rule: if the integrand contains $g(x)$ and $g'(x)$, set $u = g(x)$. Example: $\int 2x\,e^{x^2}dx = e^{x^2} + C$.
+  - **By parts** undoes the product rule: $\int u\,dv = uv - \int v\,du$. Example: $\int x e^x dx = x e^x - e^x + C$. Pick $u$ to be the part that gets simpler when differentiated.
+
+  ## 4.3 Definite integrals
+
+  $$\int_a^b f(x)\,dx = F(b) - F(a)$$
+
+  (the fundamental theorem of calculus). It's the **signed area** between the curve and the x-axis from $a$ to $b$ — area below the axis counts negative. Numerically, the **trapezoidal rule** approximates it by summing trapezoids under sampled points; this is how ROC AUC is computed from points on a curve.
+
+  ## 4.4 Area under and between curves, average value and AUC
+
+  - Area between curves: $\int_a^b |f(x) - g(x)|\,dx$.
+  - **Average value** of $f$ on $[a, b]$: $\frac{1}{b-a}\int_a^b f(x)\,dx$.
+  - **AUC** (area under the ROC curve) integrates the true-positive rate over the false-positive rate, from 0 to 1: 1.0 is a perfect ranking, 0.5 is random guessing.
+
+  ## 4.5 Integration in probability
+
+  For a continuous random variable with **density** $f$: probabilities are areas, $P(a \le X \le b) = \int_a^b f(x)\,dx$; the total area is 1; the probability of any exact single value is 0. The **CDF** is $F(x) = \int_{-\infty}^x f(t)\,dt$, and the **expectation** is $E[X] = \int x f(x)\,dx$. Example: the exponential density $\lambda e^{-\lambda x}$ gives $P(X \le t) = 1 - e^{-\lambda t}$ and $E[X] = 1/\lambda$.
+items:
+  - id: m1s4-antiderivative
+    type: mcq_single
+    title: Find the antiderivative
+    difficulty: easy
+    tags: [integration]
+    prompt: |
+      Which is $\int (6x^2 - 4x + 3)\,dx$?
+    options:
+      - { id: a, text: "$2x^3 - 2x^2 + 3x + C$" }
+      - { id: b, text: "$12x - 4 + C$" }
+      - { id: c, text: "$6x^3 - 4x^2 + 3x + C$" }
+      - { id: d, text: "$2x^3 - 2x^2 + C$" }
+    answer: a
+    explanation: |
+      Raise each power by one and divide by the new power: $6 \cdot \frac{x^3}{3} - 4 \cdot \frac{x^2}{2} + 3x + C$. Check by differentiating back. Option b is the derivative, not the integral.
+
+  - id: m1s4-definite
+    type: numeric
+    title: A definite integral
+    difficulty: easy
+    tags: [integration, definite]
+    prompt: |
+      Evaluate $\displaystyle\int_0^2 (3x^2 + 1)\,dx$.
+    answer: 10
+    tolerance: 0
+    explanation: |
+      $F(x) = x^3 + x$, so $F(2) - F(0) = (8 + 2) - 0 = 10$. The constant $C$ cancels in a definite integral.
+
+  - id: m1s4-substitution
+    type: mcq_single
+    title: Substitution
+    difficulty: medium
+    tags: [integration, substitution]
+    prompt: |
+      Which is $\int 2x\,e^{x^2}\,dx$?
+    options:
+      - { id: a, text: "$e^{x^2} + C$" }
+      - { id: b, text: "$x^2 e^{x^2} + C$" }
+      - { id: c, text: "$2e^{x^2} + C$" }
+      - { id: d, text: "$\\frac{e^{x^3}}{3} + C$" }
+    answer: a
+    explanation: |
+      Let $u = x^2$, so $du = 2x\,dx$ and the integral becomes $\int e^u du = e^u + C = e^{x^2} + C$. Spotting "a function and its derivative" is the cue for substitution.
+
+  - id: m1s4-by-parts
+    type: numeric
+    title: Integration by parts
+    difficulty: hard
+    tags: [integration, by-parts]
+    prompt: |
+      Evaluate $\displaystyle\int_0^1 x e^x\,dx$ (three decimals).
+    answer: 1
+    tolerance: 0.001
+    explanation: |
+      With $u = x$, $dv = e^x dx$: $\int x e^x dx = x e^x - e^x$. From 0 to 1: $(e - e) - (0 - 1) = 1$.
+
+  - id: m1s4-average
+    type: numeric
+    title: Average value
+    difficulty: medium
+    tags: [integration, average]
+    prompt: |
+      A server's load over 4 hours is $f(t) = 3t^2$ (thousands of requests per hour). What is the average load over $t \in [0, 4]$?
+    answer: 16
+    tolerance: 0
+    explanation: |
+      $\frac{1}{4 - 0}\int_0^4 3t^2\,dt = \frac{1}{4}\left[t^3\right]_0^4 = \frac{64}{4} = 16$. The average value is the height of the rectangle with the same area as the curve.
+
+  - id: m1s4-signed-area
+    type: mcq_single
+    title: Signed area
+    difficulty: medium
+    tags: [integration, area]
+    prompt: |
+      What is $\int_{-1}^{1} x^3\,dx$, and what is the actual area between $y = x^3$ and the x-axis on $[-1, 1]$?
+    options:
+      - { id: a, text: "Integral 0; area 0.5" }
+      - { id: b, text: "Integral 0.5; area 0.5" }
+      - { id: c, text: "Integral 0; area 0" }
+      - { id: d, text: "Integral 0.25; area 0.25" }
+    answer: a
+    explanation: |
+      The parts below and above the axis cancel: $\frac{1}{4} - \frac{1}{4} = 0$. The area counts both: $2 \times \int_0^1 x^3 dx = 2 \times 0.25 = 0.5$. For area, integrate $|f|$ or split at the zeros.
+
+  - id: m1s4-exponential-prob
+    type: numeric
+    title: A probability as an integral
+    difficulty: medium
+    tags: [integration, probability]
+    prompt: |
+      Time between requests $X$ (seconds) has density $f(x) = 2e^{-2x}$ for $x \ge 0$. What is $P(X \le 1)$? (Three decimals.)
+    answer: 0.865
+    tolerance: 0.001
+    explanation: |
+      $\int_0^1 2e^{-2x}dx = \left[-e^{-2x}\right]_0^1 = 1 - e^{-2} \approx 0.865$. For continuous variables, probabilities are areas under the density.
+
+  - id: m1s4-trapezoid
+    type: code
+    title: The trapezoidal rule
+    difficulty: medium
+    tags: [integration, numerical]
+    prompt: |
+      Implement `trapezoid(xs, ys)`: the area under the points $(x_i, y_i)$ (sorted by $x$) using trapezoids, $\sum_i (x_{i+1} - x_i)\frac{y_i + y_{i+1}}{2}$. Fewer than two points give 0.
+    function:
+      name: trapezoid
+      params:
+        - { name: xs, type: list }
+        - { name: ys, type: list }
+      returns: "float"
+    starter: |
+      def trapezoid(xs, ys):
+          return sum(ys) * (xs[-1] - xs[0]) / len(ys)
+    solution: |
+      def trapezoid(xs, ys):
+          return sum((x1 - x0) * (y0 + y1) / 2 for x0, x1, y0, y1 in zip(xs, xs[1:], ys, ys[1:]))
+    tests:
+      sample:
+        - args: [[0, 1, 2], [0, 1, 4]]
+      hidden:
+        - args: [[0], [5]]
+        - args: [[0, 0.5, 2], [1, 1, 1]]
+        - args: [[0, 0.1, 0.4, 1], [0, 0.6, 0.9, 1]]
+    tolerance: { abs: 1.0e-9, rel: 1.0e-9 }
+    explanation: |
+      Each trapezoid has width $x_{i+1} - x_i$ and average height $(y_i + y_{i+1})/2$; unequal spacing is handled naturally. The last hidden test is an ROC curve: its AUC is 0.825 — `sklearn.metrics.auc` computes exactly this.
+
+  - id: m1s4-auc-meaning
+    type: mcq_single
+    title: What AUC means
+    difficulty: medium
+    tags: [integration, auc, classification]
+    prompt: |
+      A classifier has ROC AUC = 0.5. What does that mean?
+    options:
+      - { id: a, text: "It's correct half the time on every dataset" }
+      - { id: b, text: "It ranks a random positive above a random negative only half the time — no better than chance" }
+      - { id: c, text: "Its precision is 0.5" }
+      - { id: d, text: "It's perfect for half the classes" }
+    answer: b
+    explanation: |
+      AUC is the area under TPR against FPR, which equals the probability that the model scores a random positive above a random negative. 0.5 is the diagonal line of random guessing; 1.0 is a perfect ranking.

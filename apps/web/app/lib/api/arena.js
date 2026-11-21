@@ -9,15 +9,20 @@ const call = (path, { method = "GET", body } = {}) =>
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }).then(readEnvelope);
 
+const areaQ = (area) => (area ? `?area=${encodeURIComponent(area)}` : "");
+
 export const arenaApi = {
-  tracks: () => call("/tracks"),
+  /** area: "ml" | "frontend" | "system-design" (all when omitted) */
+  tracks: (area) => call(`/tracks${areaQ(area)}`),
+  courses: (area) => call(`/courses${areaQ(area)}`),
+  course: (id) => call(`/courses/${encodeURIComponent(id)}`),
   track: (id) => call(`/tracks/${encodeURIComponent(id)}`),
   topic: (id) => call(`/topics/${encodeURIComponent(id)}`),
   item: (id) => call(`/items/${encodeURIComponent(id)}`),
   /** Every matching problem. filters: q, type, difficulty, status, track, tag, list, access */
   problems: (filters = {}) => call(`/problems?${pageQuery(filters)}`),
   /** Curated lists ("SQL interview set", ...), with the learner's progress. */
-  lists: () => call("/lists"),
+  lists: (area) => call(`/lists${areaQ(area)}`),
 
   /** { selectedOptionIds } | { value } | { text } */
   answer: (id, answer) => call(`/items/${encodeURIComponent(id)}/answer`, { method: "POST", body: answer }),
@@ -27,9 +32,9 @@ export const arenaApi = {
     call(`/items/${encodeURIComponent(id)}/code`, { method: "POST", body: { code, mode } }),
   submission: (id) => call(`/submissions/${encodeURIComponent(id)}`),
   submissions: ({ cursor, limit = 20, itemId } = {}) => call(`/submissions?${pageQuery({ cursor, limit, itemId })}`),
-  dashboard: () => call("/me/dashboard"),
-  reviewQueue: () => call("/me/review"),
-  skillMap: () => call("/skill-map"),
+  dashboard: (area) => call(`/me/dashboard${areaQ(area)}`),
+  reviewQueue: (area) => call(`/me/review${areaQ(area)}`),
+  skillMap: (area) => call(`/skill-map${areaQ(area)}`),
   myAssignments: () => call("/me/assignments"),
 
   // Mock interviews and contests (timed sessions)

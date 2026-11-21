@@ -1,0 +1,354 @@
+id: py-oop-1
+title: Object-oriented programming 1
+summary: Classes and objects, __init__ and self, instance vs class attributes, instance, class and static methods, and encapsulation with properties — the shape of every scikit-learn estimator and PyTorch module.
+prerequisites: [py-iterators-generators]
+lesson: |
+  ## 9.1 Classes and objects
+
+  A **class** is a blueprint bundling data (attributes) with behaviour (methods); an **object** (instance) is one thing built from it. You already use them everywhere: a DataFrame, a fitted model, a file. Classes help when several functions share the same state — e.g. a scaler that must remember its fitted mean and standard deviation between `fit` and `transform`.
+
+  ## 9.2 __init__ and self
+
+  ```python
+  class Account:
+      def __init__(self, owner, balance=0):
+          self.owner = owner          # instance attributes
+          self.balance = balance
+
+      def deposit(self, amount):
+          self.balance += amount
+          return self.balance
+  ```
+
+  `__init__` runs when you create an object (`Account("asha")`) and sets up its attributes. `self` is the object the method was called on: `acc.deposit(100)` is `Account.deposit(acc, 100)`. Forgetting `self.` creates a local variable that disappears when the method returns.
+
+  ## 9.3 Instance attributes vs class attributes
+
+  Attributes set on `self` belong to one object. Attributes defined in the class body are **shared** by all instances (good for constants and counters). Reading `obj.x` looks on the object first, then the class. Assigning `obj.x = ...` creates an instance attribute that **shadows** the class one. Never use a mutable class attribute (a list) for per-object data — every instance would share it.
+
+  ## 9.4 Instance, class and static methods
+
+  | Kind | First argument | Use |
+  | --- | --- | --- |
+  | instance method | `self` | works on one object's data |
+  | `@classmethod` | `cls` | alternative constructors: `Point.from_string("3,4")` |
+  | `@staticmethod` | none | a helper that belongs with the class but needs no object |
+
+  ## 9.5 Encapsulation and properties
+
+  Python has no `private`; by convention a leading underscore (`self._balance`) means "internal, don't touch". A **property** looks like an attribute but runs code — for computed values and validation:
+
+  ```python
+  @property
+  def balance(self):
+      return self._balance
+
+  @balance.setter
+  def balance(self, value):
+      if value < 0:
+          raise ValueError("balance can't be negative")
+      self._balance = value
+  ```
+
+  Read-only properties (no setter) protect derived values. `__repr__` (Section 10) makes objects print helpfully.
+items:
+  - id: py9-self
+    type: output
+    title: Forgetting self
+    difficulty: easy
+    tags: [python, oop]
+    prompt: |
+      What does this print?
+    snippet: |
+      class Counter:
+          def __init__(self):
+              self.count = 0
+
+          def bump(self):
+              count = self.count + 1
+
+          def bump_right(self):
+              self.count += 1
+
+      c = Counter()
+      c.bump()
+      c.bump_right()
+      c.bump_right()
+      print(c.count)
+    answer: |
+      2
+    explanation: |
+      `bump` assigns to a **local** `count` that disappears when it returns; only `self.count` changes the object. This slip is common when moving code from functions into classes.
+
+  - id: py9-class-attr
+    type: output
+    title: Shared vs own attributes
+    difficulty: medium
+    tags: [python, oop, attributes]
+    prompt: |
+      What does this print?
+    snippet: |
+      class Model:
+          version = 1
+          history = []
+
+          def __init__(self, name):
+              self.name = name
+
+          def log(self, msg):
+              self.history.append(msg)
+
+      a, b = Model("a"), Model("b")
+      a.version = 2
+      a.log("trained")
+      print(a.version, b.version, Model.version)
+      print(b.history)
+    answer: |
+      2 1 1
+      ['trained']
+    explanation: |
+      `a.version = 2` creates an instance attribute that shadows the class one only for `a`. But `history` is a single list on the class, and `append` mutates it, so `b` sees `a`'s log. Per-object data belongs in `__init__`.
+
+  - id: py9-methods
+    type: mcq_single
+    title: Which kind of method?
+    difficulty: medium
+    tags: [python, oop, methods]
+    prompt: |
+      You want `Dataset.from_csv("data.csv")` to read a file and return a new `Dataset`, and subclasses calling it should get an instance of the subclass. Which kind of method?
+    options:
+      - { id: a, text: "An instance method" }
+      - { id: b, text: "A @classmethod receiving cls" }
+      - { id: c, text: "A @staticmethod" }
+      - { id: d, text: "A property" }
+    answer: b
+    explanation: |
+      Alternative constructors are classmethods: they receive the class (`cls`) and return `cls(...)`, so `ImageDataset.from_csv` builds an `ImageDataset`. Static methods don't know which class they were called on.
+
+  - id: py9-account
+    type: code
+    title: A bank account class
+    difficulty: easy
+    tags: [python, oop]
+    prompt: |
+      Write `class Account` with `__init__(self, owner, balance=0)`, `deposit(amount)` and `withdraw(amount)`. Both return the new balance; `withdraw` raises `ValueError` if the amount exceeds the balance. The test runs a list of operations and records the results (or `"error"`).
+    driver: |
+      def check(ops):
+          acc = Account("asha")
+          out = []
+          for op, amount in ops:
+              try:
+                  out.append(getattr(acc, op)(amount))
+              except ValueError:
+                  out.append("error")
+          return {"results": out, "owner": acc.owner, "balance": acc.balance}
+    function:
+      name: check
+      params:
+        - { name: ops, type: list }
+      returns: "results and final state"
+    starter: |
+      class Account:
+          def __init__(self, owner, balance=0):
+              self.owner = owner
+              self.balance = balance
+
+          def deposit(self, amount):
+              self.balance += amount
+              return self.balance
+
+          def withdraw(self, amount):
+              self.balance -= amount
+              return self.balance
+    solution: |
+      class Account:
+          def __init__(self, owner, balance=0):
+              self.owner = owner
+              self.balance = balance
+
+          def deposit(self, amount):
+              self.balance += amount
+              return self.balance
+
+          def withdraw(self, amount):
+              if amount > self.balance:
+                  raise ValueError("insufficient funds")
+              self.balance -= amount
+              return self.balance
+    tests:
+      sample:
+        - args: [[["deposit", 100], ["withdraw", 30], ["withdraw", 500]]]
+      hidden:
+        - args: [[]]
+        - args: [[["withdraw", 1]]]
+    explanation: |
+      Methods share state through `self`. Raising an exception on an invalid operation keeps the object valid: the failed withdrawal leaves the balance unchanged.
+
+  - id: py9-classmethod
+    type: code
+    title: An alternative constructor
+    difficulty: medium
+    tags: [python, oop, classmethod]
+    prompt: |
+      Write `class Point` with `__init__(self, x, y)`, a `@classmethod from_string(cls, text)` parsing `"3, 4"` (spaces optional), and a method `distance_to(other)` returning the Euclidean distance.
+    driver: |
+      def check(a, b):
+          p = Point.from_string(a)
+          q = Point.from_string(b)
+          return {"p": [p.x, p.y], "distance": round(p.distance_to(q), 6), "same_class": type(p) is Point}
+    function:
+      name: check
+      params:
+        - { name: a, type: str }
+        - { name: b, type: str }
+      returns: "parsed point and distance"
+    starter: |
+      class Point:
+          def __init__(self, x, y):
+              self.x = x
+              self.y = y
+
+          @staticmethod
+          def from_string(text):
+              x, y = text.split(",")
+              return (x, y)
+
+          def distance_to(self, other):
+              return abs(self.x - other.x) + abs(self.y - other.y)
+    solution: |
+      import math
+
+      class Point:
+          def __init__(self, x, y):
+              self.x = x
+              self.y = y
+
+          @classmethod
+          def from_string(cls, text):
+              x, y = (float(part) for part in text.split(","))
+              return cls(x, y)
+
+          def distance_to(self, other):
+              return math.hypot(self.x - other.x, self.y - other.y)
+    tests:
+      sample:
+        - args: ["0, 0", "3,4"]
+      hidden:
+        - args: ["1.5,2", " -1 , -2 "]
+    explanation: |
+      The classmethod converts the parts to numbers (`float` ignores surrounding spaces) and returns `cls(...)`, a real `Point`. `math.hypot` computes $\sqrt{dx^2 + dy^2}$. The starter returns a tuple of strings and uses Manhattan distance.
+
+  - id: py9-property
+    type: code
+    title: Validate with a property
+    difficulty: medium
+    tags: [python, oop, properties]
+    prompt: |
+      Write `class Temperature` storing degrees Celsius with a property `celsius` (setter rejects values below −273.15 with `ValueError`) and a read-only property `fahrenheit` (`c × 9/5 + 32`).
+    driver: |
+      def check(start, updates):
+          t = Temperature(start)
+          log = []
+          for value in updates:
+              try:
+                  t.celsius = value
+                  log.append(round(t.fahrenheit, 2))
+              except ValueError:
+                  log.append("rejected")
+          try:
+              t.fahrenheit = 0
+              read_only = False
+          except AttributeError:
+              read_only = True
+          return {"log": log, "celsius": t.celsius, "fahrenheit_read_only": read_only}
+    function:
+      name: check
+      params:
+        - { name: start, type: float }
+        - { name: updates, type: list }
+      returns: "conversion log and checks"
+    starter: |
+      class Temperature:
+          def __init__(self, celsius):
+              self.celsius = celsius
+              self.fahrenheit = celsius * 9 / 5 + 32
+    solution: |
+      class Temperature:
+          def __init__(self, celsius):
+              self.celsius = celsius
+
+          @property
+          def celsius(self):
+              return self._celsius
+
+          @celsius.setter
+          def celsius(self, value):
+              if value < -273.15:
+                  raise ValueError("below absolute zero")
+              self._celsius = value
+
+          @property
+          def fahrenheit(self):
+              return self._celsius * 9 / 5 + 32
+    tests:
+      sample:
+        - args: [25, [100, -300, 0]]
+      hidden:
+        - args: [0, []]
+    explanation: |
+      The setter validates every assignment, including the one in `__init__`. Computing `fahrenheit` on demand means it can never go stale; the starter stores it once, so it's wrong after `celsius` changes, and anyone can overwrite it.
+
+  - id: py9-scaler
+    type: code
+    title: A tiny scikit-learn-style scaler
+    difficulty: medium
+    tags: [python, oop, ml]
+    prompt: |
+      Write `class StandardScaler` with `fit(values)` (stores the mean and the population standard deviation, returns `self`), and `transform(values)` returning `(x − mean) / std` for each value (use 1 as the std if it's 0). Calling `transform` before `fit` raises `RuntimeError`.
+    driver: |
+      def check(train, test):
+          s = StandardScaler()
+          try:
+              s.transform(test)
+              guarded = False
+          except RuntimeError:
+              guarded = True
+          out = s.fit(train).transform(test)
+          return {"guarded": guarded, "scaled": [round(v, 6) for v in out]}
+    function:
+      name: check
+      params:
+        - { name: train, type: list }
+        - { name: test, type: list }
+      returns: "scaled test values"
+    starter: |
+      class StandardScaler:
+          def fit(self, values):
+              self.mean = sum(values) / len(values)
+
+          def transform(self, values):
+              return [x - self.mean for x in values]
+    solution: |
+      class StandardScaler:
+          def __init__(self):
+              self.mean_ = None
+              self.std_ = None
+
+          def fit(self, values):
+              n = len(values)
+              self.mean_ = sum(values) / n
+              var = sum((x - self.mean_) ** 2 for x in values) / n
+              self.std_ = var ** 0.5 or 1.0
+              return self
+
+          def transform(self, values):
+              if self.mean_ is None:
+                  raise RuntimeError("call fit() first")
+              return [(x - self.mean_) / self.std_ for x in values]
+    tests:
+      sample:
+        - args: [[2, 4, 4, 4, 5, 5, 7, 9], [5, 9]]
+      hidden:
+        - args: [[3, 3, 3], [3, 4]]
+    explanation: |
+      This is scikit-learn's estimator pattern: `fit` learns state (stored with a trailing underscore, like `mean_`), returns `self` so calls chain, and `transform` uses that state. Initialising the attributes in `__init__` makes "not fitted yet" detectable. The starter forgets the std, doesn't return `self`, and crashes with an `AttributeError` before `fit`.

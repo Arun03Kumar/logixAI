@@ -1,0 +1,298 @@
+id: py-exceptions-files
+title: Exceptions and files
+summary: Handling errors with try / except / else / finally, raising and defining your own exceptions, logging, reading and writing text files with context managers, and working with CSV and JSON.
+prerequisites: [py-oop-2]
+lesson: |
+  ## 11.1 Handling exceptions
+
+  ```python
+  try:
+      value = float(text)
+  except ValueError:
+      value = None            # this specific failure is expected and handled
+  else:
+      print("parsed")         # runs only if no exception happened
+  finally:
+      print("always runs")    # cleanup, whatever happened
+  ```
+
+  - Catch **specific** exceptions (`ValueError`, `KeyError`, `FileNotFoundError`). A bare `except:` or `except Exception:` that does nothing hides real bugs.
+  - Keep the `try` block small — only the line that can fail.
+  - `except (KeyError, IndexError) as e:` catches several and gives you the exception object.
+  - Unhandled exceptions travel up the call stack until something catches them or the program stops with a traceback (read it bottom-up: the last line is the error).
+
+  ## 11.2 Raising exceptions, custom exceptions and logging
+
+  `raise ValueError("age must be positive")` signals invalid input — fail loudly at the boundary rather than producing wrong results later. Define your own types for your domain: `class DataValidationError(Exception): pass`, and catch them specifically. `raise NewError(...) from err` chains a new error onto the original. The `logging` module (`logging.warning(...)`, `logger.exception(...)` inside `except`) records what happened with levels and timestamps — use it instead of `print` in pipelines.
+
+  ## 11.3 Text files and context managers
+
+  ```python
+  with open("notes.txt", "w", encoding="utf-8") as f:
+      f.write("first line\n")
+
+  with open("notes.txt", encoding="utf-8") as f:
+      for line in f:             # reads lazily, line by line
+          print(line.rstrip("\n"))
+  ```
+
+  Modes: `"r"` read (default), `"w"` write (truncates!), `"a"` append, `"x"` create-only, `"b"` binary. `with` closes the file even if an exception occurs — the **context manager** protocol (`__enter__`/`__exit__`), also used for locks, database connections and timers. Always pass `encoding="utf-8"`. `pathlib.Path` handles paths: `Path("data") / "raw.csv"`, `.exists()`, `.read_text()`.
+
+  ## 11.4 CSV and JSON
+
+  - `csv.DictReader(f)` yields each row as a dict keyed by the header; `csv.DictWriter` writes dicts. Every CSV value is read as a **string** — convert types yourself (Pandas does this for you). Open CSV files with `newline=""`.
+  - `json.load(f)` / `json.loads(text)` parse JSON into dicts and lists; `json.dump(obj, f, indent=2)` / `json.dumps(obj)` write it. JSON has no tuples, sets or dates — convert them first.
+items:
+  - id: py11-flow
+    type: output
+    title: try, except, else, finally
+    difficulty: medium
+    tags: [python, exceptions]
+    prompt: |
+      What does this print?
+    snippet: |
+      def parse(text):
+          try:
+              value = int(text)
+          except ValueError:
+              print("bad:", text)
+              return None
+          else:
+              print("ok:", value)
+              return value
+          finally:
+              print("checked", text)
+
+      print(parse("42"))
+      print(parse("4x"))
+    answer: |
+      ok: 42
+      checked 42
+      42
+      bad: 4x
+      checked 4x
+      None
+    explanation: |
+      `else` runs only when the `try` succeeded; `finally` runs in every case — even after a `return` — before the function actually returns. That's why cleanup belongs in `finally` (or a `with` block).
+
+  - id: py11-specific
+    type: mcq_single
+    title: What to catch
+    difficulty: easy
+    tags: [python, exceptions]
+    prompt: |
+      Which is the best way to handle rows where `float(row["price"])` may fail because the price is text like `"N/A"`?
+    options:
+      - { id: a, text: "`try: ... except: pass`" }
+      - { id: b, text: "`try: price = float(row[\"price\"]) except ValueError: price = None`" }
+      - { id: c, text: "`try: ... except Exception: print(\"error\")`" }
+      - { id: d, text: "Don't use try; let the program crash" }
+    answer: b
+    explanation: |
+      Catch the specific exception you expect and decide what the value should be. A bare `except` also swallows typos (`NameError`), a missing column (`KeyError`) and even Ctrl+C, so real bugs go unnoticed.
+
+  - id: py11-custom-error
+    type: code
+    title: Validate a record
+    difficulty: medium
+    tags: [python, exceptions, validation]
+    prompt: |
+      Define `class ValidationError(Exception)` and write `validate(record)` that returns the record if it's valid and otherwise raises `ValidationError` with a message:
+
+      - `"missing field: F"` for the first missing of `name`, `age`, `email` (in that order);
+      - `"age must be between 0 and 120"`;
+      - `"invalid email"` if `email` has no `@`.
+
+      The test validates several records and reports each outcome.
+    driver: |
+      def check(records):
+          out = []
+          for r in records:
+              try:
+                  validate(r)
+                  out.append("valid")
+              except ValidationError as e:
+                  out.append(str(e))
+          return {"results": out, "is_exception": issubclass(ValidationError, Exception)}
+    function:
+      name: check
+      params:
+        - { name: records, type: list }
+      returns: "one result per record"
+    starter: |
+      class ValidationError(Exception):
+          pass
+
+      def validate(record):
+          if record["age"] < 0:
+              raise ValueError("bad age")
+          return record
+    solution: |
+      class ValidationError(Exception):
+          pass
+
+      def validate(record):
+          for field in ("name", "age", "email"):
+              if field not in record:
+                  raise ValidationError(f"missing field: {field}")
+          if not 0 <= record["age"] <= 120:
+              raise ValidationError("age must be between 0 and 120")
+          if "@" not in record["email"]:
+              raise ValidationError("invalid email")
+          return record
+    tests:
+      sample:
+        - args: [[{ "name": "a", "age": 30, "email": "a@x.com" }, { "name": "b", "age": 200, "email": "b@x.com" }, { "name": "c", "email": "c@x.com" }]]
+      hidden:
+        - args: [[{ "name": "d", "age": 20, "email": "nope" }, {}]]
+    explanation: |
+      A custom exception type lets callers catch **your** validation failures specifically, without also catching unrelated errors. The starter raises the wrong type and crashes with a `KeyError` on a missing field.
+
+  - id: py11-write-read
+    type: code
+    title: Write and read a text file
+    difficulty: easy
+    tags: [python, files, context-managers]
+    prompt: |
+      Write `save_and_count(path, lines)`: write each string in `lines` to the file at `path`, one per line (UTF-8), then read the file back and return the number of **non-empty** lines. Use `with` for both.
+    driver: |
+      import os, tempfile
+
+      def check(lines):
+          path = os.path.join(tempfile.mkdtemp(), "notes.txt")
+          count = save_and_count(path, lines)
+          with open(path, encoding="utf-8") as f:
+              content = f.read()
+          return {"count": count, "content": content}
+    function:
+      name: check
+      params:
+        - { name: lines, type: list }
+      returns: "count and file content"
+    starter: |
+      def save_and_count(path, lines):
+          f = open(path, "w")
+          for line in lines:
+              f.write(line)
+          return len(lines)
+    solution: |
+      def save_and_count(path, lines):
+          with open(path, "w", encoding="utf-8") as f:
+              for line in lines:
+                  f.write(line + "\n")
+          with open(path, encoding="utf-8") as f:
+              return sum(1 for line in f if line.strip())
+    tests:
+      sample:
+        - args: [["first", "", "third"]]
+      hidden:
+        - args: [[]]
+        - args: [["नमस्ते", "café"]]
+    explanation: |
+      `write` doesn't add newlines — add `"\n"` yourself. Without `with` (or `close()`), buffered data may never reach the disk, so the starter's file can be empty when read. Explicit `encoding="utf-8"` keeps non-English text intact on every operating system.
+
+  - id: py11-csv
+    type: code
+    title: Total sales from a CSV
+    difficulty: medium
+    tags: [python, files, csv]
+    prompt: |
+      Write `sales_by_region(path)`: read a CSV file with columns `region,amount` and return a dict of the total amount per region. Amounts are numbers stored as text; skip rows whose amount isn't a number.
+    driver: |
+      import os, tempfile
+
+      def check(csv_text):
+          path = os.path.join(tempfile.mkdtemp(), "sales.csv")
+          with open(path, "w", encoding="utf-8", newline="") as f:
+              f.write(csv_text)
+          return sales_by_region(path)
+    function:
+      name: check
+      params:
+        - { name: csv_text, type: str }
+      returns: "dict region -> total"
+    starter: |
+      def sales_by_region(path):
+          totals = {}
+          with open(path) as f:
+              for line in f:
+                  region, amount = line.strip().split(",")
+                  totals[region] = totals.get(region, 0) + amount
+          return totals
+    solution: |
+      import csv
+
+      def sales_by_region(path):
+          totals = {}
+          with open(path, encoding="utf-8", newline="") as f:
+              for row in csv.DictReader(f):
+                  try:
+                      amount = float(row["amount"])
+                  except (ValueError, TypeError):
+                      continue
+                  totals[row["region"]] = totals.get(row["region"], 0) + amount
+          return totals
+    tests:
+      sample:
+        - args: ["region,amount\nnorth,100\nsouth,50.5\nnorth,25\n"]
+      hidden:
+        - args: ["region,amount\neast,N/A\neast,10\n"]
+        - args: ["region,amount\n"]
+        - args: ["region,amount\n\"west, coast\",7\n"]
+    explanation: |
+      `csv.DictReader` handles the header, quoting (a region containing a comma) and gives named fields; values are strings, so convert explicitly and skip bad ones. The starter treats the header as data, concatenates strings instead of adding numbers, and breaks on quoted commas.
+
+  - id: py11-json
+    type: code
+    title: Read a JSON config with defaults
+    difficulty: medium
+    tags: [python, files, json]
+    prompt: |
+      Write `load_config(path)`: read a JSON object from the file and return it merged over these defaults: `{"lr": 0.01, "epochs": 10, "layers": [64, 32]}` (file values win). If the file doesn't exist, return the defaults. If it isn't valid JSON, raise `ValueError` with a message starting `"bad config"`.
+    driver: |
+      import os, tempfile
+
+      def check(text):
+          folder = tempfile.mkdtemp()
+          path = os.path.join(folder, "config.json")
+          if text is not None:
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(text)
+          try:
+              return load_config(path)
+          except ValueError as e:
+              return "error: " + str(e)[:10]
+    function:
+      name: check
+      params:
+        - { name: text, type: str }
+      returns: "config or error"
+    starter: |
+      import json
+
+      def load_config(path):
+          with open(path) as f:
+              return json.load(f)
+    solution: |
+      import json
+
+      DEFAULTS = {"lr": 0.01, "epochs": 10, "layers": [64, 32]}
+
+      def load_config(path):
+          try:
+              with open(path, encoding="utf-8") as f:
+                  data = json.load(f)
+          except FileNotFoundError:
+              return dict(DEFAULTS)
+          except json.JSONDecodeError as e:
+              raise ValueError(f"bad config: {e}") from e
+          return {**DEFAULTS, **data}
+    tests:
+      sample:
+        - args: ['{"epochs": 50}']
+      hidden:
+        - args: [null]
+        - args: ["{epochs: 50"]
+        - args: ['{"lr": 0.1, "dropout": 0.2}']
+    explanation: |
+      Handle the expected failures separately: a missing file falls back to defaults; malformed JSON becomes a clear `ValueError` chained (`from e`) to the original error. `{**DEFAULTS, **data}` merges with file values winning. Returning a **copy** of the defaults stops callers from accidentally changing the shared dict.

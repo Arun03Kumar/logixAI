@@ -1,0 +1,352 @@
+id: py-control-flow
+title: Control flow
+summary: Conditions with if / elif / else and the conditional expression, while loops, for loops with range, break / continue / pass and loop-else, and structural pattern matching with match-case.
+prerequisites: [py-basics]
+lesson: |
+  ## 2.1 Conditional statements
+
+  Every business rule is a condition: *if* spend is over 5,000 the customer is Gold; *if* age is missing, flag the row.
+
+  ```python
+  if spend >= 5000:
+      tier = "Gold"
+  elif spend >= 1000:
+      tier = "Silver"
+  else:
+      tier = "Bronze"
+  ```
+
+  - Conditions are checked **top to bottom** and only the **first** true branch runs — order the checks from most to least specific.
+  - Combine conditions with `and`, `or`, `not`; chain comparisons: `18 <= age < 60`.
+  - The **conditional expression** fits a simple choice on one line: `label = "pass" if score >= 40 else "fail"`.
+  - Any value can be a condition (truthiness): `if items:` means "if the list isn't empty".
+
+  ## 2.2 while loops
+
+  `while condition:` repeats as long as the condition is true. Use it when you don't know the number of steps in advance — retrying until success, iterating until an estimate converges. Make sure something inside the loop moves towards ending it, or it runs forever.
+
+  ## 2.3 for loops and range()
+
+  `for item in collection:` visits each element of a list, string, dict (its keys), file (its lines) and more. `range(stop)`, `range(start, stop)`, `range(start, stop, step)` produce integers — `stop` is **excluded**: `range(1, 5)` is 1, 2, 3, 4. Loop over the items directly rather than over indexes; use `enumerate` when you need both (Section 5).
+
+  ## 2.4 break, continue, pass and loop-else
+
+  - `break` leaves the loop immediately; `continue` skips to the next iteration.
+  - `pass` does nothing — a placeholder where a statement is required.
+  - A loop's `else` block runs only if the loop finished **without** `break` — handy for "search, and report if not found".
+
+  ## 2.5 match-case (Python 3.10+)
+
+  `match` compares a value against **patterns**, top to bottom:
+
+  ```python
+  match command:
+      case "start" | "go":
+          ...
+      case ("move", x, y):          # a 3-item sequence, binding x and y
+          ...
+      case {"type": "click", "pos": (x, y)}:   # a dict with these keys
+          ...
+      case _:                        # anything else
+          ...
+  ```
+
+  It shines when parsing structured data like JSON events. For simple value checks, `if`/`elif` is fine.
+items:
+  - id: py2-first-branch
+    type: output
+    title: Only the first true branch
+    difficulty: easy
+    tags: [python, conditions]
+    prompt: |
+      What does this print?
+    snippet: |
+      def tier(spend):
+          if spend >= 1000:
+              return "Silver"
+          elif spend >= 5000:
+              return "Gold"
+          else:
+              return "Bronze"
+
+      print(tier(800), tier(1200), tier(9000))
+    answer: |
+      Bronze Silver Silver
+    explanation: |
+      Branches are checked in order and the first true one wins. 9,000 is also ≥ 1,000, so the `Gold` branch is never reached. Order conditions from most to least specific: check `>= 5000` first.
+
+  - id: py2-ternary
+    type: mcq_single
+    title: The conditional expression
+    difficulty: easy
+    tags: [python, conditions]
+    prompt: |
+      Which line sets `label` to `"adult"` when `age >= 18` and `"minor"` otherwise?
+    options:
+      - { id: a, text: '`label = "adult" if age >= 18 else "minor"`' }
+      - { id: b, text: '`label = if age >= 18 "adult" else "minor"`' }
+      - { id: c, text: '`label = age >= 18 ? "adult" : "minor"`' }
+      - { id: d, text: '`label = "adult" if age >= 18`' }
+    answer: a
+    explanation: |
+      Python's form is `value_if_true if condition else value_if_false`. The `?:` syntax is from C and JavaScript, and the `else` part is required.
+
+  - id: py2-range
+    type: output
+    title: What range produces
+    difficulty: easy
+    tags: [python, loops, range]
+    prompt: |
+      What does this print?
+    snippet: |
+      print(list(range(5)))
+      print(list(range(2, 10, 3)))
+      print(list(range(5, 0, -2)))
+      print(len(range(1, 101)))
+    answer: |
+      [0, 1, 2, 3, 4]
+      [2, 5, 8]
+      [5, 3, 1]
+      100
+    explanation: |
+      `range` starts at `start` (default 0), steps by `step` and stops **before** `stop`. A negative step counts down. `range(1, 101)` has 100 numbers.
+
+  - id: py2-break-continue
+    type: output
+    title: break and continue
+    difficulty: medium
+    tags: [python, loops]
+    prompt: |
+      What does this print?
+    snippet: |
+      for n in [4, -1, 7, 0, 9, 3]:
+          if n < 0:
+              continue
+          if n == 0:
+              break
+          print(n, end=" ")
+      print("done")
+    answer: |
+      4 7 done
+    explanation: |
+      `-1` is skipped by `continue`; `0` triggers `break`, so `9` and `3` are never reached. `end=" "` keeps the numbers on one line.
+
+  - id: py2-loop-else
+    type: output
+    title: The loop's else
+    difficulty: medium
+    tags: [python, loops]
+    prompt: |
+      What does this print?
+    snippet: |
+      def find(items, target):
+          for i, x in enumerate(items):
+              if x == target:
+                  print("found at", i)
+                  break
+          else:
+              print("not found")
+
+      find([3, 8, 5], 8)
+      find([3, 8, 5], 9)
+    answer: |
+      found at 1
+      not found
+    explanation: |
+      A loop's `else` runs only when the loop ends **without** `break`. It replaces the "found = False ... if not found" flag pattern.
+
+  - id: py2-while-converge
+    type: numeric
+    title: Count the halvings
+    difficulty: easy
+    tags: [python, loops]
+    prompt: |
+      How many times does the loop body run?
+      ```python
+      x = 100
+      steps = 0
+      while x > 1:
+          x = x / 2
+          steps += 1
+      ```
+    answer: 7
+    tolerance: 0
+    explanation: |
+      100 → 50 → 25 → 12.5 → 6.25 → 3.125 → 1.5625 → 0.78125: seven halvings until `x > 1` is false. That's $\lceil \log_2 100 \rceil = 7$ — loops that halve run logarithmically many times, like binary search.
+
+  - id: py2-grade
+    type: code
+    title: Grade a score
+    difficulty: easy
+    tags: [python, conditions]
+    prompt: |
+      Write `grade(score)` for a score from 0 to 100: `"A"` for 90 and above, `"B"` for 75–89, `"C"` for 60–74, `"D"` for 40–59 and `"F"` below 40. Scores outside 0–100 return `"invalid"`.
+    function:
+      name: grade
+      params:
+        - { name: score, type: float }
+      returns: "str"
+    starter: |
+      def grade(score):
+          if score >= 40:
+              return "D"
+          elif score >= 60:
+              return "C"
+          elif score >= 75:
+              return "B"
+          elif score >= 90:
+              return "A"
+          return "F"
+    solution: |
+      def grade(score):
+          if not 0 <= score <= 100:
+              return "invalid"
+          if score >= 90:
+              return "A"
+          if score >= 75:
+              return "B"
+          if score >= 60:
+              return "C"
+          if score >= 40:
+              return "D"
+          return "F"
+    tests:
+      sample:
+        - args: [95]
+        - args: [61.5]
+      hidden:
+        - args: [90]
+        - args: [89.9]
+        - args: [40]
+        - args: [39]
+        - args: [-5]
+        - args: [101]
+        - args: [75]
+    explanation: |
+      Validate first, then check thresholds from the top down: once a branch returns, later ones never run, so each later check only needs a lower bound. The starter checks the lowest threshold first, so everything above 40 becomes a "D".
+
+  - id: py2-fizzbuzz-data
+    type: code
+    title: Label the rows
+    difficulty: easy
+    tags: [python, loops, conditions]
+    prompt: |
+      Write `labels(values)` that returns a list with, for each number: `"missing"` if it is `None`, `"negative"` if below 0, `"zero"` if 0, `"large"` if above 1000, otherwise `"ok"`.
+    function:
+      name: labels
+      params:
+        - { name: values, type: list }
+      returns: "list of str"
+    starter: |
+      def labels(values):
+          out = []
+          for v in values:
+              if v < 0:
+                  out.append("negative")
+              else:
+                  out.append("ok")
+          return out
+    solution: |
+      def labels(values):
+          out = []
+          for v in values:
+              if v is None:
+                  out.append("missing")
+              elif v < 0:
+                  out.append("negative")
+              elif v == 0:
+                  out.append("zero")
+              elif v > 1000:
+                  out.append("large")
+              else:
+                  out.append("ok")
+          return out
+    tests:
+      sample:
+        - args: [[5, -2, null, 0, 1500]]
+      hidden:
+        - args: [[]]
+        - args: [[1000, 1000.5, 0.0, null]]
+    explanation: |
+      Check `None` **first**: `None < 0` raises a `TypeError` in Python 3, which is what crashes the starter on missing data. After that, ordered `elif`s give exactly one label per value.
+
+  - id: py2-collatz
+    type: code
+    title: Steps until one
+    difficulty: medium
+    tags: [python, loops]
+    prompt: |
+      Write `collatz_steps(n)` for a positive integer `n`: repeatedly replace `n` with `n // 2` if it's even or `3 * n + 1` if it's odd, and return how many replacements it takes to reach 1 (`collatz_steps(1)` is 0).
+    function:
+      name: collatz_steps
+      params:
+        - { name: n, type: int }
+      returns: "int"
+    starter: |
+      def collatz_steps(n):
+          steps = 0
+          for _ in range(10):
+              n = n // 2 if n % 2 == 0 else 3 * n + 1
+              steps += 1
+          return steps
+    solution: |
+      def collatz_steps(n):
+          steps = 0
+          while n != 1:
+              n = n // 2 if n % 2 == 0 else 3 * n + 1
+              steps += 1
+          return steps
+    tests:
+      sample:
+        - args: [6]
+      hidden:
+        - args: [1]
+        - args: [27]
+        - args: [1024]
+    explanation: |
+      The number of steps isn't known in advance, so a `while` loop with the stopping condition is the right tool; a `for` loop with a fixed count (the starter) stops too early or keeps going past 1. `27` takes 111 steps.
+
+  - id: py2-match-events
+    type: code
+    title: Parse events with match
+    difficulty: medium
+    tags: [python, match-case]
+    prompt: |
+      Events arrive as lists. Write `describe(event)` using `match`:
+
+      - `["login", user]` → `"user USER logged in"`
+      - `["purchase", user, amount]` → `"user USER spent AMOUNT"`
+      - `["logout", user]` → `"user USER left"`
+      - anything else → `"unknown event"`
+    function:
+      name: describe
+      params:
+        - { name: event, type: list }
+      returns: "str"
+    starter: |
+      def describe(event):
+          if event[0] == "login":
+              return f"user {event[1]} logged in"
+          return "unknown event"
+    solution: |
+      def describe(event):
+          match event:
+              case ["login", user]:
+                  return f"user {user} logged in"
+              case ["purchase", user, amount]:
+                  return f"user {user} spent {amount}"
+              case ["logout", user]:
+                  return f"user {user} left"
+              case _:
+                  return "unknown event"
+    tests:
+      sample:
+        - args: [["purchase", "asha", 499]]
+      hidden:
+        - args: [["login", "ravi"]]
+        - args: [["logout", "meera"]]
+        - args: [["login"]]
+        - args: [[]]
+        - args: [["purchase", "x"]]
+    explanation: |
+      Sequence patterns check the **length** and the literal values at the same time, and bind the remaining items to names. `["login"]` (too short) and `[]` fall through to `case _` instead of raising `IndexError` the way `event[1]` does.

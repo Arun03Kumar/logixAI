@@ -16,6 +16,10 @@ import {
   type CodeRunInput,
   type EvaluationJobPayload,
   type ItemStatus,
+  type Area,
+  type CourseModuleView,
+  type CourseSummary,
+  type CourseView,
   type ItemSummary,
   type ItemView,
   type ProblemList,
@@ -29,6 +33,7 @@ import {
   type TrackSummary,
 } from "@logixai/contracts";
 import { BadRequestError, ConflictError, ForbiddenError, InternalServerError, NotFoundError } from "@logixai/service-kit";
+import type { CourseConfig } from "../content/courseConfig.js";
 import { jsHarnessFor, type Catalog, type CatalogItem, type CatalogTopic, type CatalogTrack } from "../content/catalog.js";
 import { buildJudgeProgram, buildSqlJudgeProgram, formatCall } from "../content/harness.js";
 import { buildJsJudgeProgram, formatJsCall } from "../content/harnessJs.js";
@@ -145,6 +150,7 @@ export class ArenaService {
     let items = list ? list.items.map((id) => this.catalog.item(id)!) : this.catalog.items;
     items = items.filter((i) => {
       const status = progress.get(i.id)?.status ?? null;
+      if (query.area && i.area !== query.area) return false;
       if (query.type && i.type !== query.type) return false;
       if (query.difficulty && i.difficulty !== query.difficulty) return false;
       if (query.access && i.access !== query.access) return false;
@@ -176,10 +182,11 @@ export class ArenaService {
     };
   }
 
-  async lists(userId: string | null): Promise<ProblemListSummary[]> {
+  async lists(userId: string | null, area?: Area): Promise<ProblemListSummary[]> {
     const progress = await this.progressMap(userId);
-    return this.catalog.lists.map((l) => ({
+    return this.catalog.lists.filter((l) => !area || l.area === area).map((l) => ({
       id: l.id,
+      area: l.area,
       title: l.title,
       summary: l.summary,
       itemCount: l.items.length,
@@ -190,6 +197,7 @@ export class ArenaService {
   private itemSummary(item: CatalogItem, progress: ProgressMap): ItemSummary {
     return {
       id: item.id,
+      area: item.area,
       title: item.title,
       type: item.type,
       difficulty: item.difficulty,
@@ -208,6 +216,7 @@ export class ArenaService {
   private topicSummary(topic: CatalogTopic, progress: ProgressMap): TopicSummary {
     return {
       id: topic.id,
+      area: topic.area,
       title: topic.title,
       summary: topic.summary,
       prerequisites: topic.prerequisites.map((id) => ({ id, title: this.catalog.topic(id)?.title ?? id })),
@@ -218,8 +227,11 @@ export class ArenaService {
 
   private trackSummary(track: CatalogTrack, progress: ProgressMap): TrackSummary {
     const items = track.topics.flatMap((t) => t.items);
+    const course = this.catalog.courses.find((c) => c.modules.some((m) => m.track === track.id));
     return {
       id: track.id,
+      area: track.area,
+      ...(course ? { courseId: course.id } : {}),
       title: track.title,
       summary: track.summary,
       level: track.level,
@@ -229,9 +241,68 @@ export class ArenaService {
     };
   }
 
-  async listTracks(userId: string | null): Promise<TrackSummary[]> {
+  /* ── Courses ── */
+
+  private courseView(course: CourseConfig, progress: ProgressMap): CourseView {
+    const modules: CourseModuleView[] = course.modules.map((m) => {
+      const track = m.track ? this.catalog.track(m.track) : undefined;
+      const items = track ? track.topics.flatMap((t) => t.items) : [];
+      return {
+        number: m.number,
+        title: m.title,
+        summary: m.summary,
+        status: m.status,
+        trackId: track?.id ?? null,
+        sections: track ? track.topics.map((t) => this.topicSummary(t, progress)) : [],
+        practice: m.practice.map((id) => ({ id, title: this.catalog.track(id)?.title ?? id })),
+        itemCount: items.length,
+        ...this.mastery(items, progress),
+      };
+    });
+    const tracks = course.modules.flatMap((m) => (m.track ? [this.catalog.track(m.track)!] : []));
+    const items = tracks.flatMap((t) => t.topics.flatMap((p) => p.items));
+    let next: CourseView["next"] = null;
+    for (const m of course.modules) {
+      const track = m.track ? this.catalog.track(m.track) : undefined;
+      for (const topic of track?.topics ?? []) {
+        const item = topic.items.find((i) => progress.get(i.id)?.status !== "solved");
+        if (item && !next) next = { itemId: item.id, title: item.title, sectionId: topic.id, sectionTitle: topic.title, moduleNumber: m.number };
+      }
+    }
+    return {
+      id: course.id,
+      area: course.area,
+      title: course.title,
+      summary: course.summary,
+      moduleCount: course.modules.length,
+      availableModules: modules.filter((m) => m.status === "available").length,
+      sectionCount: modules.reduce((n, m) => n + m.sections.length, 0),
+      itemCount: items.length,
+      ...this.mastery(items, progress),
+      modules,
+      next,
+    };
+  }
+
+  async listCourses(userId: string | null, area?: Area): Promise<CourseSummary[]> {
     const progress = await this.progressMap(userId);
-    return this.catalog.tracks.map((t) => this.trackSummary(t, progress));
+    return this.catalog.courses
+      .filter((c) => !area || c.area === area)
+      .map((c) => {
+        const { modules: _modules, next: _next, ...summary } = this.courseView(c, progress);
+        return summary;
+      });
+  }
+
+  async getCourse(userId: string | null, id: string): Promise<CourseView> {
+    const course = this.catalog.courses.find((c) => c.id === id);
+    if (!course) throw new NotFoundError("Course", id);
+    return this.courseView(course, await this.progressMap(userId));
+  }
+
+  async listTracks(userId: string | null, area?: Area): Promise<TrackSummary[]> {
+    const progress = await this.progressMap(userId);
+    return this.catalog.tracks.filter((t) => !area || t.area === area).map((t) => this.trackSummary(t, progress));
   }
 
   async getTrack(userId: string | null, trackId: string): Promise<TrackDetail> {
@@ -358,6 +429,7 @@ export class ArenaService {
     const full = this.itemView(item, null);
     return {
       id: full.id,
+      area: full.area,
       title: full.title,
       type: full.type,
       difficulty: full.difficulty,
@@ -647,6 +719,18 @@ export class ArenaService {
 
   /* ── Dashboard ── */
 
+  private readonly areaServices = new Map<Area, ArenaService>();
+
+  /** This service over one area's catalog: its dashboard, review queue and skill map. */
+  forArea(area: Area): ArenaService {
+    let svc = this.areaServices.get(area);
+    if (!svc) {
+      svc = new ArenaService({ ...this.deps, catalog: this.catalog.forArea(area) });
+      this.areaServices.set(area, svc);
+    }
+    return svc;
+  }
+
   async dashboard(userId: string): Promise<ArenaDashboard> {
     const [stats, progress, submitStats, recent] = await Promise.all([
       this.deps.store.stats.get(userId),
@@ -680,7 +764,7 @@ export class ArenaService {
     return {
       xp,
       ...levelForXp(xp),
-      solvedCount: [...progress.values()].filter((p) => p.status === "solved").length,
+      solvedCount: [...progress.values()].filter((p) => p.status === "solved" && this.catalog.item(p.itemId)).length,
       totalItems: this.catalog.items.length,
       submissionCount: submitStats.total,
       acceptanceRate: submitStats.total ? Math.round((submitStats.passed / submitStats.total) * 100) / 100 : null,

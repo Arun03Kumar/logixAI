@@ -1,0 +1,43 @@
+# Courses: an ordered path of modules. An available module points at a track
+# (its topics are the sections); a planned module has no track yet and lists
+# existing tracks to practise meanwhile. To add a module's material, create
+# its track and replace `status: planned` with `track: <id>`.
+- id: ml-from-zero
+  area: ml
+  title: Machine learning, from zero
+  summary: A complete path for beginners — the maths and Python you need first, then data handling, machine learning, deep learning and LLM applications. Learn each idea, practise it straight away, and track your progress module by module.
+  modules:
+    - number: 1
+      title: Mathematics and statistics
+      summary: Functions, logarithms, vectors and matrices, derivatives and gradients, integrals, counting, descriptive statistics, probability, distributions, estimation and hypothesis testing.
+      track: course-m1-maths
+      practice: [math-for-ml]
+    - number: 2
+      title: Python programming
+      summary: Types, control flow, strings, data structures, comprehensions, functions, decorators, generators, object-oriented programming, exceptions and files.
+      track: course-m2-python
+    - number: 3
+      title: NumPy and Pandas
+      summary: Arrays and vectorised maths, then DataFrames — cleaning, grouping, joining and reshaping real data.
+      status: planned
+      practice: [python-numpy, numpy-interview, pandas-interview]
+    - number: 4
+      title: Data analysis and SQL
+      summary: Querying data with SQL, exploratory analysis and visualisation.
+      status: planned
+      practice: [sql-interview]
+    - number: 5
+      title: Machine learning
+      summary: Train-test splits, regression and classification, evaluation metrics, overfitting and model selection.
+      status: planned
+      practice: [ml-fundamentals]
+    - number: 6
+      title: Deep learning
+      summary: Neural networks and backpropagation, PyTorch, training loops, CNNs and transformers.
+      status: planned
+      practice: [pytorch-interview]
+    - number: 7
+      title: LLMs and agents
+      summary: Retrieval-augmented generation, tool calling and agent loops, and LangGraph.
+      status: planned
+      practice: [llm-agents]

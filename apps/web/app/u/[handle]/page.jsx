@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { CalendarDays, Flame, Sparkles, Target, Trophy } from "lucide-react";
@@ -132,7 +133,7 @@ export default function PublicProfilePage() {
                   <ul className="divide-y divide-border">
                     {p.recent.map((r) => (
                       <li key={r.itemId} className="flex justify-between py-2 text-sm">
-                        <Link href={`/arena/items/${r.itemId}`} className="hover:underline">
+                        <Link href={itemHref(r.area, r.itemId)} className="hover:underline">
                           {r.title}
                         </Link>
                         <span className="text-muted-foreground">{dayFmt.format(new Date(r.solvedAt))}</span>

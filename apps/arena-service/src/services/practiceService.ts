@@ -129,6 +129,7 @@ export class PracticeService {
       return [
         {
           id,
+          area: item.area,
           title: item.title,
           type: item.type,
           difficulty: item.difficulty,
@@ -258,6 +259,7 @@ export class PracticeService {
     return {
       templates: this.catalog.practice.mocks.map((m) => ({
         id: m.id,
+        area: m.area,
         title: m.title,
         summary: m.summary,
         durationMin: m.durationMin,
@@ -404,7 +406,7 @@ export class PracticeService {
       items: started
         ? itemIds.flatMap((iid) => {
             const item = this.item(iid);
-            return item ? [{ id: iid, title: item.title, type: item.type, difficulty: item.difficulty, points: CONTEST_POINTS[item.difficulty] }] : [];
+            return item ? [{ id: iid, area: item.area, title: item.title, type: item.type, difficulty: item.difficulty, points: CONTEST_POINTS[item.difficulty] }] : [];
           })
         : null,
       leaderboard: rows,
@@ -505,7 +507,7 @@ export class PracticeService {
         .filter((r) => r.solvedAt && this.item(r.itemId))
         .sort((a, b) => b.solvedAt!.getTime() - a.solvedAt!.getTime())
         .slice(0, 8)
-        .map((r) => ({ itemId: r.itemId, title: this.item(r.itemId)!.title, solvedAt: r.solvedAt!.toISOString() })),
+        .map((r) => ({ itemId: r.itemId, area: this.item(r.itemId)!.area, title: this.item(r.itemId)!.title, solvedAt: r.solvedAt!.toISOString() })),
       contests,
       mocksCompleted: sessions.filter((s) => s.kind === "mock" && over(s, now)).length,
     };

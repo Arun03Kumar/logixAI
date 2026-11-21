@@ -2,6 +2,7 @@ id: ml-fundamentals
 title: Machine learning fundamentals
 summary: Splitting data without leakage, measuring models honestly, and building linear and logistic regression from scratch.
 level: core
+area: ml
 order: 3
 topics:
   - train-test-split

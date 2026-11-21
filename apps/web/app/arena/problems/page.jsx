@@ -1,4 +1,5 @@
 "use client";
+import { itemHref, useArea } from "@/app/lib/areas";
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -98,6 +99,12 @@ function ListCards({ lists, active, onPick }) {
   );
 }
 
+const PROBLEMS_BLURB = {
+  ml: "Every ML Arena problem in one place — maths, Python, SQL, Pandas, NumPy, ML, PyTorch and LLMs — with filters and curated interview lists.",
+  frontend: "Every JavaScript and React problem, with filters and curated lists.",
+  "system-design": "Every system design problem — runnable components, estimates and design questions.",
+};
+
 function ProblemsPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -108,9 +115,11 @@ function ProblemsPage() {
   const [query, setQuery] = useState(filters.q ?? "");
   const key = params.toString();
 
-  const problems = useApi(() => arenaApi.problems(filters), [key, status], { enabled: status !== "loading" });
-  const lists = useApi(() => arenaApi.lists(), [status], { enabled: status !== "loading" });
-  const tracks = useApi(() => arenaApi.tracks(), []);
+  // Each area has its own problem list: only its problems, lists and tracks.
+  const area = useArea();
+  const problems = useApi(() => arenaApi.problems({ ...filters, area: area.id }), [key, status, area.id], { enabled: status !== "loading" });
+  const lists = useApi(() => arenaApi.lists(area.id), [status, area.id], { enabled: status !== "loading" });
+  const tracks = useApi(() => arenaApi.tracks(area.id), [area.id]);
 
   const setFilter = (name, value) => {
     const next = new URLSearchParams(params);
@@ -131,7 +140,7 @@ function ProblemsPage() {
       <Container size="xl" className="space-y-6">
         <PageHeader
           title="Problems"
-          description="Every ML Arena problem in one place — SQL, Pandas, NumPy, maths and ML — with filters and curated interview lists."
+          description={PROBLEMS_BLURB[area.id]}
         />
 
         <ListCards lists={lists.data ?? []} active={filters.list} onPick={(id) => setFilter("list", id)} />
@@ -216,7 +225,7 @@ function ProblemsPage() {
                 {data.items.map((p) => (
                   <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
                     <StatusIcon status={p.status} />
-                    <Link href={`/arena/items/${p.id}`} className="min-w-0 flex-1 truncate text-sm font-medium hover:text-primary">
+                    <Link href={itemHref(p.area, p.id)} className="min-w-0 flex-1 truncate text-sm font-medium hover:text-primary">
                       {p.title}
                     </Link>
                     {p.access === "pro" ? (

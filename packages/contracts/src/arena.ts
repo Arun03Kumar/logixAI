@@ -39,6 +39,14 @@ export const ACCESS_LEVELS = ["free", "pro"] as const;
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 
 export const TRACK_LEVELS = ["foundations", "core", "interview"] as const;
+
+/**
+ * Areas of the practice platform, each with its own pages and menus: ML
+ * (ML Arena: maths, Python, data, ML, deep learning, LLMs), frontend
+ * (JavaScript and React) and system design. DSA lives in problem-service.
+ */
+export const AREAS = ["ml", "frontend", "system-design"] as const;
+export type Area = (typeof AREAS)[number];
 export type TrackLevel = (typeof TRACK_LEVELS)[number];
 
 /** Experience points for a first solve, by difficulty. Revealing first gives none. */
@@ -60,6 +68,8 @@ export type ItemStatus = "solved" | "attempted" | "revealed";
 
 export interface ItemSummary {
   id: string;
+  /** The area of the item's track. */
+  area: Area;
   title: string;
   type: ArenaItemType;
   difficulty: ArenaDifficulty;
@@ -82,6 +92,7 @@ export interface TopicRef {
 
 export interface TopicSummary {
   id: string;
+  area: Area;
   title: string;
   summary: string;
   prerequisites: TopicRef[];
@@ -93,6 +104,9 @@ export interface TopicSummary {
 
 export interface TrackSummary {
   id: string;
+  area: Area;
+  /** Set when the track is a module of a course. */
+  courseId?: string;
   title: string;
   summary: string;
   level: TrackLevel;
@@ -295,6 +309,7 @@ export const ProblemQuerySchema = z.object({
   tag: z.string().max(60).optional(),
   list: z.string().max(100).optional(),
   access: z.enum(ACCESS_LEVELS).optional(),
+  area: z.enum(AREAS).optional(),
 });
 export type ProblemQuery = z.infer<typeof ProblemQuerySchema>;
 
@@ -315,6 +330,7 @@ export interface ProblemList {
 
 export interface ProblemListSummary {
   id: string;
+  area: Area;
   title: string;
   summary: string;
   itemCount: number;
@@ -455,4 +471,42 @@ export interface BatchReport {
   /** Batch average mastery per topic: where the class needs help. */
   topicAverages: number[];
   rows: BatchReportRow[];
+}
+
+/* ── Courses: ordered modules from zero (e.g. maths, then Python, then ML) ── */
+
+export interface CourseModuleView {
+  number: number;
+  title: string;
+  summary: string;
+  /** planned: announced, no material yet (see `practice`). */
+  status: "available" | "planned";
+  trackId: string | null;
+  /** The module's sections (its track's topics), in order. */
+  sections: TopicSummary[];
+  /** Existing tracks to practise with, especially while the module is planned. */
+  practice: { id: string; title: string }[];
+  itemCount: number;
+  solvedCount: number;
+  mastery: number;
+}
+
+export interface CourseSummary {
+  id: string;
+  area: Area;
+  title: string;
+  summary: string;
+  moduleCount: number;
+  availableModules: number;
+  sectionCount: number;
+  itemCount: number;
+  solvedCount: number;
+  /** Difficulty-weighted progress over available modules, 0..1. */
+  mastery: number;
+}
+
+export interface CourseView extends CourseSummary {
+  modules: CourseModuleView[];
+  /** The first unsolved item in course order (null when everything is solved). */
+  next: { itemId: string; title: string; sectionId: string; sectionTitle: string; moduleNumber: number } | null;
 }

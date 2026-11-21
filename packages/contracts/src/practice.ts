@@ -2,7 +2,7 @@
  * Mock interviews, contests and public profiles (ML Arena / Practice).
  */
 import { z } from "zod";
-import type { ArenaDifficulty, ArenaItemType } from "./arena";
+import type { ArenaDifficulty, ArenaItemType, Area } from "./arena";
 
 /* ── Timed sessions (mock interviews and contests) ── */
 
@@ -11,6 +11,7 @@ export type SessionKind = "mock" | "contest";
 /** One question in a session, with how the learner did on it so far. */
 export interface SessionItemView {
   id: string;
+  area: Area;
   title: string;
   type: ArenaItemType;
   difficulty: ArenaDifficulty;
@@ -67,6 +68,7 @@ export interface SessionSummary {
 
 export interface MockTemplateView {
   id: string;
+  area: Area;
   title: string;
   summary: string;
   durationMin: number;
@@ -114,7 +116,7 @@ export interface LeaderboardRow {
 export interface ContestView extends ContestSummary {
   rules: string;
   /** Hidden until the contest starts. */
-  items: { id: string; title: string; type: ArenaItemType; difficulty: ArenaDifficulty; points: number }[] | null;
+  items: { id: string; area: Area; title: string; type: ArenaItemType; difficulty: ArenaDifficulty; points: number }[] | null;
   leaderboard: LeaderboardRow[];
   myRow: LeaderboardRow | null;
   mySession: SessionSummary | null;
@@ -150,7 +152,7 @@ export interface PublicProfile {
   /** Days with practice in the last 12 weeks: "YYYY-MM-DD" -> items solved. */
   activity: Record<string, number>;
   tracks: { id: string; title: string; solved: number; total: number }[];
-  recent: { itemId: string; title: string; solvedAt: string }[];
+  recent: { itemId: string; area: Area; title: string; solvedAt: string }[];
   contests: { id: string; title: string; rank: number; participants: number; points: number }[];
   mocksCompleted: number;
 }

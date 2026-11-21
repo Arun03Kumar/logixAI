@@ -1,0 +1,218 @@
+id: maths-distributions
+title: Random variables and distributions
+summary: Random variables, PMF, PDF and CDF, expectation and variance; the Bernoulli, binomial and Poisson distributions; uniform, exponential and normal; the t-distribution with a preview of chi-square and F; and the law of large numbers and central limit theorem.
+prerequisites: [maths-probability, maths-integration]
+lesson: |
+  ## 8.1 Random variables, PMF, PDF, CDF, expectation and variance
+
+  A **random variable** assigns a number to each outcome. A **discrete** one has a probability mass function $P(X = x)$; a **continuous** one has a density $f(x)$ whose areas are probabilities. The **CDF** $F(x) = P(X \le x)$ works for both.
+
+  $$E[X] = \sum x\,P(x) \;\text{ or }\; \int x f(x)\,dx \qquad \text{Var}(X) = E[(X - \mu)^2] = E[X^2] - \mu^2$$
+
+  Rules: $E[aX + b] = aE[X] + b$, $\text{Var}(aX + b) = a^2\text{Var}(X)$; for independent variables, variances add.
+
+  ## 8.2 Discrete distributions
+
+  | Distribution | Models | PMF | Mean | Variance |
+  | --- | --- | --- | --- | --- |
+  | Bernoulli($p$) | one yes/no trial (click or not) | $p^x(1-p)^{1-x}$ | $p$ | $p(1-p)$ |
+  | Binomial($n, p$) | successes in $n$ trials | $\binom{n}{k}p^k(1-p)^{n-k}$ | $np$ | $np(1-p)$ |
+  | Poisson($\lambda$) | count of events in an interval (calls per minute) | $\frac{\lambda^k e^{-\lambda}}{k!}$ | $\lambda$ | $\lambda$ |
+
+  ## 8.3 Continuous distributions
+
+  - **Uniform**($a, b$): equally likely in $[a, b]$; mean $\frac{a+b}{2}$, variance $\frac{(b-a)^2}{12}$.
+  - **Exponential**($\lambda$): waiting time between Poisson events; $P(X > t) = e^{-\lambda t}$, mean $1/\lambda$; memoryless.
+  - **Normal**($\mu, \sigma^2$): the bell curve. About 68% of values lie within $1\sigma$, 95% within $2\sigma$ (1.96 exactly), 99.7% within $3\sigma$. Standardise with $z = (x - \mu)/\sigma$ and use the standard normal table or `scipy.stats.norm`.
+
+  ## 8.4 Student's t-distribution (and a preview of χ² and F)
+
+  When the population $\sigma$ is unknown and estimated from a small sample, $\frac{\bar x - \mu}{s/\sqrt n}$ follows a **t-distribution** with $n - 1$ degrees of freedom: bell-shaped with heavier tails, approaching the normal as $n$ grows. The **χ²** distribution (sums of squared standard normals) is used for variance and categorical tests; the **F** distribution (a ratio of variances) for ANOVA — both appear in Section 10.
+
+  ## 8.5 Law of Large Numbers and Central Limit Theorem
+
+  - **LLN**: the sample mean converges to the true mean as $n$ grows — why averages over more data are more reliable.
+  - **CLT**: the mean of $n$ independent observations is approximately **normal** with mean $\mu$ and standard deviation $\sigma/\sqrt n$, whatever the original distribution (for reasonably large $n$, often $\ge 30$). It's why confidence intervals and A/B tests can use the normal distribution even for skewed data like revenue.
+items:
+  - id: m1s8-expectation
+    type: numeric
+    title: Expected value
+    difficulty: easy
+    tags: [distributions, expectation]
+    prompt: |
+      A promotion pays ₹500 with probability 0.1, ₹100 with probability 0.3 and nothing otherwise. What is the expected payout per customer (in rupees)?
+    answer: 80
+    tolerance: 0
+    explanation: |
+      $500 \times 0.1 + 100 \times 0.3 + 0 \times 0.6 = 50 + 30 = 80$. Expected value weights each outcome by its probability; it's the long-run average cost per customer.
+
+  - id: m1s8-variance-rules
+    type: numeric
+    title: Variance of a transformed variable
+    difficulty: medium
+    tags: [distributions, variance]
+    prompt: |
+      $X$ has mean 10 and variance 4. What is the variance of $Y = 3X - 5$?
+    answer: 36
+    tolerance: 0
+    explanation: |
+      $\text{Var}(aX + b) = a^2 \text{Var}(X) = 9 \times 4 = 36$. Shifting by $-5$ doesn't change spread; scaling by 3 multiplies the standard deviation by 3 and the variance by 9.
+
+  - id: m1s8-binomial
+    type: numeric
+    title: Binomial probability
+    difficulty: medium
+    tags: [distributions, binomial]
+    prompt: |
+      An ad has a 10% click rate. Shown to 5 independent users, what is the probability that **exactly 2** click? (Four decimals.)
+    answer: 0.0729
+    tolerance: 0.0001
+    explanation: |
+      $\binom{5}{2}(0.1)^2(0.9)^3 = 10 \times 0.01 \times 0.729 = 0.0729$. The binomial counts successes in a fixed number of independent yes/no trials.
+
+  - id: m1s8-poisson
+    type: numeric
+    title: Poisson arrivals
+    difficulty: medium
+    tags: [distributions, poisson]
+    prompt: |
+      A support desk gets on average 3 calls per minute. Assuming a Poisson process, what is the probability of **no** calls in a given minute? (Four decimals.)
+    answer: 0.0498
+    tolerance: 0.0001
+    explanation: |
+      $P(0) = \frac{3^0 e^{-3}}{0!} = e^{-3} \approx 0.0498$. Poisson models counts of independent events at a constant average rate; its mean and variance are both $\lambda$.
+
+  - id: m1s8-normal-rule
+    type: mcq_single
+    title: The 68–95–99.7 rule
+    difficulty: easy
+    tags: [distributions, normal]
+    prompt: |
+      Exam scores are normal with mean 70 and standard deviation 8. About what percentage scored between 54 and 86?
+    options:
+      - { id: a, text: "68%" }
+      - { id: b, text: "95%" }
+      - { id: c, text: "99.7%" }
+      - { id: d, text: "50%" }
+    answer: b
+    explanation: |
+      54 and 86 are $70 \pm 2 \times 8$, two standard deviations either side, which covers about 95%.
+
+  - id: m1s8-zscore
+    type: numeric
+    title: Normal probability with z
+    difficulty: medium
+    tags: [distributions, normal, z-score]
+    prompt: |
+      Delivery times are normal with mean 30 minutes and standard deviation 5. Using $P(Z \le 1.6) = 0.9452$, what is the probability a delivery takes **more than** 38 minutes? (Four decimals.)
+    answer: 0.0548
+    tolerance: 0.0001
+    explanation: |
+      $z = (38 - 30)/5 = 1.6$, and $P(X > 38) = 1 - 0.9452 = 0.0548$. Standardising turns every normal question into one about the standard normal.
+
+  - id: m1s8-exponential
+    type: numeric
+    title: Exponential waiting time
+    difficulty: medium
+    tags: [distributions, exponential]
+    prompt: |
+      Requests arrive at 2 per second (Poisson), so waiting times are exponential with $\lambda = 2$. What is the probability of waiting more than 1 second for the next request? (Four decimals.)
+    answer: 0.1353
+    tolerance: 0.0001
+    explanation: |
+      $P(X > 1) = e^{-2 \times 1} = e^{-2} \approx 0.1353$; the mean wait is $1/\lambda = 0.5$ s. Exponential waiting times are memoryless: having waited already doesn't change the chance of waiting another second.
+
+  - id: m1s8-clt
+    type: mcq_single
+    title: The central limit theorem
+    difficulty: medium
+    tags: [distributions, clt]
+    prompt: |
+      Daily revenue per user is heavily right-skewed with standard deviation ₹400. You average it over 10,000 random users. Which is true about that average?
+    options:
+      - { id: a, text: "It's just as skewed as individual revenue" }
+      - { id: b, text: "It's approximately normal, with standard deviation about ₹4" }
+      - { id: c, text: "It's approximately normal, with standard deviation ₹400" }
+      - { id: d, text: "Its distribution can't be known without the original distribution" }
+    answer: b
+    explanation: |
+      By the CLT the mean of many independent observations is approximately normal with standard error $\sigma/\sqrt n = 400/\sqrt{10000} = 4$. That's why A/B tests on revenue can use normal-based tests despite skewed raw data.
+
+  - id: m1s8-scipy
+    type: code
+    title: Probabilities with scipy.stats
+    difficulty: medium
+    tags: [distributions, scipy]
+    prompt: |
+      Write `probabilities()` returning a dict, each value rounded to 4 decimals, computed with `scipy.stats`:
+
+      - `binom_at_most_3`: $P(X \le 3)$ for Binomial($n = 20, p = 0.1$);
+      - `poisson_at_least_5`: $P(X \ge 5)$ for Poisson($\lambda = 3$);
+      - `normal_between`: $P(-1 < Z < 2)$ for the standard normal;
+      - `t_critical`: the value $t$ with 97.5% of the t-distribution (10 degrees of freedom) below it.
+    function:
+      name: probabilities
+      params:
+        - { name: unused, type: int }
+      returns: "dict"
+    starter: |
+      from scipy import stats
+
+      def probabilities(unused):
+          return {
+              "binom_at_most_3": round(stats.binom.pmf(3, 20, 0.1), 4),
+              "poisson_at_least_5": round(1 - stats.poisson.cdf(5, 3), 4),
+              "normal_between": round(stats.norm.cdf(2) - stats.norm.cdf(1), 4),
+              "t_critical": round(stats.norm.ppf(0.975), 4),
+          }
+    solution: |
+      from scipy import stats
+
+      def probabilities(unused):
+          return {
+              "binom_at_most_3": round(float(stats.binom.cdf(3, 20, 0.1)), 4),
+              "poisson_at_least_5": round(float(stats.poisson.sf(4, 3)), 4),
+              "normal_between": round(float(stats.norm.cdf(2) - stats.norm.cdf(-1)), 4),
+              "t_critical": round(float(stats.t.ppf(0.975, 10)), 4),
+          }
+    tests:
+      sample:
+        - args: [0]
+    explanation: |
+      `cdf` gives $P(X \le x)$ (`pmf` only $P(X = x)$); `sf` is $1 - \text{cdf}$, so $P(X \ge 5) = $ `sf(4)` for a discrete variable — `1 - cdf(5)` would be $P(X \ge 6)$. `ppf` inverts the CDF: the t critical value 2.2281 is wider than the normal's 1.96, reflecting the extra uncertainty with small samples.
+
+  - id: m1s8-clt-sim
+    type: code
+    title: See the CLT in action
+    difficulty: hard
+    tags: [distributions, clt, simulation]
+    prompt: |
+      Write `sample_means(n, reps, seed)`: using `np.random.default_rng(seed)`, draw `reps` samples of size `n` from an exponential distribution with mean 1 (`rng.exponential(1.0, size=(reps, n))`), compute each sample's mean, and return `[mean_of_means, std_of_means]` (population std, `ddof=0`), each rounded to 3 decimals.
+    function:
+      name: sample_means
+      params:
+        - { name: n, type: int }
+        - { name: reps, type: int }
+        - { name: seed, type: int }
+      returns: "[mean, std]"
+    starter: |
+      import numpy as np
+
+      def sample_means(n, reps, seed):
+          rng = np.random.default_rng(seed)
+          data = rng.exponential(1.0, size=(reps, n))
+          return [round(float(data.mean()), 3), round(float(data.std()), 3)]
+    solution: |
+      import numpy as np
+
+      def sample_means(n, reps, seed):
+          rng = np.random.default_rng(seed)
+          means = rng.exponential(1.0, size=(reps, n)).mean(axis=1)
+          return [round(float(means.mean()), 3), round(float(means.std()), 3)]
+    tests:
+      sample:
+        - args: [100, 2000, 0]
+      hidden:
+        - args: [4, 5000, 1]
+    explanation: |
+      The exponential has mean 1 and standard deviation 1, so the means of samples of 100 cluster around 1 with spread close to $1/\sqrt{100} = 0.1$, and their histogram looks normal even though the data is skewed. The starter measures the spread of the raw data (about 1) instead of the spread of the means.

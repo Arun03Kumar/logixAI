@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import Link from "next/link";
 import { Lock } from "lucide-react";
 import { Button, Card } from "@logixai/ui";
@@ -20,7 +21,7 @@ export default function ProLock({ item, signedIn }) {
           </p>
         </div>
         <Button asChild variant="primary">
-          <Link href={signedIn ? "/pricing" : `/login?next=/arena/items/${item.id}`}>
+          <Link href={signedIn ? "/pricing" : `/login?next=${itemHref(item.area, item.id)}`}>
             {signedIn ? "See Pro plans" : "Sign in"}
           </Link>
         </Button>

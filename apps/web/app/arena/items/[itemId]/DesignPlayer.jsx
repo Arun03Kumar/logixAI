@@ -1,4 +1,5 @@
 "use client";
+import { itemHref } from "@/app/lib/areas";
 import { useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
@@ -115,7 +116,7 @@ export default function DesignPlayer({ item, signedIn, onItemChange, inSession =
             </>
           ) : (
             <Button asChild variant="primary" size="sm" className="ml-auto">
-              <Link href={`/login?next=/arena/items/${item.id}`}>Sign in to submit</Link>
+              <Link href={`/login?next=${itemHref(item.area, item.id)}`}>Sign in to submit</Link>
             </Button>
           )}
         </div>
@@ -175,7 +176,7 @@ export default function DesignPlayer({ item, signedIn, onItemChange, inSession =
           ) : null}
           {item.nextItem ? (
             <Button asChild size="sm">
-              <Link href={`/arena/items/${item.nextItem.id}`}>
+              <Link href={itemHref(item.area, item.nextItem.id)}>
                 Next: {item.nextItem.title}
                 <ArrowRight />
               </Link>

@@ -56,7 +56,7 @@ function ActivityGrid({ activity }) {
 }
 
 function Dashboard() {
-  const dash = useApi(() => arenaApi.dashboard(), []);
+  const dash = useApi(() => arenaApi.dashboard("ml"), []);
   if (dash.loading) {
     return (
       <div className="grid gap-3 sm:grid-cols-4">

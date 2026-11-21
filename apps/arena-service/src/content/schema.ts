@@ -3,7 +3,7 @@
  * content/<track>/<topic>.yaml). Everything here, including answers and
  * reference solutions, stays on the server.
  */
-import { ACCESS_LEVELS, ARENA_DIFFICULTIES, METRICS, TRACK_LEVELS } from "@logixai/contracts";
+import { ACCESS_LEVELS, AREAS, ARENA_DIFFICULTIES, METRICS, TRACK_LEVELS } from "@logixai/contracts";
 import { z } from "@logixai/service-kit";
 
 const Slug = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "lowercase-words-with-dashes");
@@ -16,6 +16,8 @@ export const TrackFileSchema = z.object({
   title: z.string().min(1),
   summary: z.string().min(1),
   level: z.enum(TRACK_LEVELS),
+  /** Which part of the platform shows it: ml (ML Arena), frontend or system-design. */
+  area: z.enum(AREAS),
   order: z.number().int(),
   /** Topic ids in learning order; each has a <id>.yaml next to this file. */
   topics: z.array(Slug).min(1),
@@ -280,6 +282,8 @@ export type TopicFile = z.output<typeof TopicFileSchema>;
 export const ListsFileSchema = z.array(
   z.object({
     id: Slug,
+    /** Lists belong to one area; every item must be from it. */
+    area: z.enum(AREAS),
     title: z.string().min(1),
     summary: z.string().min(1),
     items: z.array(Slug).min(1),

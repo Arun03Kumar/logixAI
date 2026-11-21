@@ -1,0 +1,341 @@
+id: py-functional
+title: Functional programming and decorators
+summary: Functions as values — higher-order functions and lambda, map / filter / reduce, closures and function factories, decorators (with and without arguments), and the functools and operator toolkits.
+prerequisites: [py-functions]
+lesson: |
+  ## 7.1 First-class functions, higher-order functions and lambda
+
+  Functions are **values**: you can store them in variables, put them in dicts and pass them to other functions. A **higher-order function** takes or returns a function — `sorted(xs, key=len)` takes one. `lambda x: x * 2` is a small anonymous function (one expression, no statements); use it for short keys and callbacks, and `def` for anything you'd want to name or test.
+
+  ```python
+  metrics = {"mean": lambda xs: sum(xs) / len(xs), "max": max}
+  metrics["mean"]([1, 2, 3])    # 2.0
+  ```
+
+  ## 7.2 map, filter and reduce
+
+  `map(f, xs)` applies `f` to each item; `filter(pred, xs)` keeps items where `pred` is true; `functools.reduce(f, xs, start)` folds a sequence into one value. `map` and `filter` return lazy iterators — wrap in `list()` to see them. Comprehensions are usually clearer than `map`/`filter` with a lambda.
+
+  ## 7.3 Closures and function factories
+
+  An inner function **remembers** the variables of the function that created it, even after that function returned — a **closure**:
+
+  ```python
+  def make_scaler(lo, hi):
+      def scale(x):
+          return (x - lo) / (hi - lo)
+      return scale
+
+  to_unit = make_scaler(0, 200)     # remembers lo=0, hi=200
+  ```
+
+  To *change* an enclosing variable, declare it `nonlocal`. Watch out for late binding: lambdas created in a loop all see the loop variable's **final** value unless you bind it (`lambda x, k=k: ...`).
+
+  ## 7.4 Decorators
+
+  A decorator takes a function and returns a wrapped one; `@timer` above `def f` means `f = timer(f)`.
+
+  ```python
+  import functools
+
+  def log_calls(func):
+      @functools.wraps(func)          # keeps func's name and docstring
+      def wrapper(*args, **kwargs):
+          result = func(*args, **kwargs)
+          print(f"{func.__name__} -> {result}")
+          return result
+      return wrapper
+  ```
+
+  A decorator **with arguments** is a function that returns a decorator: `@retry(times=3)`. Typical uses: timing, logging, caching, retries, access checks, input validation.
+
+  ## 7.5 functools and operator
+
+  - `functools.lru_cache` / `cache` memoise pure functions; `partial(f, x=1)` pre-fills arguments; `reduce` folds; `wraps` preserves metadata.
+  - `operator.itemgetter("age")`, `attrgetter("score")` and `operator.add`, `mul` replace simple lambdas: `sorted(rows, key=itemgetter("age"))`.
+items:
+  - id: py7-functions-as-values
+    type: output
+    title: Functions in a dict
+    difficulty: easy
+    tags: [python, functions, higher-order]
+    prompt: |
+      What does this print?
+    snippet: |
+      ops = {"double": lambda x: x * 2, "square": lambda x: x ** 2, "neg": abs}
+      print([ops[name](-3) for name in ["double", "square", "neg"]])
+      print(sorted(["kiwi", "fig", "banana"], key=len))
+    answer: |
+      [-6, 9, 3]
+      ['fig', 'kiwi', 'banana']
+    explanation: |
+      Functions are ordinary values, so a dict can map names to behaviour — a clean alternative to long `if/elif` chains. `key=len` passes the built-in `len` itself (no brackets), not the result of calling it.
+
+  - id: py7-map-filter-reduce
+    type: output
+    title: map, filter, reduce
+    difficulty: easy
+    tags: [python, functional]
+    prompt: |
+      What does this print?
+    snippet: |
+      from functools import reduce
+      nums = [1, 2, 3, 4, 5]
+      print(list(map(lambda x: x * 10, nums)))
+      print(list(filter(lambda x: x % 2, nums)))
+      print(reduce(lambda acc, x: acc * x, nums, 1))
+      m = map(str, nums)
+      print(list(m), list(m))
+    answer: |
+      [10, 20, 30, 40, 50]
+      [1, 3, 5]
+      120
+      ['1', '2', '3', '4', '5'] []
+    explanation: |
+      `filter` keeps items whose result is truthy (`x % 2` is 1 for odd numbers). `reduce` multiplies everything together, starting from 1. `map` returns a **one-shot iterator**: the second `list(m)` finds it exhausted.
+
+  - id: py7-closure
+    type: output
+    title: Closures remember
+    difficulty: medium
+    tags: [python, closures]
+    prompt: |
+      What does this print?
+    snippet: |
+      def make_counter():
+          count = 0
+          def bump():
+              nonlocal count
+              count += 1
+              return count
+          return bump
+
+      a, b = make_counter(), make_counter()
+      print(a(), a(), b(), a())
+    answer: |
+      1 2 1 3
+    explanation: |
+      Each call to `make_counter` creates a new `count`, and the returned function keeps its own. `nonlocal` lets `bump` change it; without it, `count += 1` would raise `UnboundLocalError`.
+
+  - id: py7-late-binding
+    type: output
+    title: Lambdas in a loop
+    difficulty: hard
+    tags: [python, closures]
+    prompt: |
+      What does this print?
+    snippet: |
+      fs = [lambda x: x * k for k in range(3)]
+      print([f(10) for f in fs])
+      gs = [lambda x, k=k: x * k for k in range(3)]
+      print([g(10) for g in gs])
+    answer: |
+      [20, 20, 20]
+      [0, 10, 20]
+    explanation: |
+      Closures capture **variables, not values**: all three lambdas look up `k` when called, after the loop has left it at 2. A default argument (`k=k`) is evaluated at definition time, capturing each value — the standard fix.
+
+  - id: py7-make-scaler
+    type: code
+    title: A function factory
+    difficulty: easy
+    tags: [python, closures, scaling]
+    prompt: |
+      Write `make_scaler(values)` that learns the min and max of `values` and **returns a function** mapping any `x` to `(x - min) / (max - min)` — like a scaler's `fit` and `transform`. The test fits on one list and transforms another.
+    driver: |
+      def check(train, test):
+          scale = make_scaler(train)
+          return [round(scale(x), 6) for x in test]
+    function:
+      name: check
+      params:
+        - { name: train, type: list }
+        - { name: test, type: list }
+      returns: "scaled test values"
+    starter: |
+      def make_scaler(values):
+          def scale(x):
+              return (x - min([x])) / (max([x]) - min([x]) or 1)
+          return scale
+    solution: |
+      def make_scaler(values):
+          lo, hi = min(values), max(values)
+          def scale(x):
+              return (x - lo) / (hi - lo)
+          return scale
+    tests:
+      sample:
+        - args: [[0, 50, 200], [100, 0, 250]]
+      hidden:
+        - args: [[10, 20], [15, 5]]
+    explanation: |
+      The statistics are computed once, from the **training** data, and the closure remembers them — exactly why ML pipelines fit a scaler on the training set and reuse it unchanged on test data (refitting on test data leaks information). Values outside the training range map outside [0, 1].
+
+  - id: py7-decorator-calls
+    type: code
+    title: Count calls with a decorator
+    difficulty: medium
+    tags: [python, decorators]
+    prompt: |
+      Write a decorator `count_calls` that counts how many times the decorated function is called, storing the count in an attribute `calls` on the wrapper. Keep the original function's `__name__` (use `functools.wraps`).
+    driver: |
+      def check(inputs):
+          @count_calls
+          def square(x):
+              return x * x
+          results = [square(x) for x in inputs]
+          return {"results": results, "calls": square.calls, "name": square.__name__}
+    function:
+      name: check
+      params:
+        - { name: inputs, type: list }
+      returns: "results, call count and name"
+    starter: |
+      def count_calls(func):
+          def wrapper(*args, **kwargs):
+              wrapper.calls = 1
+              return func(*args, **kwargs)
+          wrapper.calls = 0
+          return wrapper
+    solution: |
+      import functools
+
+      def count_calls(func):
+          @functools.wraps(func)
+          def wrapper(*args, **kwargs):
+              wrapper.calls += 1
+              return func(*args, **kwargs)
+          wrapper.calls = 0
+          return wrapper
+    tests:
+      sample:
+        - args: [[1, 2, 3]]
+      hidden:
+        - args: [[]]
+    explanation: |
+      The wrapper accepts `*args, **kwargs` so it works for any signature, does its extra work, then calls the original. `functools.wraps` copies `__name__` and the docstring, so logs and tracebacks show `square`, not `wrapper`.
+
+  - id: py7-retry-decorator
+    type: code
+    title: A retry decorator with arguments
+    difficulty: hard
+    tags: [python, decorators, error-handling]
+    prompt: |
+      Write `retry(times)`, a decorator **factory**: `@retry(times=3)` calls the function again when it raises an exception, up to `times` attempts in total, then re-raises the last exception. The test wraps a function that fails a given number of times.
+    driver: |
+      def check(failures, times):
+          attempts = []
+
+          @retry(times=times)
+          def flaky():
+              attempts.append(1)
+              if len(attempts) <= failures:
+                  raise ConnectionError("try again")
+              return "ok"
+
+          try:
+              outcome = flaky()
+          except ConnectionError:
+              outcome = "gave up"
+          return {"outcome": outcome, "attempts": len(attempts)}
+    function:
+      name: check
+      params:
+        - { name: failures, type: int }
+        - { name: times, type: int }
+      returns: "outcome and attempts"
+    starter: |
+      def retry(times):
+          def decorator(func):
+              def wrapper(*args, **kwargs):
+                  try:
+                      return func(*args, **kwargs)
+                  except Exception:
+                      return None
+              return wrapper
+          return decorator
+    solution: |
+      import functools
+
+      def retry(times):
+          def decorator(func):
+              @functools.wraps(func)
+              def wrapper(*args, **kwargs):
+                  for attempt in range(1, times + 1):
+                      try:
+                          return func(*args, **kwargs)
+                      except Exception:
+                          if attempt == times:
+                              raise
+              return wrapper
+          return decorator
+    tests:
+      sample:
+        - args: [2, 3]
+      hidden:
+        - args: [0, 3]
+        - args: [5, 3]
+        - args: [1, 1]
+    explanation: |
+      Three layers: `retry(times)` returns the decorator, the decorator receives the function, and the wrapper runs it. A bare `raise` inside `except` re-raises the current exception with its traceback. Swallowing errors and returning `None` (the starter) hides failures — the caller can't tell "no result" from "it broke".
+
+  - id: py7-lru-cache
+    type: code
+    title: Memoise with lru_cache
+    difficulty: medium
+    tags: [python, functools, caching]
+    prompt: |
+      Write `ways(n)`: the number of ways to climb `n` stairs taking 1 or 2 steps at a time (`ways(0) == 1`, `ways(1) == 1`). It must be fast — the test checks `ways(32)` takes well under 0.2 seconds. Use `functools.lru_cache` (or `cache`).
+    driver: |
+      import time
+
+      def check(n):
+          start = time.perf_counter()
+          value = ways(n)
+          return {"value": value, "under_0_2_seconds": time.perf_counter() - start < 0.2}
+    function:
+      name: check
+      params:
+        - { name: n, type: int }
+      returns: "the count and whether it was fast"
+    starter: |
+      def ways(n):
+          if n <= 1:
+              return 1
+          return ways(n - 1) + ways(n - 2)
+    solution: |
+      from functools import lru_cache
+
+      @lru_cache(maxsize=None)
+      def ways(n):
+          if n <= 1:
+              return 1
+          return ways(n - 1) + ways(n - 2)
+    tests:
+      sample:
+        - args: [5]
+      hidden:
+        - args: [0]
+        - args: [32]
+    explanation: |
+      Plain recursion recomputes the same subproblems exponentially often (about $1.6^n$ calls: millions for `ways(32)`, and `ways(90)` would never finish). Caching makes each `n` computed once, so it's linear. `lru_cache` only works for pure functions with hashable arguments.
+
+  - id: py7-itemgetter
+    type: output
+    title: operator.itemgetter
+    difficulty: easy
+    tags: [python, operator, sorting]
+    prompt: |
+      What does this print?
+    snippet: |
+      from operator import itemgetter
+      from functools import partial
+      rows = [{"name": "ravi", "age": 31}, {"name": "asha", "age": 24}]
+      print([r["name"] for r in sorted(rows, key=itemgetter("age"))])
+      power_of_two = partial(pow, 2)
+      print(power_of_two(10))
+    answer: |
+      ['asha', 'ravi']
+      1024
+    explanation: |
+      `itemgetter("age")` is a ready-made `lambda r: r["age"]`. `partial(pow, 2)` fixes the first argument, giving a one-argument function `2 ** x`.

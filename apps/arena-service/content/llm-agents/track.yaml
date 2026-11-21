@@ -2,6 +2,7 @@ id: llm-agents
 title: LLM apps and agents
 summary: Build the pieces of LLM applications — chunking, retrieval and its metrics, tokenisation, context budgets, tool calling and agent loops — then real LangGraph graphs with routing, loops, tools, memory and human approval. Models are scripted fakes, so everything runs offline and gives the same result every time.
 level: interview
+area: ml
 order: 10
 topics:
   - llm-foundations
