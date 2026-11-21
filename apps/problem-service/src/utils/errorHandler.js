@@ -23,6 +23,8 @@ function errorHandler(err, req, res, next) {
   if (statusCode >= 500) {
     logger.error(err?.stack || String(err));
   }
+  // Errors are never cached (public reads set a shared Cache-Control earlier).
+  res.set("Cache-Control", "no-store");
   return res.status(statusCode).json(body);
 }
 

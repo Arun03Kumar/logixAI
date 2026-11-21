@@ -17,6 +17,8 @@ import {
   type AccessTokenVerifier,
   type Logger,
   z,
+  rateLimitStore,
+  type RedisClient,
 } from "@logixai/service-kit";
 import type { IdentityGateway } from "./lib/identity.js";
 import type { PaymentProvider } from "./providers/index.js";
@@ -31,6 +33,8 @@ export interface AppOptions {
   corsOrigins: string[];
   logger?: Logger;
   now?: () => Date;
+  /** Shared rate-limit counters (all replicas); in memory when unset. */
+  rateLimitRedis?: RedisClient;
 }
 
 declare module "fastify" {
@@ -56,7 +60,7 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   });
 
   await app.register(cors, { origin: options.corsOrigins, methods: ["GET", "POST"] });
-  await app.register(rateLimit, { global: false, hook: "preHandler" });
+  await app.register(rateLimit, { global: false, hook: "preHandler", ...rateLimitStore(options.rateLimitRedis, "billing") });
 
   app.setErrorHandler((err: Error & { statusCode?: number }, request, reply) => {
     const status = err.statusCode;

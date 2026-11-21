@@ -48,6 +48,9 @@ export default function RootLayout({
     >
       <head>
         <ThemeScript />
+        {/* API URLs from the server's environment; must run before the app's scripts. */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="/runtime-config.js" />
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <SessionBootstrap />

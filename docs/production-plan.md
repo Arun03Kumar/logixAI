@@ -4,7 +4,7 @@ Goal: deploy LogixAI on any platform from text files (Dockerfiles, Compose,
 Helm, env vars), and stay fast at 2,000 active users with headroom for spikes
 of 50,000, including the code editor and the Run button.
 
-Status: **proposal, not built yet.** Phases S1–S5 below, in order. Each one ships
+Status: **S1–S4 built** (see [deploy.md](deploy.md) and ml-arena.md "Run in the browser"); S5 not yet. Phases below, in order. Each one ships
 on its own and is useful without the next.
 
 ## Where we are today
@@ -87,6 +87,14 @@ Everything else is stateless and runs anywhere.
 - **Sessions stay JWT** (no server state), so any replica serves any request.
 
 ## S3 — Instant Run in the browser
+
+**As built (2026-11-21):** one engine, Pyodide 0.27.7, runs both Python and
+SQL items (it includes DuckDB), using the judge's own harness program, so
+results match by construction; DuckDB-WASM wasn't needed. Items run in the
+browser only after `content:browser-check` verified them against the judge
+(199 of 202 candidates). JavaScript/React items still run on the judge: their
+harness needs Node and jsdom, and porting it is a separate step. See
+ml-arena.md, "Run in the browser". The original plan follows.
 
 - A **browser runner** web worker with three engines, loaded on first use and
   cached: **Pyodide** (Python with numpy, pandas, scipy), **DuckDB-WASM** (SQL),

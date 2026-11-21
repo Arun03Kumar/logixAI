@@ -178,6 +178,8 @@ export interface ItemView extends ItemSummary {
   driver?: string;
   samples?: SampleTest[];
   hiddenTestCount?: number;
+  /** code / debug / sql: where Run executes (Submit always uses the server). */
+  runIn?: RunIn;
   /** Shown once solved or revealed. */
   explanation?: string;
   solution?: string;
@@ -272,6 +274,29 @@ export interface ArenaTestResult {
   output?: string;
   /** Error text (tracebacks, compile errors). */
   message?: string;
+}
+
+/** Where an item's Run executes: in the learner's browser (Pyodide) or on the judge. */
+export type RunIn = "browser" | "server";
+
+/**
+ * GET /items/:itemId/runner: what the browser needs to run an item's sample
+ * tests itself. `program` is the judge's own program with `placeholder` (the
+ * base64 of a marker) where the base64 of the learner's code goes; each test
+ * feeds `input` on stdin and compares stdout with `expected` using
+ * jsonOutputsMatch and `tolerance`, exactly like the judge.
+ */
+export interface BrowserRunnerKit {
+  itemId: string;
+  engine: "pyodide";
+  pyodideVersion: string;
+  /** What the learner writes: Python, or a SQL query run by the program's DuckDB. */
+  codeLanguage: "python" | "sql";
+  program: string;
+  placeholder: string;
+  tests: { input: string; expected: string; call: string; expectedText: string }[];
+  tolerance: { absTol: number; relTol: number };
+  timeLimitMs: number;
 }
 
 export interface ArenaSubmissionView {

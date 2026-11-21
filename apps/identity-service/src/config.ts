@@ -16,6 +16,14 @@ export const config = loadConfig(
       JWT_ISSUER: z.string().default(DEFAULT_TOKEN_ISSUER),
       ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
       REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
+      /** Public path of the auth routes, for the refresh cookie (behind the proxy: /api/identity/v1/auth). */
+      REFRESH_COOKIE_PATH: z.string().startsWith("/").default("/api/v1/auth"),
+      /** "redis" in production with more than one replica, so limits are shared. */
+      RATE_LIMIT_STORE: env.rateLimitStore(),
+      REDIS_HOST: env.redisHost(),
+      REDIS_PORT: env.redisPort(),
+      REDIS_PASSWORD: env.redisPassword(),
+      REDIS_TLS: env.flag(false),
       CORS_ORIGINS: env.list(["http://localhost:3008"]),
       /** Accounts created with these emails get the platform `admin` role. */
       BOOTSTRAP_ADMIN_EMAILS: env.list([]),

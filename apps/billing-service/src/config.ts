@@ -25,6 +25,12 @@ export const config = loadConfig(
       RAZORPAY_KEY_SECRET: optionalSecret(),
       /** Secret set on the Razorpay webhook (Dashboard > Webhooks). */
       RAZORPAY_WEBHOOK_SECRET: optionalSecret(),
+      /** "redis" in production with more than one replica, so limits are shared. */
+      RATE_LIMIT_STORE: env.rateLimitStore(),
+      REDIS_HOST: env.redisHost(),
+      REDIS_PORT: env.redisPort(),
+      REDIS_PASSWORD: env.redisPassword(),
+      REDIS_TLS: env.flag(false),
       CORS_ORIGINS: env.list(["http://localhost:3008"]),
     })
     .refine((c) => c.NODE_ENV !== "production" || Boolean(c.INTERNAL_API_TOKEN), {

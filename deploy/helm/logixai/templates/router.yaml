@@ -1,0 +1,81 @@
+{{- /* The router (Caddy): path-prefix routing to the services, same Caddyfile as Compose. */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: router-config
+  labels: {{- include "logixai.labels" . | nindent 4 }}
+data:
+  Caddyfile: |
+{{ .Files.Get "files/Caddyfile" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: router
+  labels: {{- include "logixai.labels" . | nindent 4 }}
+    app.kubernetes.io/name: router
+spec:
+  replicas: {{ .Values.router.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/name: router }
+  template:
+    metadata:
+      labels: {{- include "logixai.labels" . | nindent 8 }}
+        app.kubernetes.io/name: router
+      annotations:
+        # Restart the router when the routes change.
+        checksum/config: {{ .Files.Get "files/Caddyfile" | sha256sum }}
+    spec:
+      containers:
+        - name: caddy
+          image: {{ .Values.router.image }}
+          env:
+            # Plain HTTP on :80; the Ingress terminates TLS.
+            - name: SITE_ADDRESS
+              value: ":80"
+          ports: [{ name: http, containerPort: 80 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/caddy }
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.router.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: router-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: router
+  labels: {{- include "logixai.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/name: router }
+  ports: [{ name: http, port: 80, targetPort: http }]
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: logixai
+  labels: {{- include "logixai.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.domain | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.domain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: router, port: { name: http } } }
+{{- end }}

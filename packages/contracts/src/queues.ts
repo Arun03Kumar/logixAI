@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LanguageIdSchema, TestCaseSchema } from "./common";
+import type { LanguageId } from "@logixai/languages";
 import { METRICS } from "./checker";
 import { ExecutionResponseSchema } from "./submission";
 
@@ -13,6 +14,38 @@ export const QUEUE_NAMES = {
   /** Reply queue for ML Arena code items (arena-service). */
   ARENA_EVALUATION: "ArenaEvaluationQueue",
 } as const;
+
+/**
+ * Judge queues, one per group of sandbox images, so a burst of slow PyTorch
+ * runs can't hold up DSA or exam code. Evaluators choose which groups they
+ * serve (JUDGE_QUEUES), so each group can be scaled on its own queue length.
+ * DSA keeps the original name, so jobs queued before an upgrade still run.
+ */
+export const JUDGE_QUEUES = {
+  dsa: QUEUE_NAMES.SUBMISSION,
+  "python-ml": "SubmissionQueue-python-ml",
+  "node-web": "SubmissionQueue-node-web",
+} as const;
+export type JudgeQueueGroup = keyof typeof JUDGE_QUEUES;
+export const JUDGE_QUEUE_GROUPS = Object.keys(JUDGE_QUEUES) as JudgeQueueGroup[];
+
+export function judgeQueueGroup(language: LanguageId): JudgeQueueGroup {
+  if (language === "PYTHON_ML") return "python-ml";
+  if (language === "NODE_WEB") return "node-web";
+  return "dsa";
+}
+
+/** The queue a submission in `language` goes to. */
+export const judgeQueueFor = (language: LanguageId): string => JUDGE_QUEUES[judgeQueueGroup(language)];
+
+/**
+ * BullMQ priorities (lower runs first): an exam answer never waits behind
+ * practice, and a Submit (graded) goes before a Run (just checking).
+ */
+export const JUDGE_PRIORITY = { exam: 1, submit: 3, run: 5 } as const;
+
+/** Options every judge job is added with: priority, and a bounded history in Redis. */
+export const judgeJobOptions = (priority: number) => ({ priority, removeOnComplete: 1000, removeOnFail: 1000 });
 
 /** BullMQ job names. */
 export const JOB_NAMES = {

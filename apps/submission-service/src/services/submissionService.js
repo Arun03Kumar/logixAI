@@ -77,7 +77,7 @@ class SubmissionService {
         submissionId,
         testCases,
       },
-    });
+    }, mode);
     return {
       queueResponse,
       submission: {

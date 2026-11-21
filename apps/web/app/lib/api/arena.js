@@ -19,6 +19,8 @@ export const arenaApi = {
   track: (id) => call(`/tracks/${encodeURIComponent(id)}`),
   topic: (id) => call(`/topics/${encodeURIComponent(id)}`),
   item: (id) => call(`/items/${encodeURIComponent(id)}`),
+  /** Program + sample tests for running Run in the browser (items with runIn: "browser"). */
+  runner: (id) => call(`/items/${encodeURIComponent(id)}/runner`),
   /** Every matching problem. filters: q, type, difficulty, status, track, tag, list, access */
   problems: (filters = {}) => call(`/problems?${pageQuery(filters)}`),
   /** Curated lists ("SQL interview set", ...), with the learner's progress. */
@@ -31,6 +33,39 @@ export const arenaApi = {
   runCode: (id, code, mode) =>
     call(`/items/${encodeURIComponent(id)}/code`, { method: "POST", body: { code, mode } }),
   submission: (id) => call(`/submissions/${encodeURIComponent(id)}`),
+  /**
+   * Waits for a submission's result on the server-sent event stream. Resolves
+   * with the judged submission, or null when the stream times out or drops
+   * (then poll `submission`). `signal` cancels it.
+   */
+  waitForResult: async (id, signal) => {
+    const res = await authFetch(`${ARENA_API_URL}/arena/submissions/${encodeURIComponent(id)}/stream`, {
+      headers: { Accept: "text/event-stream" },
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return null;
+      buffer += decoder.decode(value, { stream: true });
+      // Events end with a blank line; comments (": ping") keep the connection alive.
+      let end;
+      while ((end = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        const event = /^event: (.*)$/m.exec(block)?.[1];
+        const data = /^data: (.*)$/m.exec(block)?.[1];
+        if (event === "result" && data) {
+          reader.cancel().catch(() => {});
+          return JSON.parse(data);
+        }
+        if (event === "timeout") return null;
+      }
+    }
+  },
   submissions: ({ cursor, limit = 20, itemId } = {}) => call(`/submissions?${pageQuery({ cursor, limit, itemId })}`),
   dashboard: (area) => call(`/me/dashboard${areaQ(area)}`),
   reviewQueue: (area) => call(`/me/review${areaQ(area)}`),

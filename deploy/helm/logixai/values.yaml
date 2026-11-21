@@ -1,0 +1,180 @@
+# LogixAI Helm values. See docs/deploy.md ("Kubernetes").
+#
+# Secrets are never in this file. Create them first:
+#   kubectl create secret generic logixai-secrets \
+#     --from-literal=MONGODB_URI_BASE='mongodb+srv://USER:PASSWORD@cluster0.abcde.mongodb.net' \
+#     --from-literal=REDIS_PASSWORD=... --from-literal=INTERNAL_API_TOKEN=... \
+#     --from-file=JWT_PRIVATE_KEY=jwt-ed25519.pem
+#   (optional keys: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET)
+#
+# One release per namespace: Service names (identity, arena, ...) are fixed so
+# the router can find them.
+
+image:
+  registry: ghcr.io/your-org/logixai
+  tag: latest
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public domain; the Ingress routes all of it to the router (Caddy).
+domain: learn.example.com
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  #   cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    enabled: true
+    secretName: logixai-tls
+
+existingSecret: logixai-secrets
+
+mongodb:
+  # Appended after each service's database name.
+  uriOptions: "?retryWrites=true&w=majority"
+
+redis:
+  # bundled: a single Redis StatefulSet in the release. Use a managed Redis for
+  # real traffic (bundled: false, host/port/tls below).
+  bundled: true
+  host: redis
+  port: 6379
+  tls: false
+  storage: 5Gi
+
+config:
+  JWT_KEY_ID: logixai-1
+  BOOTSTRAP_ADMIN_EMAILS: ""
+  CODE_RUNS_PER_MINUTE: "12"
+  SHUTDOWN_DRAIN_MS: "5000"
+  # Connections per replica (see docs/deploy.md, "Connection budget").
+  MONGO_MAX_POOL_SIZE: "20"
+
+router:
+  replicas: 2
+  image: caddy:2.8-alpine
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# Shared defaults for every service below (overridable per service).
+defaults:
+  replicas: 2
+  autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPU: 70 }
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 512Mi }
+
+services:
+  web:
+    image: web
+    port: 3008
+    probePath: /runtime-config.js
+    resources:
+      requests: { cpu: 200m, memory: 256Mi }
+      limits: { memory: 768Mi }
+  identity:
+    image: identity-service
+    port: 3006
+    database: logixai-identity
+    migrate: dist/db/migrate.js
+    redis: true
+    env:
+      REFRESH_COOKIE_PATH: /api/identity/v1/auth
+      RATE_LIMIT_STORE: redis
+    secretEnv: [JWT_PRIVATE_KEY]
+  problem:
+    image: problem-service
+    port: 3001
+    database: logixai-problems
+    migrate: src/db/migrate.js
+  submission:
+    image: submission-service
+    port: 3000
+    database: logixai-submissions
+    migrate: src/db/migrate.js
+    redis: true
+    env:
+      PROBLEM_ADMIN_SERVICE_URL: http://problem:3001
+      SOCKET_SERVICE_URL: http://socket:3005
+  exam:
+    image: exam-service
+    port: 3007
+    database: logixai-exams
+    migrate: dist/db/migrate.js
+    redis: true
+    env:
+      IDENTITY_API_URL: http://identity:3006/api/v1
+  arena:
+    image: arena-service
+    port: 3010
+    database: logixai-arena
+    migrate: dist/db/migrate.js
+    redis: true
+    env:
+      IDENTITY_API_URL: http://identity:3006/api/v1
+  billing:
+    image: billing-service
+    port: 3011
+    database: logixai-billing
+    migrate: dist/db/migrate.js
+    redis: true
+    env:
+      IDENTITY_URL: http://identity:3006
+      RATE_LIMIT_STORE: redis
+    optionalSecretEnv: [RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET]
+  socket:
+    image: socket-service
+    port: 3005
+    redis: true
+    # socket.io keeps long-lived connections; scale on CPU like the others.
+
+# Judge workers. Each pod runs a Docker-in-Docker sidecar (privileged) that the
+# sandboxes run in, so put them on a dedicated node pool (nodeSelector /
+# tolerations) that serves nothing else.
+evaluator:
+  enabled: true
+  image: evaluator-service
+  # Defaults for every pool below.
+  replicas: 2
+  concurrency: "2"
+  # Started, unused sandboxes kept ready per language (0 = off).
+  warmPool: "1"
+  # Registry holding the judge images (python-ml, node-web) from judge-images/.
+  judgeImageRegistry: ghcr.io/your-org/logixai
+  autoscaling:
+    enabled: true
+    # cpu: a HorizontalPodAutoscaler on CPU (works everywhere).
+    # queue: KEDA scales on the backlog of the pool's queues (needs KEDA installed:
+    #        https://keda.sh). Reacts before CPU climbs. minReplicas must be >= 1,
+    #        because KEDA reads the backlog from a running evaluator.
+    mode: cpu
+    minReplicas: 2
+    maxReplicas: 20
+    targetCPU: 60
+    # queue mode: target jobs waiting per pod (about 2 × concurrency).
+    backlogPerPod: 4
+  # One Deployment per pool. A pool serves the queue groups in `queues`
+  # (JUDGE_QUEUES: "python-ml:3,node-web,dsa"; empty = all). Split pools so
+  # each group scales on its own queue, e.g.:
+  #   - { name: evaluator-ml, queues: "python-ml:2" }
+  #   - { name: evaluator-web, queues: "node-web:2" }
+  #   - { name: evaluator-dsa, queues: "dsa:4" }
+  pools:
+    - { name: evaluator, queues: "" }
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  dind:
+    image: docker:27-dind
+    resources:
+      # Sandboxes run inside this container: about 1 CPU and 512 MB-1 GB per concurrent job.
+      requests: { cpu: "2", memory: 2Gi }
+      limits: { memory: 4Gi }
+    storage: 20Gi
+  nodeSelector: {}
+  tolerations: []
+
+nodeSelector: {}
+tolerations: []

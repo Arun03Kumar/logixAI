@@ -36,7 +36,12 @@ let socket = null;
 /** Connects as the signed-in user. Call only when a session exists. */
 export const initializeSocket = (dispatch) => {
   if (!socket) {
-    socket = io(SOCKET_URL, {
+    // SOCKET_URL may carry a path behind the proxy (https://site/realtime):
+    // socket.io reads a URL path as a namespace, so pass it as the transport path.
+    const url = new URL(SOCKET_URL, window.location.href);
+    const prefix = url.pathname.replace(/\/+$/, "");
+    socket = io(url.origin, {
+      ...(prefix ? { path: `${prefix}/socket.io` } : {}),
       // Called on every (re)connect, so an expired token is refreshed first.
       auth: (cb) => {
         getAccessToken().then((token) => cb({ token }));

@@ -39,6 +39,8 @@ import {
   errorResponse,
   successResponse,
   z,
+  rateLimitStore,
+  type RedisClient,
 } from "@logixai/service-kit";
 import type { TokenIssuer } from "./lib/tokens.js";
 import { AuthService, type IssuedSession } from "./services/authService.js";
@@ -49,7 +51,7 @@ import { PlanService } from "./services/planService.js";
 import type { Store } from "./store/types.js";
 
 export const REFRESH_COOKIE = "lx_rt";
-const REFRESH_COOKIE_PATH = "/api/v1/auth";
+const DEFAULT_REFRESH_COOKIE_PATH = "/api/v1/auth";
 
 export interface AppOptions {
   store: Store;
@@ -58,10 +60,18 @@ export interface AppOptions {
   corsOrigins: string[];
   secureCookies: boolean;
   refreshTokenTtlDays: number;
+  /**
+   * Path the browser sends the refresh cookie to: the auth routes as the
+   * browser sees them. Behind a path-prefix proxy (/api/identity/v1/auth ->
+   * /api/v1/auth) set it to the public path.
+   */
+  refreshCookiePath?: string;
   adminEmails: string[];
   logger?: boolean;
   /** Requests per minute per IP on sign-in / sign-up. */
   authRateLimit?: number;
+  /** Shared rate-limit counters (all replicas); in memory when unset. */
+  rateLimitRedis?: RedisClient;
   /** Shared secret for /internal routes; unset = open (development only). */
   internalToken?: string;
 }
@@ -80,6 +90,7 @@ function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.i
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false, trustProxy: true });
+  const refreshCookiePath = options.refreshCookiePath ?? DEFAULT_REFRESH_COOKIE_PATH;
   const authService = new AuthService(options.store, options.tokens, {
     refreshTokenTtlDays: options.refreshTokenTtlDays,
     adminEmails: options.adminEmails,
@@ -97,7 +108,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   await app.register(cookie);
   await app.register(cors, { origin: options.corsOrigins, credentials: true });
-  await app.register(rateLimit, { global: false });
+  await app.register(rateLimit, { global: false, ...rateLimitStore(options.rateLimitRedis, "identity") });
 
   app.setErrorHandler((err: Error & { statusCode?: number }, request, reply) => {
     const status = err.statusCode;
@@ -120,13 +131,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       httpOnly: true,
       secure: options.secureCookies,
       sameSite: "lax",
-      path: REFRESH_COOKIE_PATH,
+      path: refreshCookiePath,
       expires: issued.refreshExpiresAt,
     });
     return reply.status(status).send(successResponse(issued.session));
   };
   const clearSession = (reply: FastifyReply) =>
-    reply.clearCookie(REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+    reply.clearCookie(REFRESH_COOKIE, { path: refreshCookiePath });
 
   const authLimit = {
     config: { rateLimit: { max: options.authRateLimit ?? 10, timeWindow: "1 minute" } },

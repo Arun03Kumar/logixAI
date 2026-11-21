@@ -23,6 +23,8 @@ export const config = loadConfig(
       CORS_ORIGINS: env.list(["http://localhost:3008"]),
       /** Code runs (run + submit) per learner per minute. */
       CODE_RUNS_PER_MINUTE: z.coerce.number().int().positive().default(12),
+      /** Server Runs get "busy, try again" (429) while more jobs than this wait in the judge queue. */
+      JUDGE_BUSY_BACKLOG: z.coerce.number().int().positive().default(500),
     })
     .refine((c) => c.NODE_ENV !== "production" || Boolean(c.REDIS_PASSWORD), {
       message: "REDIS_PASSWORD is required in production",

@@ -72,9 +72,10 @@ export async function buildApp(
     return reply.status(statusCode).send(body);
   });
 
-  /** Every route needs a signed-in user. */
+  /** Every route needs a signed-in user, except the probes (/ping, /healthz, /readyz). */
+  const OPEN_PATHS = new Set(["/ping", "/healthz", "/readyz"]);
   app.addHook("preHandler", async (request) => {
-    if (request.url === "/ping") return;
+    if (OPEN_PATHS.has(request.url.split("?")[0]!)) return;
     const claims = await options.verifier.verifyHeader(request.headers.authorization);
     (request as FastifyRequest & { caller: Caller }).caller = {
       userId: claims.sub,

@@ -7,11 +7,17 @@ export interface RedisOptions {
   password?: string;
   /** Use TLS (managed Redis services usually require it). */
   tls?: boolean;
+  /**
+   * Fail commands quickly while Redis is unreachable instead of queueing them
+   * until it comes back. Use for request-path helpers such as rate limits,
+   * never for BullMQ queues and workers.
+   */
+  failFast?: boolean;
 }
 
 /**
- * Creates an ioredis connection. `maxRetriesPerRequest: null` is required by
- * BullMQ for connections used by workers, and harmless for plain usage.
+ * Creates an ioredis connection. By default `maxRetriesPerRequest: null`, which
+ * BullMQ requires for workers: commands wait (forever) for Redis to return.
  */
 export function createRedisConnection(options: RedisOptions): Redis {
   return new Redis({
@@ -19,6 +25,10 @@ export function createRedisConnection(options: RedisOptions): Redis {
     port: options.port,
     ...(options.password ? { password: options.password } : {}),
     ...(options.tls ? { tls: {} } : {}),
-    maxRetriesPerRequest: null,
+    // failFast keeps the offline queue (so commands sent while the connection is
+    // still opening wait for it), but gives up on any command after 500 ms.
+    ...(options.failFast
+      ? { maxRetriesPerRequest: 1, commandTimeout: 500, connectTimeout: 2_000 }
+      : { maxRetriesPerRequest: null }),
   });
 }

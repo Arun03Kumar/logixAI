@@ -3,8 +3,13 @@ const { createServer } = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const {
+  closeRedis,
   createAccessTokenVerifier,
+  createLogger,
   createRedisConnection,
+  onShutdown,
+  redisReady,
+  registerHealthRoutes,
 } = require("@logixai/service-kit");
 const {
   PORT,
@@ -64,7 +69,17 @@ app.post(
 );
 
 app.get("/ping", (req, res) => res.json({ message: "socket service is alive" }));
+registerHealthRoutes(app, { redis: redisReady(redisCache) });
 
+const logger = createLogger("socket-service");
 httpServer.listen(PORT, () => {
-  console.log(`Socket server is running on port ${PORT}`);
+  logger.info(`socket-service listening on port ${PORT}`);
 });
+onShutdown(
+  [
+    // io.close() disconnects sockets (clients reconnect to another instance) and closes the HTTP server.
+    ["socket.io", () => new Promise((resolve) => io.close(() => resolve()))],
+    closeRedis(redisCache),
+  ],
+  { logger },
+);

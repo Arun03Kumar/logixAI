@@ -1,0 +1,137 @@
+{{- if .Values.evaluator.enabled }}
+{{- $root := . }}
+{{- $e := .Values.evaluator }}
+{{- /*
+  Judge workers, one Deployment per pool (evaluator.pools). Kubernetes nodes
+  usually have no Docker daemon, so each pod runs a Docker-in-Docker sidecar
+  (privileged) and the evaluator starts its sandbox containers there over
+  localhost. Keep these pods on a dedicated node pool: see values.yaml
+  (evaluator.nodeSelector / tolerations).
+*/}}
+{{- range $pool := $e.pools }}
+{{- $name := $pool.name }}
+{{- $scale := merge (dict) ($pool.autoscaling | default dict) $e.autoscaling }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: judge
+spec:
+  {{- if not $scale.enabled }}
+  replicas: {{ $pool.replicas | default $e.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/name: {{ $name }} }
+  template:
+    metadata:
+      labels: {{- include "logixai.labels" $root | nindent 8 }}
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: judge
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Lets the submissions being judged finish (the workers stop taking new ones first).
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: evaluator
+          image: {{ include "logixai.image" (dict "root" $root "name" $e.image) }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 3002 }]
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: PORT, value: "3002" }
+            - { name: DOCKER_HOST, value: "tcp://127.0.0.1:2375" }
+            - { name: JUDGE_CONCURRENCY, value: {{ $pool.concurrency | default $e.concurrency | quote }} }
+            - { name: JUDGE_QUEUES, value: {{ $pool.queues | default "" | quote }} }
+            - { name: JUDGE_WARM_POOL, value: {{ $pool.warmPool | default $e.warmPool | quote }} }
+            - { name: JUDGE_IMAGE_REGISTRY, value: {{ $e.judgeImageRegistry | quote }} }
+            {{- include "logixai.redisEnv" $root | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          # Pulling the judge images into a fresh sidecar can take a few minutes.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 60
+          resources: {{- toYaml $e.resources | nindent 12 }}
+        - name: dind
+          image: {{ $e.dind.image }}
+          # Listens on localhost only, without TLS: reachable from this pod alone.
+          args: ["--host=tcp://127.0.0.1:2375", "--tls=false"]
+          env:
+            - { name: DOCKER_TLS_CERTDIR, value: "" }
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - { name: docker-data, mountPath: /var/lib/docker }
+          resources: {{- toYaml $e.dind.resources | nindent 12 }}
+      volumes:
+        - name: docker-data
+          emptyDir: { sizeLimit: {{ $e.dind.storage }} }
+      {{- with $e.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $e.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+# /queue-stats for the autoscaler (internal only; nothing routes here from outside).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/name: {{ $name }} }
+  ports: [{ name: http, port: 3002, targetPort: http }]
+{{- if and $scale.enabled (eq ($scale.mode | default "cpu") "queue") }}
+---
+# Scales on jobs waiting in this pool's queues (KEDA metrics-api scaler).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+spec:
+  scaleTargetRef: { name: {{ $name }} }
+  minReplicaCount: {{ max 1 $scale.minReplicas }}
+  maxReplicaCount: {{ $scale.maxReplicas }}
+  pollingInterval: 10
+  cooldownPeriod: 180
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: "http://{{ $name }}.{{ $root.Release.Namespace }}.svc.cluster.local:3002/queue-stats"
+        valueLocation: waiting
+        targetValue: {{ $scale.backlogPerPod | quote }}
+    # Also keep CPU in check while the queue is short.
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ $scale.targetCPU | quote }}
+{{- else if $scale.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ $scale.minReplicas }}
+  maxReplicas: {{ $scale.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $scale.targetCPU }} } }
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,85 @@
+# The router: one public origin for the whole app. Used by both deployments:
+#   Compose: SITE_ADDRESS=<your domain>; Caddy gets and renews the HTTPS
+#            certificate automatically (ports 80 and 443 must reach it).
+#   Helm:    SITE_ADDRESS=:80 behind the cluster's Ingress, which terminates TLS.
+# Upstream names (identity, arena, ...) are the Compose service names and the
+# Kubernetes Service names.
+
+{
+	servers {
+		# Keep the real client IP from a load balancer / Kubernetes Ingress in
+		# front (private addresses only), so per-IP rate limits apply per user.
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Services: /api/<service>/v1/... -> <service>:/api/v1/...
+	@identity path /api/identity/*
+	handle @identity {
+		uri strip_prefix /api/identity
+		rewrite * /api{uri}
+		reverse_proxy identity:3006
+	}
+	# JWKS for anyone verifying tokens from outside the stack.
+	handle /.well-known/jwks.json {
+		reverse_proxy identity:3006
+	}
+
+	@problem path /api/problem/*
+	handle @problem {
+		uri strip_prefix /api/problem
+		rewrite * /api{uri}
+		reverse_proxy problem:3001
+	}
+
+	@submission path /api/submission/*
+	handle @submission {
+		uri strip_prefix /api/submission
+		rewrite * /api{uri}
+		reverse_proxy submission:3000
+	}
+
+	@exam path /api/exam/*
+	handle @exam {
+		uri strip_prefix /api/exam
+		rewrite * /api{uri}
+		reverse_proxy exam:3007
+	}
+
+	@arena path /api/arena/*
+	handle @arena {
+		uri strip_prefix /api/arena
+		rewrite * /api{uri}
+		reverse_proxy arena:3010
+	}
+
+	@billing path /api/billing/*
+	handle @billing {
+		uri strip_prefix /api/billing
+		rewrite * /api{uri}
+		reverse_proxy billing:3011
+	}
+
+	# socket.io (websockets): /realtime/socket.io -> socket:/socket.io
+	handle_path /realtime/* {
+		reverse_proxy socket:3005
+	}
+
+	# Next.js build assets never change for a given URL.
+	@static path /_next/static/* /arena-preview/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	handle {
+		reverse_proxy web:3008
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

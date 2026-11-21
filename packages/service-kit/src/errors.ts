@@ -59,6 +59,13 @@ export class ConflictError extends BaseError {
   }
 }
 
+/** 429: the caller should wait and try again (rate limits, a busy judge). */
+export class TooManyRequestsError extends BaseError {
+  constructor(description: string, details?: unknown) {
+    super("TooManyRequests", 429, description, details);
+  }
+}
+
 export class InternalServerError extends BaseError {
   constructor(details?: unknown) {
     super("InternalServerError", 500, "Something went wrong", details);

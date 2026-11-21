@@ -167,6 +167,39 @@ now redirects) is a free-form React / JavaScript
 scratchpad built on it (drafts stay in the browser). An infinite loop can still
 freeze the tab; the restart button reloads the frame.
 
+### Run in the browser
+
+Run (the examples) executes in the learner's browser for most Python and SQL
+items: no server round trip, so a warm Run takes milliseconds and costs
+nothing, and it works signed out. Submit (hidden tests) always goes to the
+judge.
+
+- **Same program, same comparison.** `GET /items/:id/runner` returns the
+  item's own judge program (the harness above, with a placeholder where the
+  learner's code goes), the sample tests and the tolerance. The page runs it in
+  Pyodide 0.27.7 (CPython 3.12 + NumPy, Pandas, SciPy, DuckDB in WebAssembly,
+  from the jsDelivr CDN) in a Web Worker (`apps/web/public/arena-runner/`) and
+  scores it with the judge's `jsonOutputsMatch`.
+- **Which items.** Candidates are SQL items and Python items without PyTorch,
+  LangGraph/LangChain, tensors, datasets or JavaScript. A candidate runs in the
+  browser only once `npm run content:browser-check` has run its reference
+  solution in Pyodide on **every** test (sample and hidden) and got the judge's
+  answers. The result is recorded with the item's hash in
+  `content/browser-run.generated.json`; editing the item changes the hash, so it
+  runs on the judge until it's checked again. Some code legitimately differs in
+  32-bit WebAssembly (`np.bincount` on int64 arrays), which is why this is
+  checked rather than assumed. Currently 199 of 202 candidates are verified.
+- **Limits.** 12 s per example (the judge's 6 s, doubled for WebAssembly); the
+  page stops the worker after that and reports "Time limit exceeded". The first
+  Run downloads Python and the packages (about 5–10 s, cached by the browser
+  after that); the editor starts the download when it's focused.
+- **Fallback.** If the browser can't start Pyodide (old browser, blocked CDN,
+  out of memory), Run goes to the judge as before. Free-plan run limits count
+  only judge runs.
+- After changing content, run `npm run content:browser-check` (it downloads
+  Pyodide into a git-ignored `.cache/` the first time) and commit the updated
+  record. CI re-runs it and fails if the record is out of date.
+
 ### SQL items
 
 A `sql` item names a **database** (tables and named datasets, defined in

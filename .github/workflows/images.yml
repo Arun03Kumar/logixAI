@@ -1,0 +1,76 @@
+name: Images
+
+# Builds and pushes every image to GitHub Container Registry:
+#   ghcr.io/<owner>/logixai/<name>:<commit sha>   always
+#   ...:latest                                     on main
+#   ...:<tag>                                      on version tags (v1.2.3)
+# Deploy by setting TAG (Compose) or image.tag (Helm) to the commit sha.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}/logixai
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: web, dockerfile: deploy/docker/web.Dockerfile }
+          - { name: identity-service, app: "@logixai/identity-service", port: "3006" }
+          - { name: problem-service, app: "@logixai/problem-service", port: "3001", start: src/index.js }
+          - { name: submission-service, app: "@logixai/submission-service", port: "3000", start: src/index.js }
+          - { name: exam-service, app: "@logixai/exam-service", port: "3007" }
+          - { name: arena-service, app: "@logixai/arena-service", port: "3010" }
+          - { name: billing-service, app: "@logixai/billing-service", port: "3011" }
+          - { name: socket-service, app: "@logixai/socket-service", port: "3005", start: src/server.js }
+          - { name: evaluator-service, app: "@logixai/evaluator-service", port: "3002" }
+          # Judge sandboxes (JUDGE_IMAGE_REGISTRY points here). Tags must match
+          # packages/contracts' language definitions.
+          - { name: python-ml, context: judge-images/python-ml, judgeTag: "4" }
+          - { name: node-web, context: judge-images/node-web, judgeTag: "1" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ matrix.name }}
+          tags: |
+            type=sha,format=long,prefix=,enable=${{ !matrix.judgeTag }}
+            type=raw,value=latest,enable=${{ !matrix.judgeTag && github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}},enable=${{ !matrix.judgeTag }}
+            type=raw,value=${{ matrix.judgeTag }},enable=${{ !!matrix.judgeTag }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context || '.' }}
+          file: ${{ matrix.context && format('{0}/Dockerfile', matrix.context) || matrix.dockerfile || 'deploy/docker/service.Dockerfile' }}
+          build-args: |
+            APP=${{ matrix.app }}
+            APP_DIR=${{ matrix.name }}
+            PORT=${{ matrix.port }}
+            START=${{ matrix.start || 'dist/index.js' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

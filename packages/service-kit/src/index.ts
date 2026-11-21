@@ -11,6 +11,7 @@ export {
   ConflictError,
   InternalServerError,
   NotImplementedError,
+  TooManyRequestsError,
 } from "./errors";
 export { successResponse, errorResponse } from "./response";
 export { connectMongo, disconnectMongo } from "./mongo";
@@ -23,3 +24,19 @@ export type { Migration } from "./migrations";
 export { encodeCursor, decodeCursor, toPage } from "./pagination";
 export type { MongoOptions } from "./mongo";
 export type { AccessTokenVerifier } from "./auth";
+export {
+  registerHealthRoutes,
+  readiness,
+  mongoReady,
+  redisReady,
+  onShutdown,
+  closeMongo,
+  closeRedis,
+  isShuttingDown,
+} from "./lifecycle";
+export type { ReadinessCheck, ShutdownStep, ShutdownOptions } from "./lifecycle";
+export { rateLimitStore } from "./rateLimit";
+export type { Redis as RedisClient } from "ioredis";
+export { registerPublicCache, cacheControl, weakEtag, CATALOG_CACHE } from "./httpCache";
+export type { CacheRule } from "./httpCache";
+export { poolSettings } from "./mongo";

@@ -1,4 +1,14 @@
-import { connectMongo, createAccessTokenVerifier, createLogger } from "@logixai/service-kit";
+import {
+  closeMongo,
+  closeRedis,
+  connectMongo,
+  createAccessTokenVerifier,
+  createLogger,
+  createRedisConnection,
+  mongoReady,
+  onShutdown,
+  registerHealthRoutes,
+} from "@logixai/service-kit";
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { createHttpIdentityGateway } from "./lib/identity.js";
@@ -28,6 +38,18 @@ async function start() {
       logger.info("Razorpay test mode");
     }
 
+    // Shared rate-limit counters when RATE_LIMIT_STORE=redis (fail-fast: an outage lets requests through).
+    const limitsRedis =
+      config.RATE_LIMIT_STORE === "redis"
+        ? createRedisConnection({
+            host: config.REDIS_HOST,
+            port: config.REDIS_PORT,
+            ...(config.REDIS_PASSWORD ? { password: config.REDIS_PASSWORD } : {}),
+            tls: config.REDIS_TLS,
+            failFast: true,
+          })
+        : undefined;
+
     const { app, billing } = await buildApp({
       store: createMongoStore(),
       provider,
@@ -35,15 +57,27 @@ async function start() {
       verifier: createAccessTokenVerifier({ jwksUrl: config.IDENTITY_JWKS_URL, issuer: config.JWT_ISSUER }),
       corsOrigins: config.CORS_ORIGINS,
       logger,
+      ...(limitsRedis ? { rateLimitRedis: limitsRedis } : {}),
     });
 
     // Paid orders whose Pro grant failed (identity-service down) are retried.
-    setInterval(() => {
+    const sweep = setInterval(() => {
       billing
         .sweepUnfulfilled()
         .then((n) => n && logger.info(`Granted Pro for ${n} delayed order(s)`))
         .catch((err) => logger.error(`Fulfilment sweep failed: ${err.message}`));
     }, SWEEP_EVERY_MS);
+
+    registerHealthRoutes(app, { mongo: mongoReady });
+    onShutdown(
+      [
+        ["sweep", () => clearInterval(sweep)],
+        ["http", () => app.close()],
+        ...(limitsRedis ? [closeRedis(limitsRedis)] : []),
+        closeMongo,
+      ],
+      { logger },
+    );
 
     await app.listen({ port: config.PORT, host: "0.0.0.0" });
     logger.info(`billing-service listening on port ${config.PORT} (payments: ${provider.name})`);

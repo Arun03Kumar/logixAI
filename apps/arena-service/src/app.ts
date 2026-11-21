@@ -20,7 +20,12 @@ import {
   successResponse,
   type AccessTokenVerifier,
   z,
+  rateLimitStore,
+  type RedisClient,
+  CATALOG_CACHE,
+  registerPublicCache,
 } from "@logixai/service-kit";
+import { createLocalResultHub, type ResultHub } from "./lib/resultHub.js";
 import type { Catalog } from "./content/catalog.js";
 import type { IdentityClient } from "./lib/identity.js";
 import { ArenaService, type JudgeGateway } from "./services/arenaService.js";
@@ -36,6 +41,14 @@ export interface AppOptions {
   verifier: AccessTokenVerifier;
   corsOrigins: string[];
   codeRunsPerMinute?: number;
+  /** Shared rate-limit counters (all replicas); in memory when unset. */
+  rateLimitRedis?: RedisClient;
+  /** Delivers judge results to open streams (across replicas); in-process when unset. */
+  resultHub?: ResultHub;
+  /** Server Runs get 429 while more jobs than this wait for the judge. */
+  busyBacklog?: number;
+  /** Longest a result stream stays open before the page falls back to polling. */
+  streamTimeoutMs?: number;
   now?: () => Date;
   logger?: boolean;
 }
@@ -65,12 +78,15 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     store: options.store,
     ...(options.now ? { now: options.now } : {}),
   });
+  const results = options.resultHub ?? createLocalResultHub();
   const arena = new ArenaService({
     catalog: options.catalog,
     store: options.store,
     judge: options.judge,
     ...(options.now ? { now: options.now } : {}),
+    ...(options.busyBacklog !== undefined ? { busyBacklog: options.busyBacklog } : {}),
     onOutcome: (userId, itemId, event, at) => practice.onOutcome(userId, itemId, event, at),
+    onJudged: (view) => results.publish(view),
   });
   const institutions = new InstitutionArenaService({
     catalog: options.catalog,
@@ -81,7 +97,7 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
 
   await app.register(cors, { origin: options.corsOrigins, methods: ["GET", "POST", "DELETE"] });
   // Runs after onRequest, so code-run limits can be per learner.
-  await app.register(rateLimit, { global: false, hook: "preHandler" });
+  await app.register(rateLimit, { global: false, hook: "preHandler", ...rateLimitStore(options.rateLimitRedis, "arena") });
 
   app.setErrorHandler((err: Error & { statusCode?: number }, request, reply) => {
     const status = err.statusCode;
@@ -122,6 +138,26 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   const ok = <T>(data: T) => successResponse(data);
   const base = "/api/v1/arena";
 
+  // Signed-out reads are the same for everyone, so browsers and a CDN may cache
+  // them (signed-in responses carry progress and are never shared).
+  const SHORT = { maxAge: 15, sMaxAge: 30 };
+  registerPublicCache(app, {
+    [`${base}/tracks`]: CATALOG_CACHE,
+    [`${base}/tracks/:trackId`]: CATALOG_CACHE,
+    [`${base}/topics/:topicId`]: CATALOG_CACHE,
+    [`${base}/items/:itemId`]: CATALOG_CACHE,
+    [`${base}/items/:itemId/runner`]: CATALOG_CACHE,
+    [`${base}/problems`]: CATALOG_CACHE,
+    [`${base}/courses`]: CATALOG_CACHE,
+    [`${base}/courses/:courseId`]: CATALOG_CACHE,
+    [`${base}/lists`]: CATALOG_CACHE,
+    [`${base}/skill-map`]: CATALOG_CACHE,
+    // Open/closed status and leaderboards change while a contest runs.
+    [`${base}/contests`]: SHORT,
+    [`${base}/contests/:id`]: SHORT,
+    [`${base}/profiles/:handle`]: { maxAge: 60, sMaxAge: 120 },
+  });
+
   app.get("/ping", async () => ({ message: "arena service is alive" }));
 
   /* ── Catalog ── */
@@ -135,6 +171,10 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   );
   app.get<P<{ itemId: string }>>(`${base}/items/:itemId`, async (req) =>
     ok(await arena.getItem(req.userId, req.params.itemId, await access(req, req.params.itemId))),
+  );
+  // Program + sample tests for running Run in the browser (404 when the item runs on the server).
+  app.get<P<{ itemId: string }>>(`${base}/items/:itemId/runner`, async (req) =>
+    ok(arena.getRunner(req.params.itemId, await access(req, req.params.itemId))),
   );
   // ?q=&type=&difficulty=&status=&track=&tag=&list=&access=
   app.get(`${base}/problems`, async (req) =>
@@ -181,6 +221,54 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   app.get<P<{ id: string }>>(`${base}/submissions/:id`, async (req) =>
     ok(await arena.getSubmission(user(req), req.params.id)),
   );
+  /**
+   * Server-sent events: one `result` event with the submission as soon as it's
+   * judged (immediately if it already is), then the stream ends. Comments keep
+   * the connection alive; after streamTimeoutMs a `timeout` event tells the
+   * page to fall back to polling. Read with fetch (it sends the Authorization
+   * header), not EventSource.
+   */
+  app.get<P<{ id: string }>>(`${base}/submissions/:id/stream`, async (req, reply) => {
+    const userId = user(req);
+    const id = req.params.id;
+    const first = await arena.getSubmission(userId, id); // 404 for someone else's
+
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, {
+      ...(reply.getHeaders() as Record<string, string>),
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+      // Tells nginx-style proxies not to buffer the stream.
+      "x-accel-buffering": "no",
+    });
+    let done = false;
+    const timers: NodeJS.Timeout[] = [];
+    let unlisten = () => {};
+    const finish = (event: string, data: unknown) => {
+      if (done) return;
+      done = true;
+      unlisten();
+      for (const t of timers) clearTimeout(t);
+      res.end(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    req.raw.on("close", () => {
+      done = true;
+      unlisten();
+      for (const t of timers) clearTimeout(t);
+    });
+
+    if (first.status !== "pending") return finish("result", first);
+    // Listen first, then look again, so a result landing in between isn't missed.
+    unlisten = results.listen(id, (view) => finish("result", view));
+    const now = await arena.getSubmission(userId, id);
+    if (now.status !== "pending") return finish("result", now);
+    res.write(": waiting for the judge\n\n");
+    const heartbeat = setInterval(() => !done && res.write(": ping\n\n"), 15_000);
+    timers.push(heartbeat);
+    timers.push(setTimeout(() => finish("timeout", { id }), options.streamTimeoutMs ?? 120_000));
+  });
   // ?area= scopes these to one area (ML Arena shows only ML).
   const scoped = (req: FastifyRequest) => {
     const area = parse(AreaQuerySchema, req.query, "query").area;

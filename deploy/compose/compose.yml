@@ -1,0 +1,240 @@
+# LogixAI production stack for one or more Docker hosts (docs/deploy.md).
+#
+#   cp deploy/compose/.env.example deploy/compose/.env   # fill in secrets
+#   docker compose -f deploy/compose/compose.yml --env-file deploy/compose/.env up -d
+#
+# Everything is served from one domain through Caddy (automatic HTTPS):
+#   https://$DOMAIN/                      web (Next.js)
+#   https://$DOMAIN/api/<service>/v1/...  -> <service> /api/v1/...
+#   https://$DOMAIN/realtime/socket.io    socket-service
+#
+# Databases: MongoDB Atlas (MONGODB_URI_BASE) by default; add `--profile bundled-mongo`
+# to run MongoDB in this stack instead. Redis runs in the stack unless REDIS_HOST
+# points elsewhere (then leave out the redis service with `--scale redis=0`).
+#
+# Migrations run once per deploy (the *-migrate services) before the apps start.
+
+x-service: &service
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 40s
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-env: &env
+  NODE_ENV: production
+  JWT_ISSUER: ${JWT_ISSUER:-logixai-identity}
+  IDENTITY_JWKS_URL: http://identity:3006/.well-known/jwks.json
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN}
+  CORS_ORIGINS: https://${DOMAIN:?set DOMAIN}
+  SHUTDOWN_DRAIN_MS: ${SHUTDOWN_DRAIN_MS:-5000}
+  # Connections per replica; replicas x this, over all services, must fit the cluster's limit.
+  MONGO_MAX_POOL_SIZE: ${MONGO_MAX_POOL_SIZE:-20}
+
+x-redis-env: &redis-env
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+  REDIS_TLS: ${REDIS_TLS:-false}
+
+x-migrate: &migrate
+  init: true
+  restart: "no"
+
+x-image: &image-defaults
+  context: ../..
+  dockerfile: deploy/docker/service.Dockerfile
+
+services:
+  # ── Edge ──
+  caddy:
+    <<: *service
+    image: caddy:2.8-alpine
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      SITE_ADDRESS: ${DOMAIN}
+    volumes:
+      # Shared with the Helm chart, so both route the same way.
+      - ../helm/logixai/files/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [web, identity, problem, submission, exam, arena, billing, socket]
+
+  web:
+    <<: *service
+    image: ${REGISTRY:-logixai}/web:${TAG:-latest}
+    build: { context: ../.., dockerfile: deploy/docker/web.Dockerfile }
+    environment:
+      PUBLIC_IDENTITY_API_URL: https://${DOMAIN}/api/identity/v1
+      PUBLIC_PROBLEM_API_URL: https://${DOMAIN}/api/problem/v1
+      PUBLIC_SUBMISSION_API_URL: https://${DOMAIN}/api/submission/v1
+      PUBLIC_EXAM_API_URL: https://${DOMAIN}/api/exam/v1
+      PUBLIC_ARENA_API_URL: https://${DOMAIN}/api/arena/v1
+      PUBLIC_BILLING_API_URL: https://${DOMAIN}/api/billing/v1
+      PUBLIC_SOCKET_URL: https://${DOMAIN}/realtime
+
+  # ── Services ──
+  identity:
+    <<: *service
+    image: ${REGISTRY:-logixai}/identity-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/identity-service", APP_DIR: identity-service, PORT: "3006" } }
+    environment:
+      <<: [*env, *redis-env]
+      RATE_LIMIT_STORE: redis
+      DB_CONNECTION_STRING: ${MONGODB_URI_BASE:?set MONGODB_URI_BASE}/logixai-identity${MONGODB_URI_OPTIONS:-}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?set JWT_PRIVATE_KEY}
+      JWT_KEY_ID: ${JWT_KEY_ID:-logixai-1}
+      BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
+      REFRESH_COOKIE_PATH: /api/identity/v1/auth
+    depends_on: { identity-migrate: { condition: service_completed_successfully } }
+
+  problem:
+    <<: *service
+    image: ${REGISTRY:-logixai}/problem-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/problem-service", APP_DIR: problem-service, PORT: "3001", START: src/index.js } }
+    environment:
+      <<: *env
+      DB_CONNECTION_STRING: ${MONGODB_URI_BASE}/logixai-problems${MONGODB_URI_OPTIONS:-}
+    depends_on: { problem-migrate: { condition: service_completed_successfully } }
+
+  submission:
+    <<: *service
+    image: ${REGISTRY:-logixai}/submission-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/submission-service", APP_DIR: submission-service, PORT: "3000", START: src/index.js } }
+    environment:
+      <<: [*env, *redis-env]
+      DB_CONNECTION_STRING: ${MONGODB_URI_BASE}/logixai-submissions${MONGODB_URI_OPTIONS:-}
+      PROBLEM_ADMIN_SERVICE_URL: http://problem:3001
+      SOCKET_SERVICE_URL: http://socket:3005
+    depends_on: { submission-migrate: { condition: service_completed_successfully } }
+
+  exam:
+    <<: *service
+    image: ${REGISTRY:-logixai}/exam-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/exam-service", APP_DIR: exam-service, PORT: "3007" } }
+    environment:
+      <<: [*env, *redis-env]
+      DB_CONNECTION_STRING: ${MONGODB_URI_BASE}/logixai-exams${MONGODB_URI_OPTIONS:-}
+      IDENTITY_API_URL: http://identity:3006/api/v1
+    depends_on: { exam-migrate: { condition: service_completed_successfully } }
+
+  arena:
+    <<: *service
+    image: ${REGISTRY:-logixai}/arena-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/arena-service", APP_DIR: arena-service, PORT: "3010" } }
+    environment:
+      <<: [*env, *redis-env]
+      DB_CONNECTION_STRING: ${MONGODB_URI_BASE}/logixai-arena${MONGODB_URI_OPTIONS:-}
+      IDENTITY_API_URL: http://identity:3006/api/v1
+      CODE_RUNS_PER_MINUTE: ${CODE_RUNS_PER_MINUTE:-12}
+      JUDGE_BUSY_BACKLOG: ${JUDGE_BUSY_BACKLOG:-500}
+    depends_on: { arena-migrate: { condition: service_completed_successfully } }
+
+  billing:
+    <<: *service
+    image: ${REGISTRY:-logixai}/billing-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/billing-service", APP_DIR: billing-service, PORT: "3011" } }
+    environment:
+      <<: [*env, *redis-env]
+      RATE_LIMIT_STORE: redis
+      DB_CONNECTION_STRING: ${MONGODB_URI_BASE}/logixai-billing${MONGODB_URI_OPTIONS:-}
+      IDENTITY_URL: http://identity:3006
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+    depends_on: { billing-migrate: { condition: service_completed_successfully } }
+
+  socket:
+    <<: *service
+    image: ${REGISTRY:-logixai}/socket-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/socket-service", APP_DIR: socket-service, PORT: "3005", START: src/server.js } }
+    environment:
+      <<: [*env, *redis-env]
+
+  # Judge workers: start sandbox containers on this host's Docker daemon, so they
+  # need the Docker socket (which is root-equivalent: run them on hosts that serve
+  # nothing else, see docs/deploy.md). Scale with `--scale evaluator=N`.
+  evaluator:
+    <<: *service
+    image: ${REGISTRY:-logixai}/evaluator-service:${TAG:-latest}
+    build: { <<: *image-defaults, args: { APP: "@logixai/evaluator-service", APP_DIR: evaluator-service, PORT: "3002" } }
+    user: root
+    stop_grace_period: 90s
+    environment:
+      <<: *redis-env
+      NODE_ENV: production
+      JUDGE_CONCURRENCY: ${JUDGE_CONCURRENCY:-2}
+      # Queue groups this evaluator serves ("python-ml:3,node-web,dsa"; empty = all).
+      JUDGE_QUEUES: ${JUDGE_QUEUES:-}
+      # Started, unused sandboxes kept ready per language.
+      JUDGE_WARM_POOL: ${JUDGE_WARM_POOL:-1}
+      JUDGE_IMAGE_REGISTRY: ${JUDGE_IMAGE_REGISTRY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # ── One-off migrations (run on every `up`, exit when done) ──
+  identity-migrate:
+    <<: *migrate
+    image: ${REGISTRY:-logixai}/identity-service:${TAG:-latest}
+    command: ["node", "dist/db/migrate.js"]
+    environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-identity${MONGODB_URI_OPTIONS:-}" }
+  problem-migrate:
+    <<: *migrate
+    image: ${REGISTRY:-logixai}/problem-service:${TAG:-latest}
+    command: ["node", "src/db/migrate.js"]
+    environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-problems${MONGODB_URI_OPTIONS:-}" }
+  submission-migrate:
+    <<: *migrate
+    image: ${REGISTRY:-logixai}/submission-service:${TAG:-latest}
+    command: ["node", "src/db/migrate.js"]
+    environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-submissions${MONGODB_URI_OPTIONS:-}" }
+  exam-migrate:
+    <<: *migrate
+    image: ${REGISTRY:-logixai}/exam-service:${TAG:-latest}
+    command: ["node", "dist/db/migrate.js"]
+    environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-exams${MONGODB_URI_OPTIONS:-}" }
+  arena-migrate:
+    <<: *migrate
+    image: ${REGISTRY:-logixai}/arena-service:${TAG:-latest}
+    command: ["node", "dist/db/migrate.js"]
+    environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-arena${MONGODB_URI_OPTIONS:-}" }
+  billing-migrate:
+    <<: *migrate
+    image: ${REGISTRY:-logixai}/billing-service:${TAG:-latest}
+    command: ["node", "dist/db/migrate.js"]
+    environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-billing${MONGODB_URI_OPTIONS:-}" }
+
+  # ── Data stores ──
+  redis:
+    <<: *service
+    image: redis:7-alpine
+    # Append-only file: queued judge jobs survive a restart. BullMQ needs noeviction.
+    command: ["sh", "-c", "exec redis-server --appendonly yes --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    environment: { REDIS_PASSWORD: "${REDIS_PASSWORD}" }
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Only with `--profile bundled-mongo` (then MONGODB_URI_BASE=mongodb://mongo:27017).
+  # A single node without a replica set: fine to try things out; use Atlas or a
+  # replica set for real traffic.
+  mongo:
+    <<: *service
+    profiles: [bundled-mongo]
+    image: mongo:7
+    volumes: [mongo-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  caddy-data:
+  caddy-config:
+  redis-data:
+  mongo-data:

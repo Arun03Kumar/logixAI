@@ -3,15 +3,30 @@ import type { Redis } from "ioredis";
 import {
   EvaluationJobPayloadSchema,
   JOB_NAMES,
+  JUDGE_PRIORITY,
   QUEUE_NAMES,
   SubmissionJobPayloadSchema,
+  judgeJobOptions,
+  judgeQueueFor,
 } from "@logixai/contracts";
 import type { Logger } from "@logixai/service-kit";
 import type { AttemptService, JudgeGateway } from "./services/attemptService.js";
 
-/** Sends exam code to the shared judge and asks for replies on the exam queue. */
+/**
+ * Sends exam code to the judge (the queue for its language) at the highest
+ * priority, and asks for replies on the exam queue.
+ */
 export function createQueueJudge(connection: Redis): JudgeGateway {
-  const queue = new Queue(QUEUE_NAMES.SUBMISSION, { connection });
+  const queues = new Map<string, Queue>();
+  const queueFor = (language: Parameters<typeof judgeQueueFor>[0]) => {
+    const name = judgeQueueFor(language);
+    let queue = queues.get(name);
+    if (!queue) {
+      queue = new Queue(name, { connection });
+      queues.set(name, queue);
+    }
+    return queue;
+  };
   return {
     async submit(request) {
       const first = request.testCases[0];
@@ -27,7 +42,7 @@ export function createQueueJudge(connection: Redis): JudgeGateway {
           replyQueue: QUEUE_NAMES.EXAM_EVALUATION,
         },
       });
-      await queue.add(JOB_NAMES.SUBMISSION, payload);
+      await queueFor(request.language).add(JOB_NAMES.SUBMISSION, payload, judgeJobOptions(JUDGE_PRIORITY.exam));
     },
   };
 }

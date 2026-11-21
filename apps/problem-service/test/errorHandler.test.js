@@ -4,6 +4,11 @@ import errorHandler from "../src/utils/errorHandler";
 
 function run(err, params = {}) {
   const res = {
+    headers: {},
+    set: vi.fn(function (name, value) {
+      this.headers[name] = value;
+      return this;
+    }),
     status: vi.fn(function (code) {
       this.statusCode = code;
       return this;
@@ -27,6 +32,8 @@ describe("problem-service errorHandler", () => {
     const res = run(castError, { id: "undefined" });
     expect(res.statusCode).toBe(404);
     expect(res.body.success).toBe(false);
+    // Errors are never cached, even on routes that allow public caching.
+    expect(res.headers["Cache-Control"]).toBe("no-store");
   });
 
   it("turns mongoose validation errors into 400", () => {

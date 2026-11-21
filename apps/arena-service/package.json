@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
-    "content:build": "tsx scripts/build-content.ts"
+    "content:build": "tsx scripts/build-content.ts",
+    "content:browser-check": "tsx scripts/check-browser-parity.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

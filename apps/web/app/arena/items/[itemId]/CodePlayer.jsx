@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { ArrowRight, CheckCircle2, Database, Eye, Lightbulb, ListChecks, Play, RotateCcw, Send, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Database, Eye, Lightbulb, ListChecks, Monitor, Play, RotateCcw, Send, XCircle } from "lucide-react";
 import { Button, Spinner, VerdictBadge, cn } from "@logixai/ui";
 import MathMarkdown from "@/app/components/MathMarkdown";
 import { configureJsx, editorOptions, handleEditorMount } from "@/app/coding-platform/components/problem/editorConfig";
 import { arenaApi } from "@/app/lib/api/arena";
+import { browserRunSupported, runInBrowser, warmUp } from "@/app/lib/runner/browserRunner";
 import DataTable, { TableDiff, isTableValue, parseJson } from "../../_components/DataTable";
 import LivePreview from "../../_components/LivePreview";
 import SimChart from "../../_components/SimChart";
@@ -100,11 +101,11 @@ function Mismatch({ expected, output }) {
   );
 }
 
-function Results({ submission, running, sql, visual }) {
+function Results({ submission, running, runStatus, sql, visual }) {
   if (running && !submission) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner className="size-3.5" /> Sending your code to the judge…
+        <Spinner className="size-3.5" /> {runStatus || "Sending your code to the judge…"}
       </p>
     );
   }
@@ -135,6 +136,12 @@ function Results({ submission, running, sql, visual }) {
         {submission.mode === "submit" && passedAll ? <span className="font-normal">· Accepted</span> : null}
         {submission.xpGained ? <span className="font-normal">· +{submission.xpGained} XP</span> : null}
       </p>
+      {submission.ranIn === "browser" ? (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Monitor className="size-3.5" />
+          Ran instantly in your browser on the examples. Submit runs every test on the judge.
+        </p>
+      ) : null}
       <ul className="space-y-2">
         {submission.tests.map((t) =>
           t.sample ? (
@@ -155,6 +162,12 @@ function Results({ submission, running, sql, visual }) {
               {t.verdict === "SUCCESS" && sql && t.output ? <ValueView json={t.output} caption="Your result" /> : null}
               {t.message ? (
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{t.message}</pre>
+              ) : null}
+              {t.printed ? (
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Printed</p>
+                  <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{t.printed}</pre>
+                </div>
               ) : null}
             </li>
           ) : (
@@ -285,7 +298,11 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
   const [passedNow, setPassedNow] = useState(false);
   const [submission, setSubmission] = useState(null);
   const [running, setRunning] = useState(false);
+  const [runStatus, setRunStatus] = useState("");
   const [hints, setHints] = useState(0);
+  // Run in the browser (instant, no server) for items verified to match the judge.
+  const inBrowser = item.runIn === "browser" && browserRunSupported();
+  const kit = useRef(null);
   const alive = useRef(true);
   const open = (item.status === "solved" || item.status === "revealed") && (!reviewMode || passedNow);
 
@@ -302,6 +319,17 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
   };
 
   const poll = async (id) => {
+    // The result is pushed as soon as it's judged; polling is the fallback.
+    try {
+      const pushed = await arenaApi.waitForResult(id);
+      if (!alive.current) return null;
+      if (pushed && pushed.status !== "pending") {
+        setSubmission(pushed);
+        return pushed;
+      }
+    } catch {
+      // Stream unavailable (proxy, network): poll instead.
+    }
     for (let i = 0; i < POLL_LIMIT && alive.current; i++) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       const s = await arenaApi.submission(id);
@@ -312,7 +340,49 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
     return null;
   };
 
+  /** Loads the runner kit and starts Pyodide in the background, so the first Run is quick. */
+  const prepareBrowser = () => {
+    if (!inBrowser || kit.current) return;
+    kit.current = arenaApi.runner(item.id).then(
+      (k) => {
+        warmUp(k.pyodideVersion);
+        return k;
+      },
+      (err) => {
+        kit.current = null;
+        throw err;
+      },
+    );
+    kit.current.catch(() => {});
+  };
+
+  const runHere = async () => {
+    setRunning(true);
+    setPane("results");
+    setSubmission(null);
+    try {
+      prepareBrowser();
+      const result = await runInBrowser(await kit.current, code, (text) => alive.current && setRunStatus(text));
+      if (alive.current) setSubmission(result);
+      return true;
+    } catch (err) {
+      // Old browser, blocked CDN, out of memory...: the judge runs it instead.
+      console.warn("Browser run unavailable, using the judge:", err);
+      return false;
+    } finally {
+      if (alive.current) {
+        setRunning(false);
+        setRunStatus("");
+      }
+    }
+  };
+
   const run = async (mode) => {
+    if (mode === "run" && inBrowser && (await runHere())) return;
+    if (!signedIn) {
+      toast.error("Sign in to run your code.");
+      return;
+    }
     setRunning(true);
     setPane("results");
     setSubmission(null);
@@ -446,13 +516,23 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
           </Button>
           {signedIn ? (
             <>
-              <Button size="sm" onClick={() => run("run")} disabled={running}>
+              <Button size="sm" onClick={() => run("run")} disabled={running} title={inBrowser ? "Runs the examples in your browser" : undefined}>
                 <Play />
                 Run
               </Button>
               <Button variant="primary" size="sm" onClick={() => run("submit")} disabled={running}>
                 <Send />
                 Submit
+              </Button>
+            </>
+          ) : inBrowser ? (
+            <>
+              <Button size="sm" onClick={() => run("run")} disabled={running} title="Runs the examples in your browser">
+                <Play />
+                Run
+              </Button>
+              <Button asChild variant="primary" size="sm">
+                <Link href={`/login?next=${itemHref(item.area, item.id)}`}>Sign in to submit</Link>
               </Button>
             </>
           ) : (
@@ -470,7 +550,11 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
             theme="vs-dark"
             value={code}
             onChange={change}
-            onMount={handleEditorMount}
+            onMount={(editor, monaco) => {
+              handleEditorMount(editor, monaco);
+              // Fetch the runner and start Python as soon as the learner starts typing.
+              editor.onDidFocusEditorText(prepareBrowser);
+            }}
             options={editorOptions(js ? { tabSize: 2 } : {})}
           />
         </div>
@@ -511,7 +595,7 @@ export default function CodePlayer({ item, signedIn, onItemChange, reviewMode = 
           )}
           aria-live="polite"
         >
-          <Results submission={submission} running={running} sql={sql} visual={item.visual} />
+          <Results submission={submission} running={running} runStatus={runStatus} sql={sql} visual={item.visual} />
         </div>
       </div>
     </div>

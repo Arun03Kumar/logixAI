@@ -3,15 +3,30 @@ import type { Redis } from "ioredis";
 import {
   EvaluationJobPayloadSchema,
   JOB_NAMES,
+  JUDGE_PRIORITY,
   QUEUE_NAMES,
   SubmissionJobPayloadSchema,
+  judgeJobOptions,
+  judgeQueueFor,
 } from "@logixai/contracts";
 import type { Logger } from "@logixai/service-kit";
-import type { ArenaService, JudgeGateway } from "./services/arenaService.js";
+import type { ArenaService, JudgeGateway, JudgeRequest } from "./services/arenaService.js";
 
-/** Sends arena code to the shared judge (PYTHON_ML or NODE_WEB sandbox, JSON comparison). */
+/**
+ * Sends arena code to the judge: the queue for its sandbox image
+ * (python-ml or node-web), with Submit ahead of Run.
+ */
 export function createQueueJudge(connection: Redis): JudgeGateway {
-  const queue = new Queue(QUEUE_NAMES.SUBMISSION, { connection });
+  const queues = new Map<string, Queue>();
+  const queueFor = (language: JudgeRequest["language"]) => {
+    const name = judgeQueueFor(language);
+    let queue = queues.get(name);
+    if (!queue) {
+      queue = new Queue(name, { connection });
+      queues.set(name, queue);
+    }
+    return queue;
+  };
   return {
     async submit(request) {
       const payload = SubmissionJobPayloadSchema.parse({
@@ -26,7 +41,15 @@ export function createQueueJudge(connection: Redis): JudgeGateway {
           checker: request.checker,
         },
       });
-      await queue.add(JOB_NAMES.SUBMISSION, payload, { removeOnComplete: 1000, removeOnFail: 1000 });
+      await queueFor(request.language).add(
+        JOB_NAMES.SUBMISSION,
+        payload,
+        judgeJobOptions(request.mode === "submit" ? JUDGE_PRIORITY.submit : JUDGE_PRIORITY.run),
+      );
+    },
+    async backlog(language) {
+      const counts = await queueFor(language).getJobCounts("waiting", "prioritized");
+      return (counts.waiting ?? 0) + (counts.prioritized ?? 0);
     },
   };
 }

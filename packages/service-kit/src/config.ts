@@ -14,6 +14,8 @@ export const env = {
       .string()
       .optional()
       .transform((v) => (v ? v : undefined)),
+  /** Where rate-limit counters live: "memory" (one process) or "redis" (shared by all replicas). */
+  rateLimitStore: () => z.enum(["memory", "redis"]).default("memory"),
   /** "true"/"false"/"1"/"0" -> boolean */
   flag: (fallback: boolean) =>
     z

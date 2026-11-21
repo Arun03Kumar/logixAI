@@ -136,12 +136,12 @@ class DockerSandbox implements Sandbox {
  * no network, no capabilities, read-only image, unprivileged user,
  * memory / CPU / process limits, and small tmpfs mounts for the code.
  */
-export function createDockerSandboxFactory(docker = new Docker()): SandboxFactory {
+export function createDockerSandboxFactory(docker = new Docker(), registry?: string): SandboxFactory {
   return {
     async create(language: LanguageDefinition) {
       const memoryBytes = language.memoryMb * 1024 * 1024;
       const container = await docker.createContainer({
-        Image: language.dockerImage,
+        Image: resolveImage(language.dockerImage, registry),
         Cmd: ["sleep", String(MAX_LIFETIME_SEC)],
         WorkingDir: SANDBOX_DIR,
         User: SANDBOX_USER,
@@ -173,6 +173,14 @@ export function createDockerSandboxFactory(docker = new Docker()): SandboxFactor
       return new DockerSandbox(container);
     },
   };
+}
+
+/**
+ * Our own judge images (`logixai/<name>:<tag>`) come from `registry` when one
+ * is set; public images (gcc, eclipse-temurin, ...) are used as they are.
+ */
+export function resolveImage(image: string, registry?: string) {
+  return registry && image.startsWith("logixai/") ? `${registry}/${image.slice("logixai/".length)}` : image;
 }
 
 /** Pulls any missing judge images up front, so the first submission isn't slow. */

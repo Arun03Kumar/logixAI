@@ -1,3 +1,4 @@
+import { applyBrowserRunRecord, readBrowserRunRecord } from "./browserRun.js";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -53,6 +54,8 @@ export type CatalogItem = ItemSource & {
   judge?: { sample: JudgeTest[]; hidden: JudgeTest[] };
   /** Dataset challenges: the first rows and split sizes, for the item page. */
   datasetPreview?: DatasetSplit["preview"];
+  /** Its browser Run was checked against the judge (content:browser-check); see browserRun.ts. */
+  browserVerified?: boolean;
 };
 
 export interface CatalogTopic extends Omit<TopicFile, "items"> {
@@ -350,6 +353,7 @@ export function loadCatalog(dir: string): Catalog {
     ? GeneratedTestsSchema.parse(JSON.parse(readFileSync(generatedPath, "utf8")))
     : { items: {} };
   const catalog = buildCatalog(sources, generated, dir);
+  applyBrowserRunRecord(catalog.items, readBrowserRunRecord(dir));
   catalog.practice = loadPracticeConfig(dir, catalog);
   catalog.courses = loadCourses(dir, catalog);
   return catalog;

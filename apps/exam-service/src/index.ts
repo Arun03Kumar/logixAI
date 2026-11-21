@@ -1,8 +1,14 @@
 import {
+  closeMongo,
+  closeRedis,
   connectMongo,
   createAccessTokenVerifier,
   createLogger,
   createRedisConnection,
+  mongoReady,
+  onShutdown,
+  redisReady,
+  registerHealthRoutes,
 } from "@logixai/service-kit";
 import { config } from "./config.js";
 import { buildApp } from "./app.js";
@@ -38,15 +44,27 @@ async function start() {
       corsOrigins: config.CORS_ORIGINS,
     });
 
-    startJudgeResultWorker(redis, attempts, logger);
+    const worker = startJudgeResultWorker(redis, attempts, logger);
 
     // Auto-submit attempts whose time ran out while the student was away.
-    setInterval(() => {
+    const sweep = setInterval(() => {
       attempts
         .sweepExpired()
         .then((n) => n && logger.info(`Auto-submitted ${n} expired attempt(s)`))
         .catch((err) => logger.error(`Expired-attempt sweep failed: ${err.message}`));
     }, SWEEP_EVERY_MS);
+
+    registerHealthRoutes(app, { mongo: mongoReady, redis: redisReady(redis) });
+    onShutdown(
+      [
+        ["sweep", () => clearInterval(sweep)],
+        ["http", () => app.close()],
+        ["judge-result-worker", () => worker.close()],
+        closeRedis(redis),
+        closeMongo,
+      ],
+      { logger },
+    );
 
     await app.listen({ port: config.PORT, host: "0.0.0.0" });
     logger.info(`exam-service listening on port ${config.PORT}`);

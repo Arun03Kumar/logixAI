@@ -44,3 +44,6 @@ dist/
 
 # editors
 .idea/
+
+# Downloaded Pyodide for content:browser-check
+.cache/

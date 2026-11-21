@@ -10,6 +10,7 @@ import {
   type AnswerInput,
   type AnswerResult,
   type ArenaDashboard,
+  type BrowserRunnerKit,
   type ArenaSubmissionSummary,
   type ArenaSubmissionView,
   type ArenaTestResult,
@@ -32,9 +33,17 @@ import {
   type TrackDetail,
   type TrackSummary,
 } from "@logixai/contracts";
-import { BadRequestError, ConflictError, ForbiddenError, InternalServerError, NotFoundError } from "@logixai/service-kit";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  InternalServerError,
+  NotFoundError,
+  TooManyRequestsError,
+} from "@logixai/service-kit";
 import type { CourseConfig } from "../content/courseConfig.js";
 import { jsHarnessFor, type Catalog, type CatalogItem, type CatalogTopic, type CatalogTrack } from "../content/catalog.js";
+import { browserRunnerKit, runIn } from "../content/browserRun.js";
 import { buildJudgeProgram, buildSqlJudgeProgram, formatCall } from "../content/harness.js";
 import { buildJsJudgeProgram, formatJsCall } from "../content/harnessJs.js";
 import { addDays, dayOf, streaks } from "../lib/days.js";
@@ -58,10 +67,14 @@ export interface JudgeRequest {
   tests: { input: string; output: string }[];
   /** json with the item's tolerance, or metric for dataset challenges. */
   checker: Checker;
+  /** Submits are judged before runs when the queue is busy. */
+  mode: "run" | "submit";
 }
 
 export interface JudgeGateway {
   submit(request: JudgeRequest): Promise<void>;
+  /** Jobs waiting for a judge in this language's queue (backpressure). */
+  backlog?(language: JudgeRequest["language"]): Promise<number>;
 }
 
 export interface Deps {
@@ -71,6 +84,13 @@ export interface Deps {
   now?: () => Date;
   /** Told about every graded answer and submit (mock interviews and contests record them). */
   onOutcome?: (userId: string, itemId: string, event: "correct" | "wrong", at: Date) => Promise<void>;
+  /**
+   * Runs are refused with 429 ("busy, try again") while more than this many
+   * jobs wait in the judge queue. Submits are always accepted.
+   */
+  busyBacklog?: number;
+  /** Told when a submission's result is in (pushes it to the learner's open stream). */
+  onJudged?: (submission: ArenaSubmissionView, userId: string) => Promise<void>;
 }
 
 /** A learner may have one run waiting for the judge at a time (stale after this). */
@@ -378,6 +398,7 @@ export class ArenaService {
           tables: this.sampleTables(item, t.args)!,
         }));
         view.hiddenTestCount = item.judge?.hidden.length ?? 0;
+        view.runIn = runIn(item) ?? "server";
         if (open) view.solution = item.solution;
         break;
       case "code":
@@ -397,6 +418,7 @@ export class ArenaService {
           };
         });
         view.hiddenTestCount = item.judge?.hidden.length ?? 0;
+        view.runIn = runIn(item) ?? "server";
         if (item.scoring) view.scoring = item.scoring;
         if (item.dataset && item.datasetPreview) view.dataset = { target: item.dataset.target, ...item.datasetPreview };
         if (open) view.solution = item.solution;
@@ -573,6 +595,15 @@ export class ArenaService {
     if ((await this.deps.store.submissions.countPendingSince(userId, new Date(now.getTime() - PENDING_WINDOW_MS))) > 0) {
       throw new ConflictError("Your previous run is still being judged. Try again in a moment.");
     }
+    const language = item.type !== "sql" && item.language === "javascript" ? "NODE_WEB" : "PYTHON_ML";
+    // Backpressure: when the judge is far behind, a Run is refused quickly
+    // rather than queued for minutes. A Submit is always accepted.
+    if (input.mode === "run" && this.deps.judge.backlog && this.deps.busyBacklog !== undefined) {
+      const waiting = await this.deps.judge.backlog(language).catch(() => 0);
+      if (waiting > this.deps.busyBacklog) {
+        throw new TooManyRequestsError("The judge is very busy right now. Try Run again in a minute — Submit still works.", { waiting });
+      }
+    }
     const tests = input.mode === "submit" ? [...item.judge.sample, ...item.judge.hidden] : item.judge.sample;
     const submission = await this.deps.store.submissions.create({
       userId,
@@ -593,7 +624,8 @@ export class ArenaService {
       await this.deps.judge.submit({
         submissionId: submission.id,
         userId,
-        language: item.type !== "sql" && item.language === "javascript" ? "NODE_WEB" : "PYTHON_ML",
+        language,
+        mode: input.mode,
         program:
           item.type === "sql"
             ? buildSqlJudgeProgram({ tables: item.tables, ordered: item.ordered }, input.code)
@@ -617,6 +649,22 @@ export class ArenaService {
       throw err;
     }
     return this.submissionView(submission);
+  }
+
+  /**
+   * What the browser needs to run this item's sample tests itself (Run only;
+   * Submit always goes to the judge). Same access rules as the item.
+   */
+  getRunner(itemId: string, pro = false): BrowserRunnerKit {
+    const item = this.mustItem(itemId);
+    this.requireAccess(item, pro);
+    const sample = (item.judge?.sample ?? []).map((t, i) => ({
+      call: this.sampleCall(item, t.args, i),
+      expected: this.expectedText(item, t.expected),
+    }));
+    const kit = browserRunnerKit(item, sample);
+    if (!kit) throw new NotFoundError("Browser runner", itemId);
+    return kit;
   }
 
   /** Applies a judge result (from ArenaEvaluationQueue). */
@@ -665,6 +713,7 @@ export class ArenaService {
       tests,
       judgedAt: this.now(),
     });
+    if (done) await this.deps.onJudged?.(this.submissionView(done), done.userId).catch(() => {});
     if (!done || !item || done.mode !== "submit") return;
     // Judge errors (our side) don't count against the learner.
     if (status !== "error") await this.deps.onOutcome?.(done.userId, item.id, status === "passed" ? "correct" : "wrong", this.now());

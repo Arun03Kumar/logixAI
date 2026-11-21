@@ -1,0 +1,124 @@
+{{- /* One Deployment + Service (+ HPA, PodDisruptionBudget) per entry in .Values.services. */ -}}
+{{- $root := . }}
+{{- range $name, $svc := .Values.services }}
+{{- $replicas := $svc.replicas | default $root.Values.defaults.replicas }}
+{{- $hpa := $svc.autoscaling | default $root.Values.defaults.autoscaling }}
+{{- $resources := $svc.resources | default $root.Values.defaults.resources }}
+{{- $probe := $svc.probePath | default "/readyz" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  {{- if not $hpa.enabled }}
+  replicas: {{ $replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/name: {{ $name }} }
+  template:
+    metadata:
+      labels: {{- include "logixai.labels" $root | nindent 8 }}
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Longer than SHUTDOWN_DRAIN_MS + the services' 25 s shutdown limit.
+      terminationGracePeriodSeconds: 40
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000 }
+      containers:
+        - name: {{ $name }}
+          image: {{ include "logixai.image" (dict "root" $root "name" $svc.image) }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: {{ $svc.port }} }]
+          env:
+            - name: PORT
+              value: {{ $svc.port | quote }}
+            {{- if eq $name "web" }}
+            {{- range $key, $prefix := dict "IDENTITY_API_URL" "identity" "PROBLEM_API_URL" "problem" "SUBMISSION_API_URL" "submission" "EXAM_API_URL" "exam" "ARENA_API_URL" "arena" "BILLING_API_URL" "billing" }}
+            - name: PUBLIC_{{ $key }}
+              value: https://{{ $root.Values.domain }}/api/{{ $prefix }}/v1
+            {{- end }}
+            - name: PUBLIC_SOCKET_URL
+              value: https://{{ $root.Values.domain }}/realtime
+            {{- else }}
+            {{- include "logixai.commonEnv" $root | nindent 12 }}
+            {{- if $svc.database }}
+            {{- include "logixai.mongoEnv" (dict "root" $root "database" $svc.database) | nindent 12 }}
+            {{- end }}
+            {{- if $svc.redis }}
+            {{- include "logixai.redisEnv" $root | nindent 12 }}
+            {{- end }}
+            {{- range $svc.secretEnv }}
+            - name: {{ . }}
+              valueFrom: { secretKeyRef: { name: {{ $root.Values.existingSecret }}, key: {{ . }} } }
+            {{- end }}
+            {{- range $svc.optionalSecretEnv }}
+            - name: {{ . }}
+              valueFrom: { secretKeyRef: { name: {{ $root.Values.existingSecret }}, key: {{ . }}, optional: true } }
+            {{- end }}
+            {{- end }}
+            {{- range $k, $v := $svc.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: {{ $probe }}, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: {{ if eq $name "web" }}{{ $probe }}{{ else }}/healthz{{ end }}, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 3
+          resources: {{- toYaml $resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/name: {{ $name }} }
+  ports: [{ name: http, port: {{ $svc.port }}, targetPort: http }]
+{{- if $hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ $hpa.minReplicas }}
+  maxReplicas: {{ $hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $hpa.targetCPU }} } }
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "logixai.labels" $root | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/name: {{ $name }} }
+{{- end }}
