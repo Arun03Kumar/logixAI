@@ -18,7 +18,7 @@
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "test": "turbo run test",
-    "db:migrate": "turbo run db:migrate",
+    "db:migrate": "turbo run db:migrate --concurrency=1",
     "judge:images": "docker build -t logixai/python-ml:4 judge-images/python-ml && docker build -t logixai/node-web:1 judge-images/node-web",
     "content:build": "npm run content:build -w @logixai/arena-service",
     "content:check": "npm run content:build -w @logixai/arena-service -- --check"
