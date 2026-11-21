@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { loadConfig } from "./config";
 import type mongoose from "mongoose";
 import type { Logger } from "./logger";
 
@@ -83,4 +85,13 @@ export async function runMigrations(options: {
   }
   log(applied.length ? `Applied ${applied.length} migration(s)` : "No pending migrations");
   return applied;
+}
+
+/**
+ * Config for `npm run db:migrate` / the deploy migration job: only the
+ * database. Migrations must not need the service's other settings (JWT keys,
+ * Redis), which a production migration job doesn't have.
+ */
+export function loadMigrationConfig(serviceName: string) {
+  return loadConfig(z.object({ DB_CONNECTION_STRING: z.string().min(1) }), { serviceName: `${serviceName}-migrate` });
 }

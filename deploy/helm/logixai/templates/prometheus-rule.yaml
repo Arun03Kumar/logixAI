@@ -1,0 +1,10 @@
+{{- if .Values.monitoring.prometheusRule }}
+{{- /* The alert rules in files/alerts.yml, for the Prometheus Operator. */}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: logixai
+  labels: {{- include "logixai.labels" . | nindent 4 }}
+spec:
+{{ .Files.Get "files/alerts.yml" | fromYaml | toYaml | indent 2 }}
+{{- end }}

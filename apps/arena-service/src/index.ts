@@ -11,6 +11,7 @@ import {
   onShutdown,
   redisReady,
   registerHealthRoutes,
+  registerMetricsRoute,
 } from "@logixai/service-kit";
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
@@ -72,9 +73,12 @@ async function start() {
       rateLimitRedis: limitsRedis,
       resultHub,
       busyBacklog: config.JUDGE_BUSY_BACKLOG,
+      busyWaitMs: config.JUDGE_BUSY_WAIT_SECONDS * 1000,
+      freeDailyRuns: config.FREE_DAILY_CODE_RUNS,
     });
     const worker = startJudgeResultWorker(redis, arena, logger);
     registerHealthRoutes(app, { mongo: mongoReady, redis: redisReady(redis) });
+    registerMetricsRoute(app);
     onShutdown(
       [
         ["http", () => app.close()],

@@ -15,6 +15,8 @@ export const config = loadConfig(
       JWT_KEY_ID: z.string().default("logixai-1"),
       JWT_ISSUER: z.string().default(DEFAULT_TOKEN_ISSUER),
       ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
+      /** Sign-up / sign-in attempts per minute per IP. Raise only on staging for load tests. */
+      AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
       REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(30),
       /** Public path of the auth routes, for the refresh cookie (behind the proxy: /api/identity/v1/auth). */
       REFRESH_COOKIE_PATH: z.string().startsWith("/").default("/api/v1/auth"),

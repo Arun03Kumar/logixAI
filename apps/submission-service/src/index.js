@@ -1,4 +1,11 @@
-const fastify = require("fastify")({ logger: true });
+const {
+  fastifyRequestIdOptions,
+  instrumentHttp,
+  registerMetricsRoute,
+} = require("@logixai/service-kit");
+const fastify = require("fastify")({ logger: true, ...fastifyRequestIdOptions });
+// Request timing per route (/metrics) and X-Request-Id on every response.
+instrumentHttp(fastify, "submission-service", { error: (msg) => fastify.log.error(msg) });
 const cors = require("@fastify/cors");
 const {
   closeMongo,
@@ -24,6 +31,7 @@ async function start() {
     fastify.log.info("db connected");
 
     registerHealthRoutes(fastify, { mongo: mongoReady, redis: redisReady(redis) });
+    registerMetricsRoute(fastify);
     // 0.0.0.0, not the default localhost, so the service is reachable inside a container.
     await fastify.listen({ port: PORT, host: "0.0.0.0" });
 

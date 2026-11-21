@@ -7,6 +7,7 @@ import {
   mongoReady,
   onShutdown,
   registerHealthRoutes,
+  registerMetricsRoute,
 } from "@logixai/service-kit";
 import { config } from "./config.js";
 import { buildApp } from "./app.js";
@@ -55,12 +56,15 @@ async function start() {
       secureCookies: config.NODE_ENV === "production",
       refreshTokenTtlDays: config.REFRESH_TOKEN_TTL_DAYS,
       refreshCookiePath: config.REFRESH_COOKIE_PATH,
+      authRateLimit: config.AUTH_RATE_LIMIT_PER_MINUTE,
       adminEmails: config.BOOTSTRAP_ADMIN_EMAILS,
       ...(config.INTERNAL_API_TOKEN ? { internalToken: config.INTERNAL_API_TOKEN } : {}),
       ...(limitsRedis ? { rateLimitRedis: limitsRedis } : {}),
     });
 
     registerHealthRoutes(app, { mongo: mongoReady });
+
+    registerMetricsRoute(app);
     onShutdown([["http", () => app.close()], ...(limitsRedis ? [closeRedis(limitsRedis)] : []), closeMongo], { logger });
 
     await app.listen({ port: config.PORT, host: "0.0.0.0" });

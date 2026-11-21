@@ -390,6 +390,13 @@ API (arena-service, `/api/v1/arena`, signed in or not):
 Items with `access: pro` are locked for users without Pro, and free users
 have a daily cap on code runs; see [billing.md](billing.md).
 
+
+`GET /api/v1/arena/problems` is paged: `limit` (default 50, at most 100) and
+the `nextCursor` of the previous page as `cursor`. `total`, `solved` and `tags`
+always cover every matching problem, so filters and counts don't depend on how
+many pages are loaded; the problems page shows "Show N more". A cursor names
+the last item of the previous page, so after a deploy that removes that item
+the next request answers 400 and the page reloads from the start.
 ## Mock interviews, contests and profiles
 
 Both mock interviews and contests are **sessions** (`practice_sessions`): a

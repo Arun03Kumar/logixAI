@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { metrics } from "./metrics";
 import type { Logger } from "./logger";
 
 export interface MongoOptions {
@@ -27,6 +28,18 @@ export interface MongoOptions {
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const poolInUse = metrics.gauge("mongodb_pool_checked_out", "MongoDB connections in use (checked out of the pool).");
+const poolMax = metrics.gauge("mongodb_pool_max", "MongoDB pool size (MONGO_MAX_POOL_SIZE).");
+
+/** Counts connections in use, so a pool too small for the load shows up on the dashboard. */
+function trackPool(service: string, max: number) {
+  const client = mongoose.connection.getClient();
+  poolInUse.set({ service }, 0);
+  poolMax.set({ service }, max);
+  client.on("connectionCheckedOut", () => poolInUse.inc({ service }));
+  client.on("connectionCheckedIn", () => poolInUse.inc({ service }, -1));
+}
 
 /** A positive integer from the environment, or undefined when unset/empty/invalid. */
 function envInt(name: string) {
@@ -63,6 +76,7 @@ export async function connectMongo(
         ...(options.appName ? { appName: options.appName } : {}),
       });
       logger?.info(`Connected to MongoDB (database "${connection.connection.name}")`);
+      trackPool(options.appName ?? connection.connection.name, poolSettings(options).maxPoolSize);
       return connection;
     } catch (err) {
       if (attempt >= retries) throw err;

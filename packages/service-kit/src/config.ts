@@ -51,7 +51,9 @@ export function loadConfig<S extends z.ZodObject>(
 ): Readonly<z.infer<S>> {
   dotenv.config({ quiet: true });
 
-  const result = schema.safeParse(process.env);
+  // An empty variable (KEY= in a .env file) means "use the default", not "".
+  const vars = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== ""));
+  const result = schema.safeParse(vars);
   if (!result.success) {
     const name = options.serviceName ?? "service";
     const problems = result.error.issues

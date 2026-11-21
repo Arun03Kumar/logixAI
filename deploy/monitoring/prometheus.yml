@@ -1,0 +1,25 @@
+# Prometheus for the Compose stack (`--profile monitoring`, docs/deploy.md).
+# Every service serves /metrics on its own port; DNS A records find every
+# replica of a scaled service (`--scale arena=3`).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: logixai
+    dns_sd_configs:
+      - { names: [identity], type: A, port: 3006 }
+      - { names: [problem], type: A, port: 3001 }
+      - { names: [submission], type: A, port: 3000 }
+      - { names: [exam], type: A, port: 3007 }
+      - { names: [arena], type: A, port: 3010 }
+      - { names: [billing], type: A, port: 3011 }
+      - { names: [socket], type: A, port: 3005 }
+      - { names: [evaluator], type: A, port: 3002 }
+    relabel_configs:
+      # instance = "<service>:<port>/<ip>", so replicas stay apart.
+      - source_labels: [__meta_dns_name]
+        target_label: component

@@ -149,6 +149,9 @@ export function createDockerSandboxFactory(docker = new Docker(), registry?: str
         NetworkDisabled: true,
         Tty: false,
         HostConfig: {
+          // Docker deletes the container when it stops (lifetime reached), so a
+          // crashed evaluator can't leave sandboxes behind.
+          AutoRemove: true,
           NetworkMode: "none",
           Memory: memoryBytes,
           MemorySwap: memoryBytes, // no swap

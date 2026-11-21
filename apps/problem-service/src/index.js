@@ -5,9 +5,18 @@ const logger = require("./config/logger.config");
 const connect_db = require("./config/db.config");
 const apiRouter = require("./routes");
 const errorHandler = require("./utils/errorHandler");
-const { closeMongo, mongoReady, onShutdown, registerHealthRoutes } = require("@logixai/service-kit");
+const {
+  closeMongo,
+  instrumentHttp,
+  mongoReady,
+  onShutdown,
+  registerHealthRoutes,
+  registerMetricsRoute,
+} = require("@logixai/service-kit");
 
 const app = express();
+// Request timing per route (/metrics) and X-Request-Id on every response; before the routes.
+instrumentHttp(app, "problem-service", logger);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -16,6 +25,7 @@ app.use(express.text());
 app.use(cors({ origin: "*" }));
 
 registerHealthRoutes(app, { mongo: mongoReady });
+registerMetricsRoute(app);
 
 app.use("/api", apiRouter);
 

@@ -15,6 +15,16 @@ describe("loadConfig", () => {
     process.env = { ...saved };
   });
 
+  it("treats an empty variable as unset, so the default applies", () => {
+    process.env.LX_TEST_LIMIT = "";
+    process.env.LX_TEST_NAME = "   ";
+    const cfg = loadConfig(
+      z.object({ LX_TEST_LIMIT: z.coerce.number().int().positive().default(30), LX_TEST_NAME: z.string().default("x") }),
+      { exitOnError: false },
+    );
+    expect(cfg).toMatchObject({ LX_TEST_LIMIT: 30, LX_TEST_NAME: "x" });
+  });
+
   it("applies defaults and coerces numbers", () => {
     delete process.env.PORT;
     process.env.REDIS_PORT = "6380";

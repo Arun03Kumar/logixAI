@@ -1,12 +1,22 @@
 import express from "express";
 import { Queue } from "bullmq";
 import { JUDGE_QUEUES, LANGUAGES, judgeQueueGroup, type LanguageDefinition } from "@logixai/contracts";
-import { closeRedis, createLogger, onShutdown, redisReady, registerHealthRoutes } from "@logixai/service-kit";
+import {
+  closeRedis,
+  createLogger,
+  instrumentHttp,
+  metrics,
+  onShutdown,
+  redisReady,
+  registerHealthRoutes,
+  registerMetricsRoute,
+} from "@logixai/service-kit";
 import redis from "./config/redisConfig.js";
 import {
   BASE_TIME_LIMIT_MS,
   COMPILE_TIMEOUT_MS,
   JUDGE_CONCURRENCY,
+  JUDGE_FORK_SERVER,
   JUDGE_IMAGE_REGISTRY,
   JUDGE_QUEUES as SERVED,
   JUDGE_WARM_POOL,
@@ -44,6 +54,7 @@ async function start() {
       baseTimeLimitMs: BASE_TIME_LIMIT_MS,
       compileTimeoutMs: COMPILE_TIMEOUT_MS,
       submissionBudgetMs: SUBMISSION_BUDGET_MS,
+      forkServer: JUDGE_FORK_SERVER,
     },
     log: (msg: string) => logger.warn(msg),
   };
@@ -53,7 +64,19 @@ async function start() {
   // Read-only handles for queue lengths (autoscaling reads them via /queue-stats).
   const queues = SERVED.map(({ group }) => ({ group, queue: new Queue(JUDGE_QUEUES[group], { connection: redis }) }));
 
+  // Backlog and warm sandboxes, read on every scrape.
+  metrics.gauge("judge_queue_waiting", "Jobs waiting in each judge queue this evaluator serves.", async (g) => {
+    for (const { group, queue } of queues) {
+      const c = await queue.getJobCounts("waiting", "prioritized");
+      g.set({ group }, (c.waiting ?? 0) + (c.prioritized ?? 0));
+    }
+  });
+  metrics.gauge("judge_warm_sandboxes", "Started, unused sandboxes ready per language.", (g) => {
+    for (const [language, n] of Object.entries(sandboxes.stats())) g.set({ language }, n);
+  });
+
   const app = express();
+  instrumentHttp(app, "evaluator-service", logger);
   app.get("/ping", (_req, res) => {
     res.json({ message: "evaluator service is alive", queues: SERVED });
   });
@@ -77,6 +100,7 @@ async function start() {
     }
   });
   registerHealthRoutes(app, { redis: redisReady(redis) });
+  registerMetricsRoute(app);
   const server = app.listen(PORT, () => {
     const served = SERVED.map((s) => `${s.group}×${s.concurrency ?? JUDGE_CONCURRENCY}`).join(", ");
     logger.info(`evaluator-service listening on port ${PORT} (queues: ${served}; warm pool ${JUDGE_WARM_POOL} per language)`);

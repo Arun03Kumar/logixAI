@@ -4,8 +4,9 @@
  * new version.
  */
 const mongoose = require("mongoose");
-const { connectMongo, createLogger, runMigrations } = require("@logixai/service-kit");
-const { DB_CONNECTION_STRING } = require("../config/serverConfig");
+const { connectMongo, createLogger, loadMigrationConfig, runMigrations } = require("@logixai/service-kit");
+// Only the database: a migration job doesn't get the service's other settings.
+const { DB_CONNECTION_STRING } = loadMigrationConfig("submission-service");
 require("../models/submissionModel"); // registers the model whose indexes get synced
 const migrations = require("./migrations");
 

@@ -1,4 +1,4 @@
-import { DEFAULT_TOKEN_ISSUER } from "@logixai/contracts";
+import { DEFAULT_TOKEN_ISSUER, FREE_DAILY_CODE_RUNS } from "@logixai/contracts";
 import { env, loadConfig, z } from "@logixai/service-kit";
 
 export const config = loadConfig(
@@ -25,6 +25,10 @@ export const config = loadConfig(
       CODE_RUNS_PER_MINUTE: z.coerce.number().int().positive().default(12),
       /** Server Runs get "busy, try again" (429) while more jobs than this wait in the judge queue. */
       JUDGE_BUSY_BACKLOG: z.coerce.number().int().positive().default(500),
+      /** ...or while the next job to be judged has waited longer than this many seconds. */
+      JUDGE_BUSY_WAIT_SECONDS: z.coerce.number().int().positive().default(30),
+      /** Free-plan server runs per day per learner. Raise only on staging, for load tests. */
+      FREE_DAILY_CODE_RUNS: z.coerce.number().int().positive().default(FREE_DAILY_CODE_RUNS),
     })
     .refine((c) => c.NODE_ENV !== "production" || Boolean(c.REDIS_PASSWORD), {
       message: "REDIS_PASSWORD is required in production",

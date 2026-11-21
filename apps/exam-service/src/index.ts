@@ -9,6 +9,7 @@ import {
   onShutdown,
   redisReady,
   registerHealthRoutes,
+  registerMetricsRoute,
 } from "@logixai/service-kit";
 import { config } from "./config.js";
 import { buildApp } from "./app.js";
@@ -55,6 +56,8 @@ async function start() {
     }, SWEEP_EVERY_MS);
 
     registerHealthRoutes(app, { mongo: mongoReady, redis: redisReady(redis) });
+
+    registerMetricsRoute(app);
     onShutdown(
       [
         ["sweep", () => clearInterval(sweep)],

@@ -38,6 +38,8 @@ const config = loadConfig(
         }
         return out;
       }),
+    /** Heavy Python (PyTorch, pandas) imports once per submission and forks per test. */
+    JUDGE_FORK_SERVER: env.flag(true),
     /** Started, unused sandboxes kept ready per language (0 = off). */
     JUDGE_WARM_POOL: z.coerce.number().int().min(0).max(16).default(1),
     /** Per-test time limit before the language multiplier (C++ ×1, Java ×2, Python ×3). */
@@ -77,4 +79,5 @@ export const {
   JUDGE_IMAGE_REGISTRY,
   JUDGE_QUEUES,
   JUDGE_WARM_POOL,
+  JUDGE_FORK_SERVER,
 } = config;

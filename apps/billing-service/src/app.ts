@@ -19,11 +19,16 @@ import {
   z,
   rateLimitStore,
   type RedisClient,
+  createLogger,
+  fastifyRequestIdOptions,
+  instrumentHttp,
 } from "@logixai/service-kit";
 import type { IdentityGateway } from "./lib/identity.js";
 import type { PaymentProvider } from "./providers/index.js";
 import { BillingService, type Caller } from "./services/billingService.js";
 import type { Store } from "./store/types.js";
+
+const httpLogger = createLogger("billing-service");
 
 export interface AppOptions {
   store: Store;
@@ -50,7 +55,9 @@ function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.i
 }
 
 export async function buildApp(options: AppOptions): Promise<{ app: FastifyInstance; billing: BillingService }> {
-  const app = Fastify({ logger: false, bodyLimit: 64 * 1024, trustProxy: true });
+  const app = Fastify({ ...fastifyRequestIdOptions, logger: false, bodyLimit: 64 * 1024, trustProxy: true });
+  // Request timing per route (/metrics) and X-Request-Id on every response; 5xx are logged with their id.
+  instrumentHttp(app, "billing-service", httpLogger);
   const billing = new BillingService({
     store: options.store,
     provider: options.provider,

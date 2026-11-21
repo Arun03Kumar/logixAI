@@ -1,4 +1,6 @@
 "use client";
+import { usePagedApi } from "@/app/lib/api/usePagedApi";
+import LoadMore from "@/app/components/LoadMore";
 import { itemHref, useArea } from "@/app/lib/areas";
 import { Suspense, useState } from "react";
 import Link from "next/link";
@@ -99,6 +101,8 @@ function ListCards({ lists, active, onPick }) {
   );
 }
 
+const PAGE_SIZE = 50;
+
 const PROBLEMS_BLURB = {
   ml: "Every ML Arena problem in one place — maths, Python, SQL, Pandas, NumPy, ML, PyTorch and LLMs — with filters and curated interview lists.",
   frontend: "Every JavaScript and React problem, with filters and curated lists.",
@@ -117,7 +121,12 @@ function ProblemsPage() {
 
   // Each area has its own problem list: only its problems, lists and tracks.
   const area = useArea();
-  const problems = useApi(() => arenaApi.problems({ ...filters, area: area.id }), [key, status, area.id], { enabled: status !== "loading" });
+  // 50 at a time; the count, solved count and tags cover every match.
+  const problems = usePagedApi(
+    (cursor) => arenaApi.problems({ ...filters, area: area.id, limit: PAGE_SIZE, cursor }),
+    [key, status, area.id],
+    { enabled: status !== "loading" },
+  );
   const lists = useApi(() => arenaApi.lists(area.id), [status, area.id], { enabled: status !== "loading" });
   const tracks = useApi(() => arenaApi.tracks(area.id), [area.id]);
 
@@ -252,6 +261,7 @@ function ProblemsPage() {
                   </li>
                 ))}
               </ul>
+              <LoadMore list={problems} label={`Show ${Math.min(PAGE_SIZE, data.total - data.items.length)} more`} />
             </>
           )}
         </Card>

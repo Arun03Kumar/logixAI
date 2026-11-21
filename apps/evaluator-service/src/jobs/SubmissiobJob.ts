@@ -6,6 +6,7 @@ import {
 import { judgeSubmission, type JudgeLimits } from "../judge/judge.js";
 import evaluationQueueProducer from "../producers/evaluationQueueProducer.js";
 import type { SandboxFactory } from "../sandbox/types.js";
+import { judgeDuration, judgedTotal, overallVerdict } from "../metrics.js";
 
 export interface SubmissionJobDeps {
   sandboxes: SandboxFactory;
@@ -27,6 +28,7 @@ export default class SubmissionJob {
 
   async handle(): Promise<void> {
     for (const submission of Object.values(this.payload)) {
+      const started = process.hrtime.bigint();
       const response = await judgeSubmission(
         {
           language: LANGUAGES[submission.language],
@@ -36,6 +38,9 @@ export default class SubmissionJob {
         },
         this.deps,
       );
+      const labels = { language: submission.language, verdict: overallVerdict(response.map((r) => r.status)) };
+      judgeDuration.observe(labels, Number(process.hrtime.bigint() - started) / 1e9);
+      judgedTotal.inc(labels);
       await evaluationQueueProducer(
         { response, userId: submission.userId, submissionId: submission.submissionId },
         submission.replyQueue,

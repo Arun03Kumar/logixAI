@@ -41,6 +41,9 @@ import {
   z,
   rateLimitStore,
   type RedisClient,
+  createLogger,
+  fastifyRequestIdOptions,
+  instrumentHttp,
 } from "@logixai/service-kit";
 import type { TokenIssuer } from "./lib/tokens.js";
 import { AuthService, type IssuedSession } from "./services/authService.js";
@@ -52,6 +55,8 @@ import type { Store } from "./store/types.js";
 
 export const REFRESH_COOKIE = "lx_rt";
 const DEFAULT_REFRESH_COOKIE_PATH = "/api/v1/auth";
+
+const httpLogger = createLogger("identity-service");
 
 export interface AppOptions {
   store: Store;
@@ -89,7 +94,9 @@ function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.i
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false, trustProxy: true });
+  const app = Fastify({ ...fastifyRequestIdOptions, logger: options.logger ?? false, trustProxy: true });
+  // Request timing per route (/metrics) and X-Request-Id on every response; 5xx are logged with their id.
+  instrumentHttp(app, "identity-service", httpLogger);
   const refreshCookiePath = options.refreshCookiePath ?? DEFAULT_REFRESH_COOKIE_PATH;
   const authService = new AuthService(options.store, options.tokens, {
     refreshTokenTtlDays: options.refreshTokenTtlDays,

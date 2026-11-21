@@ -59,6 +59,12 @@ jobs:
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
           ./kubeconform -strict -summary /tmp/rendered.yaml
 
+      - name: Prometheus config and alert rules
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/deploy/helm/logixai/files/alerts.yml:/alerts.yml:ro"             prom/prometheus:v2.54.1 check rules /alerts.yml
+          sed 's#/etc/prometheus/alerts.yml#/alerts.yml#' deploy/monitoring/prometheus.yml > /tmp/prometheus.yml
+          docker run --rm --entrypoint promtool -v /tmp/prometheus.yml:/prometheus.yml:ro             -v "$PWD/deploy/helm/logixai/files/alerts.yml:/alerts.yml:ro" prom/prometheus:v2.54.1 check config /prometheus.yml
+
       - name: Caddyfile
         run: |
           docker run --rm -e SITE_ADDRESS=example.com -v "$PWD/deploy/helm/logixai/files/Caddyfile:/etc/caddy/Caddyfile:ro" \

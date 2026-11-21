@@ -335,6 +335,10 @@ export const ProblemQuerySchema = z.object({
   list: z.string().max(100).optional(),
   access: z.enum(ACCESS_LEVELS).optional(),
   area: z.enum(AREAS).optional(),
+  /** Page size (default 50). Totals and tag counts always cover every match. */
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  /** nextCursor from the previous page. */
+  cursor: z.string().min(1).max(200).optional(),
 });
 export type ProblemQuery = z.infer<typeof ProblemQuerySchema>;
 
@@ -344,9 +348,14 @@ export interface ProblemRow extends ItemSummary {
   track: TopicRef;
 }
 
-/** GET /arena/problems: every matching problem (the catalog is small), in learning order. */
+/**
+ * GET /arena/problems: one page of matching problems, in learning order (or a
+ * list's order). total, solved and tags cover every match, not just this page.
+ */
 export interface ProblemList {
   items: ProblemRow[];
+  /** Pass as ?cursor= for the next page; null on the last page. */
+  nextCursor: string | null;
   total: number;
   solved: number;
   /** Tags across the matching problems, most common first. */

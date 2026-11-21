@@ -176,5 +176,12 @@ evaluator:
   nodeSelector: {}
   tolerations: []
 
+# Prometheus: pods carry prometheus.io/scrape annotations (port, /metrics).
+# prometheusRule: also install the alert rules (files/alerts.yml) as a
+# PrometheusRule, for clusters running the Prometheus Operator.
+monitoring:
+  annotations: true
+  prometheusRule: false
+
 nodeSelector: {}
 tolerations: []

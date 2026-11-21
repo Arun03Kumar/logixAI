@@ -244,19 +244,69 @@ JavaScript, DSA problems, exams) goes to the judge through Redis queues.
 - **Warm sandboxes**: each evaluator keeps `JUDGE_WARM_POOL` (default 1)
   started, unused containers per language, so a job doesn't wait for one to
   boot. Each submission still gets its own fresh container, destroyed after.
+- **Fork server for heavy Python** (`JUDGE_FORK_SERVER`, on by default):
+  importing PyTorch takes ~4.4 s, and each test is a new process. For programs
+  that import PyTorch, scikit-learn, SciPy or LangGraph, the sandbox starts one
+  process that imports them once; each test is then a fresh process forked
+  from it, with the same input file, time limit and verdicts. A program that
+  kills it just falls back to running directly. Measured on every item: all
+  238 reference solutions pass; PyTorch submissions are 2.4× faster alone and
+  1.7× under load, and five false time-outs (caused by the import, not the
+  learner's code) became the right verdict. See
+  `apps/evaluator-service/src/judge/forkServer.ts`.
 - **Autoscaling on the backlog**: `GET /queue-stats` on an evaluator returns
   `{ waiting, queues, warm }` for its groups. With KEDA installed, set
   `evaluator.autoscaling.mode: queue` and pods are added when more than
   `backlogPerPod` jobs wait per pod (CPU still applies too). Without KEDA,
   `mode: cpu` uses a normal HorizontalPodAutoscaler.
-- **Backpressure**: while more than `JUDGE_BUSY_BACKLOG` (500) jobs wait, a
-  server Run is answered at once with 429 "busy, try again"; Submits and exam
-  answers are always queued.
+- **Backpressure**: while more than `JUDGE_BUSY_BACKLOG` (500) jobs wait, or
+  the next job in the queue has waited longer than `JUDGE_BUSY_WAIT_SECONDS`
+  (30 s), a server Run is answered at once with 429 "busy, try again";
+  Submits and exam answers are always queued. (The wait matters more than the
+  count: 500 PyTorch jobs is a 14-minute wait on 4 slots.)
 - **Results are pushed**: ML Arena pages wait on
   `GET /api/v1/arena/submissions/:id/stream` (server-sent events) and get the
   verdict the moment it's applied, on whichever arena replica holds the stream
   (Redis pub/sub). They poll only if the stream can't be used. DSA and exams
   already push through socket-service.
+
+## Monitoring and load tests
+
+**Metrics.** Every service serves `GET /metrics` in Prometheus format on its
+own port (the router never forwards it, so it isn't public):
+
+- `http_request_duration_seconds{service,method,route,status}`: latency and
+  request counts per route (5xx responses are also logged with their request id);
+- `judge_queue_waiting{group}`, `judge_queue_wait_seconds`,
+  `judge_submission_duration_seconds{language,verdict}`,
+  `judge_submissions_total`, `judge_warm_sandboxes` (evaluator);
+- `mongodb_pool_checked_out` / `mongodb_pool_max`, `process_resident_memory_bytes`,
+  `nodejs_heap_used_bytes`, `nodejs_eventloop_delay_p99_seconds`.
+
+**Request ids.** The router gives every request an `X-Request-Id`; each service
+keeps it (or creates one), returns it, and logs it with any 5xx. In
+production, logs are JSON lines (`LOG_FORMAT=json`, the default when
+`NODE_ENV=production`).
+
+**Compose.** `--profile monitoring` adds Prometheus (with the alert rules in
+`deploy/helm/logixai/files/alerts.yml`) and Grafana on `127.0.0.1:3100`
+(reach it with an SSH tunnel; set `GRAFANA_ADMIN_PASSWORD`). The "LogixAI
+overview" dashboard is provisioned: API latency and errors, judge backlog,
+queue wait and judging time, warm sandboxes, MongoDB pool use, event loop and
+memory.
+
+**Kubernetes.** Pods carry `prometheus.io/scrape` annotations. With the
+Prometheus Operator, set `monitoring.prometheusRule: true` to install the
+alert rules; import `deploy/monitoring/grafana/dashboards/logixai-overview.json`
+into Grafana.
+
+**Alerts** (`files/alerts.yml`): a service down; 5xx above 1%; API p95 above
+500 ms; judge queue wait p95 above 10 s; judge backlog near the "busy"
+threshold; judge internal errors; MongoDB pool over 90%; event loop blocked.
+
+**Load tests.** k6 scripts and how to run them against staging are in
+[load/README.md](../load/README.md); results so far in
+[load/results.md](../load/results.md).
 
 ## Before going live
 

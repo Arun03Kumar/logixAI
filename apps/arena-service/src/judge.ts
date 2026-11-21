@@ -16,8 +16,11 @@ import type { ArenaService, JudgeGateway, JudgeRequest } from "./services/arenaS
  * Sends arena code to the judge: the queue for its sandbox image
  * (python-ml or node-web), with Submit ahead of Run.
  */
+const LOAD_CACHE_MS = 2_000;
+
 export function createQueueJudge(connection: Redis): JudgeGateway {
   const queues = new Map<string, Queue>();
+  const loads = new Map<string, { at: number; load: { waiting: number; headWaitMs: number } }>();
   const queueFor = (language: JudgeRequest["language"]) => {
     const name = judgeQueueFor(language);
     let queue = queues.get(name);
@@ -48,8 +51,19 @@ export function createQueueJudge(connection: Redis): JudgeGateway {
       );
     },
     async backlog(language) {
-      const counts = await queueFor(language).getJobCounts("waiting", "prioritized");
-      return (counts.waiting ?? 0) + (counts.prioritized ?? 0);
+      // Cached briefly: every Run asks, and the answer changes slowly.
+      const cached = loads.get(language);
+      if (cached && Date.now() - cached.at < LOAD_CACHE_MS) return cached.load;
+      const queue = queueFor(language);
+      const [counts, head] = await Promise.all([
+        queue.getJobCounts("waiting", "prioritized"),
+        // The next jobs to be judged (highest priority, oldest first).
+        queue.getJobs(["prioritized", "waiting"], 0, 9, true),
+      ]);
+      const oldest = Math.min(...head.map((j) => j?.timestamp ?? Date.now()), Date.now());
+      const load = { waiting: (counts.waiting ?? 0) + (counts.prioritized ?? 0), headWaitMs: Date.now() - oldest };
+      loads.set(language, { at: Date.now(), load });
+      return load;
     },
   };
 }

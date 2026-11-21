@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import { JOB_NAMES } from "@logixai/contracts";
 import redis from "../config/redisConfig.js";
 import SubmissionJob, { type SubmissionJobDeps } from "../jobs/SubmissiobJob.js";
+import { queueWait } from "../metrics.js";
 
 /**
  * Consumes one judge queue. `concurrency` submissions from it are judged in
@@ -13,6 +14,7 @@ export default function submissionWorker(queueName: string, deps: SubmissionJobD
     queueName,
     async (job) => {
       if (job.name !== JOB_NAMES.SUBMISSION) return undefined;
+      queueWait.observe({ queue: queueName }, Math.max(0, Date.now() - job.timestamp) / 1000);
       // Awaited so BullMQ only marks the job complete once judging is done.
       await new SubmissionJob(job.data, deps).handle();
       return true;

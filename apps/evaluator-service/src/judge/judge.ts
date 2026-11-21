@@ -1,7 +1,18 @@
 import type { Checker, ExecutionResponse, LanguageDefinition, TestCase } from "@logixai/contracts";
-import type { ExecResult, SandboxFactory } from "../sandbox/types.js";
+import type { ExecResult, Sandbox, SandboxFactory } from "../sandbox/types.js";
 import { formatScore, jsonOutputsMatch, metricPasses, metricScore } from "@logixai/contracts";
 import { outputsMatch } from "./compare.js";
+import {
+  CLIENT_FILE,
+  CLIENT_PY,
+  FORK_DIR,
+  ZYGOTE_FILE,
+  ZYGOTE_PY,
+  clientCommand,
+  startZygoteCommand,
+  usesHeavyImports,
+  waitForZygoteCommand,
+} from "./forkServer.js";
 
 export interface JudgeLimits {
   /** Per-test time limit before the language multiplier. */
@@ -11,6 +22,8 @@ export interface JudgeLimits {
   submissionBudgetMs: number;
   /** stdout/stderr kept per test. */
   maxOutputBytes: number;
+  /** Run heavy Python tests through the fork server (see forkServer.ts). Default true. */
+  forkServer?: boolean;
 }
 
 export const DEFAULT_LIMITS: JudgeLimits = {
@@ -19,6 +32,11 @@ export const DEFAULT_LIMITS: JudgeLimits = {
   submissionBudgetMs: 60_000,
   maxOutputBytes: 64 * 1024,
 };
+
+/** Languages whose imports are slow enough to be worth a fork server. */
+const FORK_SERVER_LANGUAGES = new Set(["PYTHON_ML"]);
+/** Longest the fork server may take to import its libraries (PyTorch ~4.5 s). */
+const FORK_SERVER_START_SECONDS = 30;
 
 /** Where each test's input is written inside the sandbox. */
 const INPUT_FILE = "input.txt";
@@ -155,6 +173,12 @@ export async function judgeSubmission(
       }
     }
 
+    // Heavy Python: import the libraries once, then fork a fresh process per test.
+    let runCommand = language.runCommand;
+    if ((limits.forkServer ?? true) && FORK_SERVER_LANGUAGES.has(language.id) && usesHeavyImports(input.code)) {
+      if (await startForkServer(sandbox, language.sourceFile, deps.log)) runCommand = clientCommand(language.sourceFile);
+    }
+
     const started = Date.now();
     const results: ExecutionResponse[] = [];
     for (const testCase of input.testCases) {
@@ -173,7 +197,7 @@ export async function judgeSubmission(
         results.push({ status: "ERROR", output: "The judge couldn't prepare this test." });
         continue;
       }
-      const run = await sandbox.exec(withTimeout(timeLimitMs, `${language.runCommand} < ${INPUT_FILE}`), {
+      const run = await sandbox.exec(withTimeout(timeLimitMs, `${runCommand} < ${INPUT_FILE}`), {
         timeoutMs: timeLimitMs + WATCHDOG_SLACK_MS,
         maxOutputBytes: limits.maxOutputBytes,
       });
@@ -185,5 +209,28 @@ export async function judgeSubmission(
     return [{ status: "ERROR", output: "The judge hit a problem running your code. Try again." }];
   } finally {
     await sandbox.destroy().catch(() => {});
+  }
+}
+
+/**
+ * Writes and starts the fork server, and waits until it listens. Returns
+ * false if it doesn't start (then tests run the program directly, as before).
+ */
+async function startForkServer(sandbox: Sandbox, sourceFile: string, log?: (msg: string) => void): Promise<boolean> {
+  const write = (file: string, text: string) =>
+    sandbox.exec(["sh", "-c", `mkdir -p ${FORK_DIR} && cat > ${file}`], { stdin: text, timeoutMs: 10_000, maxOutputBytes: 1024 });
+  try {
+    if ((await write(ZYGOTE_FILE, ZYGOTE_PY)).exitCode !== 0 || (await write(CLIENT_FILE, CLIENT_PY)).exitCode !== 0) return false;
+    await sandbox.exec(["sh", "-c", startZygoteCommand(sourceFile)], { timeoutMs: 10_000, maxOutputBytes: 1024 });
+    const ready = await sandbox.exec(["sh", "-c", waitForZygoteCommand(FORK_SERVER_START_SECONDS)], {
+      timeoutMs: (FORK_SERVER_START_SECONDS + 5) * 1000,
+      maxOutputBytes: 1024,
+    });
+    if (ready.exitCode === 0) return true;
+    log?.("Fork server didn't start; running tests directly");
+    return false;
+  } catch (err) {
+    log?.(`Fork server failed: ${(err as Error).message}`);
+    return false;
   }
 }

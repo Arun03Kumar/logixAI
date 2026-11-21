@@ -129,6 +129,7 @@ services:
       IDENTITY_API_URL: http://identity:3006/api/v1
       CODE_RUNS_PER_MINUTE: ${CODE_RUNS_PER_MINUTE:-12}
       JUDGE_BUSY_BACKLOG: ${JUDGE_BUSY_BACKLOG:-500}
+      JUDGE_BUSY_WAIT_SECONDS: ${JUDGE_BUSY_WAIT_SECONDS:-30}
     depends_on: { arena-migrate: { condition: service_completed_successfully } }
 
   billing:
@@ -169,6 +170,8 @@ services:
       JUDGE_QUEUES: ${JUDGE_QUEUES:-}
       # Started, unused sandboxes kept ready per language.
       JUDGE_WARM_POOL: ${JUDGE_WARM_POOL:-1}
+      # Heavy Python imports once per submission and forks per test.
+      JUDGE_FORK_SERVER: ${JUDGE_FORK_SERVER:-true}
       JUDGE_IMAGE_REGISTRY: ${JUDGE_IMAGE_REGISTRY:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -205,6 +208,33 @@ services:
     command: ["node", "dist/db/migrate.js"]
     environment: { NODE_ENV: production, DB_CONNECTION_STRING: "${MONGODB_URI_BASE}/logixai-billing${MONGODB_URI_OPTIONS:-}" }
 
+  # ── Monitoring (opt in: --profile monitoring) ──
+  # Grafana listens on 127.0.0.1:3100 only: reach it with an SSH tunnel.
+  prometheus:
+    <<: *service
+    profiles: [monitoring]
+    image: prom/prometheus:v2.54.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../helm/logixai/files/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    <<: *service
+    profiles: [monitoring]
+    image: grafana/grafana:11.2.0
+    ports: ["127.0.0.1:3100:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../monitoring/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ../monitoring/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on: [prometheus]
+
   # ── Data stores ──
   redis:
     <<: *service
@@ -234,6 +264,8 @@ services:
       retries: 5
 
 volumes:
+  prometheus-data:
+  grafana-data:
   caddy-data:
   caddy-config:
   redis-data:

@@ -7,7 +7,9 @@ const {
   createAccessTokenVerifier,
   createLogger,
   createRedisConnection,
+  instrumentHttp,
   onShutdown,
+  registerMetricsRoute,
   redisReady,
   registerHealthRoutes,
 } = require("@logixai/service-kit");
@@ -32,6 +34,7 @@ const { requireInternalToken } = require("./internalAuth");
 const app = express();
 const httpServer = createServer(app);
 
+instrumentHttp(app, "socket-service");
 app.use(express.json());
 app.use(
   cors({
@@ -70,6 +73,7 @@ app.post(
 
 app.get("/ping", (req, res) => res.json({ message: "socket service is alive" }));
 registerHealthRoutes(app, { redis: redisReady(redisCache) });
+registerMetricsRoute(app);
 
 const logger = createLogger("socket-service");
 httpServer.listen(PORT, () => {

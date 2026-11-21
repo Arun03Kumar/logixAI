@@ -25,6 +25,12 @@ spec:
     metadata:
       labels: {{- include "logixai.labels" $root | nindent 8 }}
         app.kubernetes.io/name: {{ $name }}
+      {{- if and $root.Values.monitoring.annotations (ne $name "web") }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.port | quote }}
+        prometheus.io/path: /metrics
+      {{- end }}
     spec:
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}

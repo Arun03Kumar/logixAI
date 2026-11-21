@@ -24,6 +24,9 @@ import {
   type RedisClient,
   CATALOG_CACHE,
   registerPublicCache,
+  createLogger,
+  fastifyRequestIdOptions,
+  instrumentHttp,
 } from "@logixai/service-kit";
 import { createLocalResultHub, type ResultHub } from "./lib/resultHub.js";
 import type { Catalog } from "./content/catalog.js";
@@ -32,6 +35,8 @@ import { ArenaService, type JudgeGateway } from "./services/arenaService.js";
 import { InstitutionArenaService, type Caller } from "./services/institutionService.js";
 import { PracticeService, type Viewer } from "./services/practiceService.js";
 import type { Store } from "./store/types.js";
+
+const httpLogger = createLogger("arena-service");
 
 export interface AppOptions {
   catalog: Catalog;
@@ -45,8 +50,12 @@ export interface AppOptions {
   rateLimitRedis?: RedisClient;
   /** Delivers judge results to open streams (across replicas); in-process when unset. */
   resultHub?: ResultHub;
-  /** Server Runs get 429 while more jobs than this wait for the judge. */
+  /** Server Runs get 429 while more jobs than this wait for the judge... */
   busyBacklog?: number;
+  /** ...or while the job at the head of the queue has waited longer than this. */
+  busyWaitMs?: number;
+  /** Free-plan server runs per day (default FREE_DAILY_CODE_RUNS). */
+  freeDailyRuns?: number;
   /** Longest a result stream stays open before the page falls back to polling. */
   streamTimeoutMs?: number;
   now?: () => Date;
@@ -72,7 +81,9 @@ function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.i
 }
 
 export async function buildApp(options: AppOptions): Promise<{ app: FastifyInstance; arena: ArenaService }> {
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 256 * 1024, trustProxy: true });
+  const app = Fastify({ ...fastifyRequestIdOptions, logger: options.logger ?? false, bodyLimit: 256 * 1024, trustProxy: true });
+  // Request timing per route (/metrics) and X-Request-Id on every response; 5xx are logged with their id.
+  instrumentHttp(app, "arena-service", httpLogger);
   const practice = new PracticeService({
     catalog: options.catalog,
     store: options.store,
@@ -85,6 +96,8 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     judge: options.judge,
     ...(options.now ? { now: options.now } : {}),
     ...(options.busyBacklog !== undefined ? { busyBacklog: options.busyBacklog } : {}),
+    ...(options.busyWaitMs !== undefined ? { busyWaitMs: options.busyWaitMs } : {}),
+    ...(options.freeDailyRuns !== undefined ? { freeDailyRuns: options.freeDailyRuns } : {}),
     onOutcome: (userId, itemId, event, at) => practice.onOutcome(userId, itemId, event, at),
     onJudged: (view) => results.publish(view),
   });

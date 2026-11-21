@@ -4,7 +4,7 @@ Goal: deploy LogixAI on any platform from text files (Dockerfiles, Compose,
 Helm, env vars), and stay fast at 2,000 active users with headroom for spikes
 of 50,000, including the code editor and the Run button.
 
-Status: **S1–S4 built** (see [deploy.md](deploy.md) and ml-arena.md "Run in the browser"); S5 not yet. Phases below, in order. Each one ships
+Status: **S1–S5 built** (see [deploy.md](deploy.md), ml-arena.md "Run in the browser" and [load/results.md](../load/results.md)). The first load tests found that Python-ML judging was dominated by re-importing PyTorch for every test; a fork server now imports once per submission (see deploy.md). Phases below, in order. Each one ships
 on its own and is useful without the next.
 
 ## Where we are today

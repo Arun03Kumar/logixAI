@@ -40,6 +40,8 @@ import {
   InternalServerError,
   NotFoundError,
   TooManyRequestsError,
+  decodeCursor,
+  encodeCursor,
 } from "@logixai/service-kit";
 import type { CourseConfig } from "../content/courseConfig.js";
 import { jsHarnessFor, type Catalog, type CatalogItem, type CatalogTopic, type CatalogTrack } from "../content/catalog.js";
@@ -73,8 +75,11 @@ export interface JudgeRequest {
 
 export interface JudgeGateway {
   submit(request: JudgeRequest): Promise<void>;
-  /** Jobs waiting for a judge in this language's queue (backpressure). */
-  backlog?(language: JudgeRequest["language"]): Promise<number>;
+  /**
+   * How far behind this language's judge queue is (backpressure): jobs
+   * waiting, and how long the job at the head of the queue has waited.
+   */
+  backlog?(language: JudgeRequest["language"]): Promise<{ waiting: number; headWaitMs: number }>;
 }
 
 export interface Deps {
@@ -86,9 +91,14 @@ export interface Deps {
   onOutcome?: (userId: string, itemId: string, event: "correct" | "wrong", at: Date) => Promise<void>;
   /**
    * Runs are refused with 429 ("busy, try again") while more than this many
-   * jobs wait in the judge queue. Submits are always accepted.
+   * jobs wait in the judge queue, or the job at its head has waited longer
+   * than busyWaitMs (a queue can be slow with few jobs: PyTorch takes seconds
+   * each). Submits are always accepted.
    */
   busyBacklog?: number;
+  busyWaitMs?: number;
+  /** Free-plan server runs per day (default FREE_DAILY_CODE_RUNS; staging raises it for load tests). */
+  freeDailyRuns?: number;
   /** Told when a submission's result is in (pushes it to the learner's open stream). */
   onJudged?: (submission: ArenaSubmissionView, userId: string) => Promise<void>;
 }
@@ -184,7 +194,21 @@ export class ArenaService {
     });
     const tagCounts = new Map<string, number>();
     for (const i of items) for (const t of i.tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
-    const rows = items.map((i): ProblemRow => {
+    const solved = items.filter((i) => progress.get(i.id)?.status === "solved").length;
+
+    // The cursor is the id of the last item on the previous page (stable for a deploy's catalog).
+    const { limit } = query;
+    const after = decodeCursor(query.cursor, (v): v is { after: string } => typeof v === "object" && v !== null && typeof (v as { after?: unknown }).after === "string");
+    let start = 0;
+    if (after) {
+      const at = items.findIndex((i) => i.id === after.after);
+      if (at < 0) throw new BadRequestError("cursor", { reason: "That page is out of date. Reload the list." });
+      start = at + 1;
+    }
+    const pageItems = items.slice(start, start + limit);
+    const hasMore = start + limit < items.length;
+
+    const rows = pageItems.map((i): ProblemRow => {
       const topic = this.catalog.topic(i.topicId)!;
       const track = this.catalog.track(i.trackId)!;
       return {
@@ -196,8 +220,9 @@ export class ArenaService {
     });
     return {
       items: rows,
-      total: rows.length,
-      solved: rows.filter((r) => r.status === "solved").length,
+      nextCursor: hasMore && pageItems.length ? encodeCursor({ after: pageItems[pageItems.length - 1]!.id }) : null,
+      total: items.length,
+      solved,
       tags: [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
     };
   }
@@ -586,9 +611,10 @@ export class ArenaService {
     if (!pro) {
       // India-time day, like streaks.
       const dayStart = new Date(`${dayOf(now)}T00:00:00+05:30`);
-      if ((await this.deps.store.submissions.countSince(userId, dayStart)) >= FREE_DAILY_CODE_RUNS) {
+      const cap = this.deps.freeDailyRuns ?? FREE_DAILY_CODE_RUNS;
+      if ((await this.deps.store.submissions.countSince(userId, dayStart)) >= cap) {
         throw new ForbiddenError(
-          `You've used today's ${FREE_DAILY_CODE_RUNS} free code runs. Pro has no daily limit — or come back tomorrow.`,
+          `You've used today's ${cap} free code runs. Pro has no daily limit — or come back tomorrow.`,
         );
       }
     }
@@ -598,10 +624,12 @@ export class ArenaService {
     const language = item.type !== "sql" && item.language === "javascript" ? "NODE_WEB" : "PYTHON_ML";
     // Backpressure: when the judge is far behind, a Run is refused quickly
     // rather than queued for minutes. A Submit is always accepted.
-    if (input.mode === "run" && this.deps.judge.backlog && this.deps.busyBacklog !== undefined) {
-      const waiting = await this.deps.judge.backlog(language).catch(() => 0);
-      if (waiting > this.deps.busyBacklog) {
-        throw new TooManyRequestsError("The judge is very busy right now. Try Run again in a minute — Submit still works.", { waiting });
+    if (input.mode === "run" && this.deps.judge.backlog) {
+      const load = await this.deps.judge.backlog(language).catch(() => ({ waiting: 0, headWaitMs: 0 }));
+      const tooMany = this.deps.busyBacklog !== undefined && load.waiting > this.deps.busyBacklog;
+      const tooSlow = this.deps.busyWaitMs !== undefined && load.headWaitMs > this.deps.busyWaitMs;
+      if (tooMany || tooSlow) {
+        throw new TooManyRequestsError("The judge is very busy right now. Try Run again in a minute — Submit still works.", load);
       }
     }
     const tests = input.mode === "submit" ? [...item.judge.sample, ...item.judge.hidden] : item.judge.sample;

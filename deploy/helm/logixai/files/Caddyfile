@@ -17,10 +17,11 @@
 	encode zstd gzip
 
 	# Services: /api/<service>/v1/... -> <service>:/api/v1/...
+	# One `uri replace` per service: Caddy runs directives in its own order
+	# (rewrite before uri), so a strip + rewrite pair would apply backwards.
 	@identity path /api/identity/*
 	handle @identity {
-		uri strip_prefix /api/identity
-		rewrite * /api{uri}
+		uri replace /api/identity/ /api/ 1
 		reverse_proxy identity:3006
 	}
 	# JWKS for anyone verifying tokens from outside the stack.
@@ -30,36 +31,31 @@
 
 	@problem path /api/problem/*
 	handle @problem {
-		uri strip_prefix /api/problem
-		rewrite * /api{uri}
+		uri replace /api/problem/ /api/ 1
 		reverse_proxy problem:3001
 	}
 
 	@submission path /api/submission/*
 	handle @submission {
-		uri strip_prefix /api/submission
-		rewrite * /api{uri}
+		uri replace /api/submission/ /api/ 1
 		reverse_proxy submission:3000
 	}
 
 	@exam path /api/exam/*
 	handle @exam {
-		uri strip_prefix /api/exam
-		rewrite * /api{uri}
+		uri replace /api/exam/ /api/ 1
 		reverse_proxy exam:3007
 	}
 
 	@arena path /api/arena/*
 	handle @arena {
-		uri strip_prefix /api/arena
-		rewrite * /api{uri}
+		uri replace /api/arena/ /api/ 1
 		reverse_proxy arena:3010
 	}
 
 	@billing path /api/billing/*
 	handle @billing {
-		uri strip_prefix /api/billing
-		rewrite * /api{uri}
+		uri replace /api/billing/ /api/ 1
 		reverse_proxy billing:3011
 	}
 

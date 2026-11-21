@@ -28,7 +28,7 @@ const verifier: AccessTokenVerifier = {
 let catalog: Catalog;
 let app: FastifyInstance;
 let arena: ArenaService;
-let backlog = 0;
+let backlog = { waiting: 0, headWaitMs: 0 };
 const sent: JudgeRequest[] = [];
 
 beforeAll(async () => {
@@ -46,6 +46,7 @@ beforeAll(async () => {
     verifier,
     corsOrigins: [],
     busyBacklog: 500,
+    busyWaitMs: 30_000,
     streamTimeoutMs: 300,
   }));
 });
@@ -71,13 +72,21 @@ describe("judge queue", () => {
   });
 
   it("refuses a Run quickly when the judge is far behind, but still accepts a Submit", async () => {
-    backlog = 501;
+    backlog = { waiting: 501, headWaitMs: 0 };
     const run = await api("busy", "POST", `/items/${ITEM}/code`, { code: CODE, mode: "run" });
     expect(run.statusCode).toBe(429);
     expect(run.json().message).toMatch(/busy/);
     const submit = await api("busy", "POST", `/items/${ITEM}/code`, { code: CODE, mode: "submit" });
     expect(submit.statusCode).toBe(202);
-    backlog = 0;
+    backlog = { waiting: 0, headWaitMs: 0 };
+  });
+
+  it("also says busy when few jobs wait but the queue is slow (the next job has waited too long)", async () => {
+    backlog = { waiting: 12, headWaitMs: 45_000 };
+    expect((await api("slow", "POST", `/items/${ITEM}/code`, { code: CODE, mode: "run" })).statusCode).toBe(429);
+    backlog = { waiting: 12, headWaitMs: 5_000 };
+    expect((await api("slow", "POST", `/items/${ITEM}/code`, { code: CODE, mode: "run" })).statusCode).toBe(202);
+    backlog = { waiting: 0, headWaitMs: 0 };
   });
 });
 

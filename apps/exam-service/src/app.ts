@@ -21,6 +21,9 @@ import {
   successResponse,
   type AccessTokenVerifier,
   z,
+  createLogger,
+  fastifyRequestIdOptions,
+  instrumentHttp,
 } from "@logixai/service-kit";
 import type { IdentityClient } from "./lib/identity.js";
 import { AttemptService, type JudgeGateway } from "./services/attemptService.js";
@@ -29,6 +32,8 @@ import { GradingService } from "./services/gradingService.js";
 import type { Caller } from "./services/context.js";
 import { ExamService } from "./services/examService.js";
 import type { Store } from "./store/types.js";
+
+const httpLogger = createLogger("exam-service");
 
 export interface AppOptions {
   store: Store;
@@ -48,7 +53,9 @@ function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.i
 export async function buildApp(
   options: AppOptions,
 ): Promise<{ app: FastifyInstance; attempts: AttemptService }> {
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
+  const app = Fastify({ ...fastifyRequestIdOptions, logger: options.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
+  // Request timing per route (/metrics) and X-Request-Id on every response; 5xx are logged with their id.
+  instrumentHttp(app, "exam-service", httpLogger);
   const deps = { store: options.store, identity: options.identity };
   const exams = new ExamService(deps);
   const attempts = new AttemptService({ ...deps, judge: options.judge });
@@ -72,8 +79,8 @@ export async function buildApp(
     return reply.status(statusCode).send(body);
   });
 
-  /** Every route needs a signed-in user, except the probes (/ping, /healthz, /readyz). */
-  const OPEN_PATHS = new Set(["/ping", "/healthz", "/readyz"]);
+  /** Every route needs a signed-in user, except the probes (/ping, /healthz, /readyz, /metrics). */
+  const OPEN_PATHS = new Set(["/ping", "/healthz", "/readyz", "/metrics"]);
   app.addHook("preHandler", async (request) => {
     if (OPEN_PATHS.has(request.url.split("?")[0]!)) return;
     const claims = await options.verifier.verifyHeader(request.headers.authorization);

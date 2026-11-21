@@ -1,0 +1,66 @@
+# Alert rules for the targets in docs/production-plan.md. One copy, shared:
+# Compose mounts it into Prometheus (--profile monitoring); Helm turns it into
+# a PrometheusRule when monitoring.prometheusRule is on.
+groups:
+  - name: logixai
+    rules:
+      - alert: ServiceDown
+        expr: up{job="logixai"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.component }} ({{ $labels.instance }}) isn't answering /metrics"
+
+      - alert: ApiErrorRateHigh
+        expr: |
+          sum by (service) (rate(http_request_duration_seconds_count{status=~"5.."}[5m]))
+            / sum by (service) (rate(http_request_duration_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }}: more than 1% of requests fail with 5xx"
+
+      - alert: ApiLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket{route!~".*/stream"}[5m]))) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }}: p95 latency above 500 ms (target 300 ms)"
+
+      - alert: JudgeQueueWaitHigh
+        expr: |
+          histogram_quantile(0.95, sum by (queue, le) (rate(judge_queue_wait_seconds_bucket[5m]))) > 10
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.queue }}: jobs wait more than 10 s for a judge (add evaluators)"
+
+      - alert: JudgeBacklogNearBusy
+        # Arena answers Run with "busy" above JUDGE_BUSY_BACKLOG (500).
+        expr: max by (group) (judge_queue_waiting) > 300
+        for: 3m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.group }}: {{ $value }} jobs waiting; Runs get 'busy' at 500"
+
+      - alert: JudgeErrors
+        expr: sum(rate(judge_submissions_total{verdict="ERROR"}[10m])) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "The judge reports internal errors (sandboxes failing to start?)"
+
+      - alert: MongoPoolSaturated
+        expr: max by (service) (mongodb_pool_checked_out / mongodb_pool_max) > 0.9
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }}: MongoDB pool over 90% in use (raise MONGO_MAX_POOL_SIZE or add replicas)"
+
+      - alert: EventLoopBlocked
+        expr: nodejs_eventloop_delay_p99_seconds > 0.2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.component }}: event loop delayed over 200 ms (CPU-bound work or overload)"

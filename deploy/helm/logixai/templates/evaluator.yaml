@@ -30,6 +30,12 @@ spec:
       labels: {{- include "logixai.labels" $root | nindent 8 }}
         app.kubernetes.io/name: {{ $name }}
         app.kubernetes.io/component: judge
+      {{- if $root.Values.monitoring.annotations }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3002"
+        prometheus.io/path: /metrics
+      {{- end }}
     spec:
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}

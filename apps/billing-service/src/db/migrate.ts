@@ -4,9 +4,11 @@
  * new version.
  */
 import mongoose from "mongoose";
-import { connectMongo, createLogger, runMigrations, type Migration } from "@logixai/service-kit";
-import { config } from "../config.js";
+import { loadMigrationConfig, connectMongo, createLogger, runMigrations, type Migration } from "@logixai/service-kit";
 import "../store/mongoStore.js"; // registers the models
+
+// Only the database: a migration job doesn't get the service's other settings.
+const config = loadMigrationConfig("billing-service");
 
 /** Add new migrations at the end. Never edit one that has already run. */
 const migrations: Migration[] = [];
