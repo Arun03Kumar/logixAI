@@ -1,0 +1,275 @@
+# Curated problem lists, shown on /arena/problems. Items must exist.
+- id: interview-essentials
+  title: Data interview essentials
+  summary: "23 problems covering the patterns that come up again and again in data and ML interviews: top-N with ties, anti-joins, running totals, streaks, groupby, pivots and from-scratch NumPy."
+  items:
+    - sql-top-three-orders
+    - sql-customers-without-orders
+    - sql-department-headcount
+    - sql-repeat-buyers
+    - sql-second-highest-salary
+    - sql-department-top-earners
+    - sql-running-total
+    - sql-top-two-per-department
+    - sql-daily-active-users
+    - sql-three-day-streak
+    - pd-big-delivered-ids
+    - pd-fill-age-by-city
+    - pd-top-spender-per-city
+    - pd-running-spend
+    - pd-customers-without-orders
+    - pd-city-status-pivot
+    - pd-rolling-average
+    - np-one-hot
+    - np-top-k-per-row
+    - np-log-softmax
+    - np-knn-predict
+    - np-cosine-matrix
+    - np-attention
+- id: sql-interview-set
+  title: SQL interview set
+  summary: Every SQL problem, from filters to recursive CTEs, in learning order.
+  items:
+    - sql-delivered-big-orders
+    - sql-customers-in-mumbai
+    - sql-top-three-orders
+    - sql-distinct-cities
+    - sql-missing-city
+    - sql-order-size-buckets
+    - sql-orders-in-march
+    - sql-recent-well-paid
+    - sql-null-not-equal-mcq
+    - sql-orders-with-customer
+    - sql-customers-without-orders
+    - sql-employee-and-manager
+    - sql-earns-more-than-manager
+    - sql-department-headcount
+    - sql-order-revenue
+    - sql-products-never-sold
+    - sql-join-filter-placement
+    - sql-orders-per-customer
+    - sql-revenue-by-city
+    - sql-repeat-buyers
+    - sql-avg-salary-by-dept
+    - sql-units-per-category
+    - sql-cancel-rate
+    - sql-largest-order-each
+    - sql-count-null-mcq
+    - sql-where-having-mcq
+    - sql-above-average-orders
+    - sql-second-highest-salary
+    - sql-department-top-earners
+    - sql-always-delivered
+    - sql-first-order-each
+    - sql-big-spenders
+    - sql-bought-electronics
+    - sql-shared-names
+    - sql-salary-dense-rank
+    - sql-running-total
+    - sql-top-two-per-department
+    - sql-days-since-previous-order
+    - sql-category-share
+    - sql-second-order
+    - sql-salary-vs-department
+    - sql-dau-moving-average
+    - sql-rank-functions-mcq
+    - sql-daily-active-users
+    - sql-orders-per-month
+    - sql-days-to-first-purchase
+    - sql-buyers-by-country
+    - sql-day1-retention
+    - sql-three-day-streak
+    - sql-median-delivered
+    - sql-signup-funnel
+    - sql-best-month-per-city
+    - sql-total-reports
+    - sql-consecutive-month-buyers
+- id: pandas-30
+  title: Pandas 30
+  summary: "Thirty Pandas tasks on realistic tables: cleaning, groupby, joins, reshaping and time series."
+  items:
+    - pd-big-delivered-ids
+    - pd-clean-contacts
+    - pd-dedupe-keep-last
+    - pd-fill-age-by-city
+    - pd-top-cities
+    - pd-cap-outliers
+    - pd-orders-in-month
+    - pd-missing-report
+    - pd-delivered-revenue-by-city
+    - pd-top-spender-per-city
+    - pd-dept-summary
+    - pd-running-spend
+    - pd-salary-rank-in-dept
+    - pd-city-share
+    - pd-repeat-customers
+    - pd-salary-zscore
+    - pd-order-segments
+    - pd-customers-without-orders
+    - pd-city-status-pivot
+    - pd-melt-scores
+    - pd-apply-updates
+    - pd-delivered-rate-by-city
+    - pd-tag-counts
+    - pd-weekly-revenue
+    - pd-rolling-average
+    - pd-monthly-growth
+    - pd-average-gap-days
+    - pd-first-last-dates
+    - pd-fill-missing-days
+    - pd-weekday-average
+- id: ml-coding-round
+  title: ML coding round
+  summary: "Implement it in NumPy: losses, backprop, BatchNorm, k-NN, k-means, AUC, PCA and attention — the from-scratch questions of ML engineer interviews."
+  items:
+    - np-log-softmax
+    - np-cross-entropy
+    - np-relu-backward
+    - np-linear-backward
+    - np-batchnorm-forward
+    - np-ridge-closed-form
+    - np-knn-predict
+    - np-kmeans-step
+    - np-roc-auc
+    - np-cosine-matrix
+    - np-pca-variance-ratio
+    - np-attention
+    - np-causal-attention
+    - linreg-gd-code
+    - logreg-train-code
+    - cm-confusion-code
+    - np-softmax-code
+    - bc-pairwise-code
+- id: pytorch-coding-round
+  title: PyTorch coding round
+  summary: "27 PyTorch problems judged on hidden tests: tensor tricks, autograd, nn.Modules from scratch, training-loop bugs, optimizers and attention."
+  items:
+    - torch-pairwise-sq-dists
+    - torch-target-logprobs
+    - torch-masked-mean
+    - torch-one-hot
+    - torch-causal-mask
+    - torch-topk-mask
+    - autograd-derivative
+    - autograd-saliency
+    - autograd-inplace-bug
+    - autograd-straight-through
+    - nn-linear-from-scratch
+    - nn-layernorm
+    - nn-rmsnorm
+    - nn-dropout
+    - nn-residual-block
+    - train-fit-linear
+    - train-missing-zero-grad
+    - train-predict-eval
+    - train-clip-global-norm
+    - train-sgd-momentum
+    - train-adam-step
+    - train-warmup-cosine
+    - attn-sdpa
+    - attn-sinusoidal-pe
+    - attn-top-k-probs
+    - attn-mha
+    - attn-greedy-decode
+- id: numpy-25
+  title: NumPy 25
+  summary: Twenty-five NumPy problems, from vectorisation tricks to linear algebra for embeddings and transformers.
+  items:
+    - np-one-hot
+    - np-moving-average
+    - np-row-normalize
+    - np-class-counts
+    - np-fill-nan-col-mean
+    - np-top-k-per-row
+    - np-row-dot
+    - np-unique-counts
+    - np-log-softmax
+    - np-cross-entropy
+    - np-relu-backward
+    - np-linear-backward
+    - np-batchnorm-forward
+    - np-ridge-closed-form
+    - np-knn-predict
+    - np-kmeans-step
+    - np-roc-auc
+    - np-cosine-matrix
+    - np-covariance
+    - np-pca-variance-ratio
+    - np-solve-system
+    - np-project-onto
+    - np-is-orthogonal
+    - np-attention
+    - np-causal-attention
+- id: frontend-coding-round
+  title: Frontend coding round
+  summary: "23 JavaScript and React problems judged on hidden tests: debounce, throttle, Promise.all, retries, an LRU cache, an event emitter, forms, tabs, hooks and data fetching."
+  items:
+    - js-once
+    - js-memoize
+    - js-curry
+    - js-debounce
+    - js-throttle
+    - js-promise-all
+    - js-retry-backoff
+    - js-with-timeout
+    - js-map-limit
+    - js-lru-cache
+    - js-event-emitter
+    - js-deep-equal
+    - js-get-path
+    - js-flatten-depth
+    - js-group-by
+    - js-deep-clone
+    - react-bounded-counter
+    - react-add-todo-bug
+    - react-todo-toggle
+    - react-signup-form
+    - react-tabs
+    - react-use-debounced-value
+    - react-fetch-race
+- id: system-design-runnable
+  title: System design you can run
+  summary: "20 hands-on system design problems: rate limiters, load balancers, consistent hashing, caches, circuit breakers and IDs judged against simulated traffic, plus design questions with rubrics."
+  items:
+    - sd-fixed-window
+    - sd-sliding-log
+    - sd-token-bucket
+    - sd-token-bucket-units
+    - sd-sliding-window-counter
+    - sd-design-rate-limiter
+    - sd-round-robin-health
+    - sd-smooth-weighted
+    - sd-least-connections
+    - sd-consistent-hashing
+    - sd-design-chat-lb
+    - sd-ttl-cache
+    - sd-request-coalescing
+    - sd-bloom-filter
+    - sd-circuit-breaker
+    - sd-design-cache
+    - sd-base62
+    - sd-snowflake
+    - sd-idempotency-keys
+    - sd-design-url-shortener
+- id: llm-agents-set
+  title: LLM apps and agents
+  summary: "18 hands-on LLM problems: chunking, retrieval and its metrics, BPE, tool calling, agent loops and real LangGraph graphs with tools, memory and human approval."
+  items:
+    - llm-chunk-text
+    - llm-top-k-retrieval
+    - llm-retrieval-metrics
+    - llm-bpe-merge
+    - llm-context-budget
+    - llm-design-rag-assistant
+    - agent-validate-tool-call
+    - agent-loop
+    - agent-tool-errors
+    - agent-structured-output
+    - agent-design-evals
+    - lg-first-graph
+    - lg-router
+    - lg-parallel-reducer
+    - lg-reflection-loop
+    - lg-tool-agent
+    - lg-memory
+    - lg-human-approval

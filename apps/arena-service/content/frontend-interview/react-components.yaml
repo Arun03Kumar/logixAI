@@ -1,0 +1,686 @@
+id: react-components
+title: React components and hooks
+summary: Build and debug real components — state and events, controlled forms, lists with immutable updates, accessible tabs, a debounced-value hook and data fetching without race conditions.
+prerequisites: [js-closures, js-async]
+lesson: |
+  ## State and rendering
+
+  A component is a function from props and state to UI. Calling a state setter schedules a re-render; React compares the new state with the old **by reference** (`Object.is`), so you must create new arrays and objects instead of mutating them:
+
+  ```jsx
+  setItems([...items, newItem]);                      // add
+  setItems(items.filter((i) => i.id !== id));         // remove
+  setItems(items.map((i) => i.id === id ? { ...i, done: !i.done } : i));  // update
+  ```
+
+  When the next state depends on the previous one, pass a function: `setCount((c) => c + 1)`. Inside one event handler `count` is a snapshot of that render, so calling `setCount(count + 1)` twice adds 1, not 2.
+
+  ## Controlled inputs
+
+  ```jsx
+  const [email, setEmail] = useState("");
+  <input value={email} onChange={(e) => setEmail(e.target.value)} />
+  ```
+
+  The state is the source of truth; validation and "disable the button" are just expressions computed from it during render — no extra state needed.
+
+  ## Effects
+
+  `useEffect(fn, deps)` runs after render when a dependency changed. Return a **cleanup** function to undo it (clear a timer, ignore a stale response); React runs it before the next run of the effect and on unmount.
+
+  ```jsx
+  useEffect(() => {
+    let active = true;
+    load(id).then((data) => { if (active) setData(data); });
+    return () => { active = false; };   // a newer id makes this response stale
+  }, [id]);
+  ```
+
+  ## How these are tested
+
+  Your component runs in Node with React 19 and a simulated DOM (jsdom). The test renders it, clicks and types like a user, and checks the text on screen — so use the labels, `data-testid`s and roles each question asks for. Timers use a fake clock. Items with a preview also render live next to the editor.
+items:
+  - id: react-keys
+    type: mcq_single
+    title: Why not use the index as key?
+    difficulty: easy
+    tags: [react, lists, keys]
+    prompt: |
+      A list renders `items.map((item, i) => <Row key={i} item={item} />)`, and each `Row` has its own state (an "expanded" toggle). What goes wrong when an item is inserted at the top?
+    options:
+      - { id: a, text: "Nothing — keys only need to be unique among siblings" }
+      - { id: b, text: "React matches rows by key, so every row now gets the state of the row that used to be at its index: the expanded row appears to move" }
+      - { id: c, text: "React throws a duplicate-key error" }
+      - { id: d, text: "The list re-renders twice" }
+    answer: b
+    explanation: |
+      Keys tell React which element is which between renders. After an insert at the top, key `0` now belongs to the new item, so React keeps row 0's state (and DOM, like input text) for it, and every row's state shifts by one. A stable id from the data (`key={item.id}`) keeps state attached to the right item. Index keys are fine only for lists that never reorder, insert or delete.
+
+  - id: react-stale-state
+    type: mcq_single
+    title: Two updates, one click
+    difficulty: easy
+    tags: [react, state]
+    prompt: |
+      ```jsx
+      function Counter() {
+        const [n, setN] = useState(0);
+        return (
+          <button onClick={() => { setN(n + 1); setN(n + 1); }}>{n}</button>
+        );
+      }
+      ```
+      What does the button show after **one** click?
+    options:
+      - { id: a, text: "2" }
+      - { id: b, text: "1" }
+      - { id: c, text: "0 — state updates inside handlers are ignored" }
+      - { id: d, text: "It depends on timing" }
+    answer: b
+    explanation: |
+      `n` is the value from the render that created this handler: 0. Both calls ask for `0 + 1`. Use the updater form, `setN((c) => c + 1)`, which receives the latest queued value, so two calls give 2.
+
+  - id: react-effect-cleanup
+    type: mcq_multi
+    title: When does cleanup run?
+    difficulty: medium
+    tags: [react, effects]
+    prompt: |
+      For `useEffect(() => { ...; return cleanup; }, [userId])`, when does React call `cleanup`? Select all that apply.
+    options:
+      - { id: a, text: "When the component unmounts" }
+      - { id: b, text: "Before running the effect again because userId changed" }
+      - { id: c, text: "After every render, even when userId didn't change" }
+      - { id: d, text: "Only if the effect threw an error" }
+    answer: [a, b]
+    explanation: |
+      Cleanup undoes the previous run of the effect: right before the effect runs again (its dependencies changed) and when the component unmounts. With unchanged dependencies the effect doesn't re-run, so neither does cleanup. In development, Strict Mode runs effect → cleanup → effect once on mount to surface missing cleanups.
+
+  - id: react-bounded-counter
+    type: code
+    language: javascript
+    title: A bounded counter
+    difficulty: easy
+    tags: [react, state, events]
+    prompt: |
+      Build `Counter({ start, min, max })`:
+
+      - a `<span data-testid="count">` showing the value (starting at `start`);
+      - a button labelled `-` and a button labelled `+` that change it by 1;
+      - the value never goes below `min` or above `max`: disable the `-` button at `min` and the `+` button at `max`.
+
+      Export it (`export default function Counter ...` or a named function).
+    expose: [Counter]
+    preview:
+      component: Counter
+      props: { start: 1, min: 0, max: 3 }
+    driver: |
+      async function check(props, presses) {
+        const { container } = await __lx.render(<Counter {...props} />);
+        for (const label of presses) {
+          const button = __lx.byText(container, label);
+          if (!button.disabled) await __lx.click(button);
+        }
+        return {
+          count: __lx.text(__lx.byTestId(container, "count")),
+          minusDisabled: __lx.byText(container, "-").disabled,
+          plusDisabled: __lx.byText(container, "+").disabled,
+        };
+      }
+    function:
+      name: check
+      params:
+        - { name: props, type: dict }
+        - { name: presses, type: list }
+      returns: "the count and which buttons are disabled"
+    starter: |
+      import { useState } from "react";
+
+      export default function Counter({ start, min, max }) {
+        const [count, setCount] = useState(start);
+        return (
+          <div>
+            <button onClick={() => setCount(count - 1)}>-</button>
+            <span data-testid="count">{count}</span>
+            <button onClick={() => setCount(count + 1)}>+</button>
+          </div>
+        );
+      }
+    solution: |
+      import { useState } from "react";
+
+      export default function Counter({ start, min, max }) {
+        const [count, setCount] = useState(start);
+        return (
+          <div>
+            <button disabled={count <= min} onClick={() => setCount((c) => Math.max(min, c - 1))}>-</button>
+            <span data-testid="count">{count}</span>
+            <button disabled={count >= max} onClick={() => setCount((c) => Math.min(max, c + 1))}>+</button>
+          </div>
+        );
+      }
+    tests:
+      sample:
+        - args: [{ "start": 1, "min": 0, "max": 3 }, ["+", "+", "+", "+"]]
+      hidden:
+        - args: [{ "start": 2, "min": 0, "max": 5 }, ["-", "-", "-", "+"]]
+        - args: [{ "start": 0, "min": 0, "max": 0 }, ["+", "-"]]
+    explanation: |
+      `disabled` is derived from the current value during render — no extra state. Clamping inside the updater as well keeps the value in range even if something calls the handler while the button is disabled (fast double clicks, keyboard). The starter happily counts past both ends.
+
+  - id: react-add-todo-bug
+    type: debug
+    language: javascript
+    title: The list that won't update
+    difficulty: medium
+    tags: [react, state, immutability, debugging]
+    prompt: |
+      `TodoList` should add the input's text to the list when **Add** is clicked (ignoring blank text) and then clear the input. Clicking Add does nothing visible. Find and fix the bug(s).
+    expose: [TodoList]
+    preview:
+      component: TodoList
+      props: {}
+    driver: |
+      async function check(entries) {
+        const { container } = await __lx.render(<TodoList />);
+        const input = __lx.$(container, "input");
+        for (const text of entries) {
+          await __lx.type(input, text);
+          await __lx.click(__lx.byText(container, "Add"));
+        }
+        return { items: __lx.$$(container, "li").map(__lx.text), inputAfter: input.value };
+      }
+    function:
+      name: check
+      params:
+        - { name: entries, type: list }
+      returns: "the list items and the input's value"
+    starter: |
+      import { useState } from "react";
+
+      export default function TodoList() {
+        const [items, setItems] = useState([]);
+        const [text, setText] = useState("");
+
+        function add() {
+          if (!text.trim()) return;
+          items.push(text.trim());
+          setItems(items);
+        }
+
+        return (
+          <div>
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="New task" />
+            <button onClick={add}>Add</button>
+            <ul>
+              {items.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+          </div>
+        );
+      }
+    solution: |
+      import { useState } from "react";
+
+      export default function TodoList() {
+        const [items, setItems] = useState([]);
+        const [text, setText] = useState("");
+
+        function add() {
+          if (!text.trim()) return;
+          setItems((prev) => [...prev, text.trim()]);
+          setText("");
+        }
+
+        return (
+          <div>
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="New task" />
+            <button onClick={add}>Add</button>
+            <ul>
+              {items.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+          </div>
+        );
+      }
+    tests:
+      sample:
+        - args: [["Buy milk", "Call Ravi"]]
+      hidden:
+        - args: [["  ", "Ship it"]]
+    hints:
+      - "React decides whether to re-render by comparing the new state with the old one. Is it a new array?"
+    explanation: |
+      `items.push` mutates the existing array and `setItems(items)` passes the **same** reference, so React sees no change and skips the render (the item is there, invisibly, until something else re-renders). Create a new array — `[...prev, text]` — and clear the input with `setText("")`. The updater form also keeps two quick adds from overwriting each other.
+
+  - id: react-todo-toggle
+    type: code
+    language: javascript
+    title: Toggle, remove and count
+    difficulty: medium
+    tags: [react, state, lists]
+    prompt: |
+      Build `Todos({ initial })`, where `initial` is an array of `{ id, text, done }`. Render:
+
+      - a `<li>` per todo containing a checkbox (`<input type="checkbox">`, checked when done), the text, and a button labelled `Remove`;
+      - a `<p data-testid="left">` with the number of todos **not** done, e.g. `2 left`.
+
+      Toggling a checkbox flips that todo; Remove deletes it. Don't mutate the todos.
+    expose: [Todos]
+    preview:
+      component: Todos
+      props: { initial: [{ id: 1, text: "Write tests", done: false }, { id: 2, text: "Fix bug", done: true }, { id: 3, text: "Ship", done: false }] }
+    driver: |
+      async function check(initial, actions) {
+        const frozen = initial.map((t) => Object.freeze({ ...t }));
+        Object.freeze(frozen);
+        const { container } = await __lx.render(<Todos initial={frozen} />);
+        for (const [action, index] of actions) {
+          const li = __lx.$$(container, "li")[index];
+          if (action === "toggle") await __lx.click(__lx.$(li, "input[type=checkbox]"));
+          else await __lx.click(__lx.byText(li, "Remove"));
+        }
+        return {
+          todos: __lx.$$(container, "li").map((li) => [__lx.text(li).replace(/\s*Remove$/, ""), __lx.$(li, "input").checked]),
+          left: __lx.text(__lx.byTestId(container, "left")),
+        };
+      }
+    function:
+      name: check
+      params:
+        - { name: initial, type: list }
+        - { name: actions, type: list }
+      returns: "each todo's text and checkbox, and the count"
+    starter: |
+      import { useState } from "react";
+
+      export default function Todos({ initial }) {
+        const [todos, setTodos] = useState(initial);
+        return (
+          <div>
+            <ul>
+              {todos.map((t) => (
+                <li key={t.id}>
+                  <input type="checkbox" checked={t.done} onChange={() => {}} />
+                  {t.text}
+                  <button>Remove</button>
+                </li>
+              ))}
+            </ul>
+            <p data-testid="left">{todos.length} left</p>
+          </div>
+        );
+      }
+    solution: |
+      import { useState } from "react";
+
+      export default function Todos({ initial }) {
+        const [todos, setTodos] = useState(initial);
+        const toggle = (id) => setTodos((ts) => ts.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+        const remove = (id) => setTodos((ts) => ts.filter((t) => t.id !== id));
+        const left = todos.filter((t) => !t.done).length;
+        return (
+          <div>
+            <ul>
+              {todos.map((t) => (
+                <li key={t.id}>
+                  <input type="checkbox" checked={t.done} onChange={() => toggle(t.id)} />
+                  {t.text}
+                  <button onClick={() => remove(t.id)}>Remove</button>
+                </li>
+              ))}
+            </ul>
+            <p data-testid="left">{left} left</p>
+          </div>
+        );
+      }
+    tests:
+      sample:
+        - args: [[{ "id": 1, "text": "Write tests", "done": false }, { "id": 2, "text": "Fix bug", "done": true }, { "id": 3, "text": "Ship", "done": false }], [["toggle", 0], ["remove", 1]]]
+      hidden:
+        - args: [[{ "id": 7, "text": "Only", "done": false }], [["toggle", 0], ["toggle", 0], ["remove", 0]]]
+        - args: [[{ "id": 1, "text": "a", "done": true }, { "id": 2, "text": "b", "done": true }], [["toggle", 1]]]
+    explanation: |
+      Update immutably: `map` with a spread copy for the toggled item, `filter` to remove. The test freezes the initial todos, so `t.done = !t.done` throws — mutation bugs can't hide. The "left" count is derived from `todos` during render; storing it as separate state would invite the two to drift apart. Keys use the stable `id`, so removing an item doesn't shift checkbox state onto its neighbour.
+
+  - id: react-signup-form
+    type: code
+    language: javascript
+    title: A validated sign-up form
+    difficulty: medium
+    tags: [react, forms, validation]
+    prompt: |
+      Build `SignupForm({ onSubmit })` with controlled inputs:
+
+      - `<input data-testid="email">` and `<input data-testid="password" type="password">`;
+      - a `<button type="submit">` labelled `Sign up`, **disabled** until the email contains `@` and a `.` after it, and the password has at least 8 characters;
+      - while the password is non-empty and shorter than 8 characters, show `<p data-testid="password-error">At least 8 characters</p>` (otherwise don't render it);
+      - submitting the form calls `onSubmit({ email, password })` once, with the email trimmed, and must not reload the page.
+    expose: [SignupForm]
+    preview:
+      component: SignupForm
+      props: {}
+    driver: |
+      async function check(steps) {
+        const submitted = [];
+        const { container } = await __lx.render(<SignupForm onSubmit={(v) => submitted.push(v)} />);
+        const snapshots = [];
+        for (const [field, value] of steps) {
+          if (field === "submit") {
+            const form = __lx.$(container, "form");
+            await __lx.act(() => form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
+          } else {
+            await __lx.type(__lx.byTestId(container, field), value);
+          }
+          const button = __lx.byText(container, "Sign up");
+          snapshots.push([button ? button.disabled : "no button", __lx.text(__lx.byTestId(container, "password-error"))]);
+        }
+        return { snapshots, submitted };
+      }
+    function:
+      name: check
+      params:
+        - { name: steps, type: list }
+      returns: "button state and error text after each step, and what was submitted"
+    starter: |
+      import { useState } from "react";
+
+      export default function SignupForm({ onSubmit }) {
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
+        return (
+          <form onSubmit={() => onSubmit({ email, password })}>
+            <input data-testid="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input data-testid="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button type="submit">Sign up</button>
+          </form>
+        );
+      }
+    solution: |
+      import { useState } from "react";
+
+      export default function SignupForm({ onSubmit }) {
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
+        const trimmed = email.trim();
+        const at = trimmed.indexOf("@");
+        const emailOk = at > 0 && trimmed.indexOf(".", at) > at + 1;
+        const passwordOk = password.length >= 8;
+        const valid = emailOk && passwordOk;
+
+        function handleSubmit(e) {
+          e.preventDefault();
+          if (valid) onSubmit({ email: trimmed, password });
+        }
+
+        return (
+          <form onSubmit={handleSubmit}>
+            <input data-testid="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+            <input data-testid="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
+            {password && !passwordOk ? <p data-testid="password-error">At least 8 characters</p> : null}
+            <button type="submit" disabled={!valid}>Sign up</button>
+          </form>
+        );
+      }
+    tests:
+      sample:
+        - args: [[["email", "asha@example.com"], ["password", "short"], ["password", "longenough"], ["submit"]]]
+      hidden:
+        - args: [[["email", "no-at-sign"], ["password", "12345678"], ["submit"]]]
+        - args: [[["password", "x"], ["password", ""], ["email", "  r@x.io  "], ["password", "abcdefgh"], ["submit"]]]
+    explanation: |
+      Validity is computed from state on every render, so the button, the error and the submit guard always agree. `e.preventDefault()` stops the browser's default full-page form submission. Checking `valid` again in the handler matters because a disabled button isn't the only way to submit (pressing Enter in a field submits too). The error shows only once the user has typed something, so an empty form isn't covered in red.
+
+  - id: react-tabs
+    type: code
+    language: javascript
+    title: Accessible tabs
+    difficulty: medium
+    access: pro
+    tags: [react, accessibility, keyboard]
+    prompt: |
+      Build `Tabs({ tabs })`, where `tabs` is an array of `{ label, content }`:
+
+      - a container with `role="tablist"` holding one `<button role="tab">` per tab, with `aria-selected="true"` on the selected one (`"false"` on the others); the first tab starts selected;
+      - one `<div role="tabpanel">` showing the selected tab's `content`;
+      - clicking a tab selects it; with focus on a tab, **ArrowRight** / **ArrowLeft** select the next / previous tab, wrapping around at the ends.
+    expose: [Tabs]
+    preview:
+      component: Tabs
+      props: { tabs: [{ label: "Overview", content: "What it does" }, { label: "Pricing", content: "Free for students" }, { label: "FAQ", content: "Ask us anything" }] }
+    driver: |
+      async function check(tabs, actions) {
+        const { container } = await __lx.render(<Tabs tabs={tabs} />);
+        const selected = () => __lx.$$(container, '[role="tab"]').filter((t) => t.getAttribute("aria-selected") === "true").map(__lx.text);
+        const states = [];
+        for (const [action, arg] of actions) {
+          const current = __lx.$(container, '[role="tab"][aria-selected="true"]');
+          if (action === "click") await __lx.click(__lx.$$(container, '[role="tab"]')[arg]);
+          else await __lx.keyDown(current, arg);
+          states.push([selected(), __lx.text(__lx.$(container, '[role="tabpanel"]'))]);
+        }
+        return { initial: __lx.$$(container, '[role="tablist"]').length, states };
+      }
+    function:
+      name: check
+      params:
+        - { name: tabs, type: list }
+        - { name: actions, type: list }
+      returns: "the selected tab and panel text after each action"
+    starter: |
+      import { useState } from "react";
+
+      export default function Tabs({ tabs }) {
+        const [index, setIndex] = useState(0);
+        return (
+          <div>
+            <div>
+              {tabs.map((t, i) => (
+                <button key={t.label} onClick={() => setIndex(i)}>{t.label}</button>
+              ))}
+            </div>
+            <div>{tabs[index].content}</div>
+          </div>
+        );
+      }
+    solution: |
+      import { useState } from "react";
+
+      export default function Tabs({ tabs }) {
+        const [index, setIndex] = useState(0);
+        const n = tabs.length;
+
+        function onKeyDown(e) {
+          if (e.key === "ArrowRight") setIndex((i) => (i + 1) % n);
+          if (e.key === "ArrowLeft") setIndex((i) => (i - 1 + n) % n);
+        }
+
+        return (
+          <div>
+            <div role="tablist" onKeyDown={onKeyDown}>
+              {tabs.map((t, i) => (
+                <button
+                  key={t.label}
+                  role="tab"
+                  aria-selected={i === index ? "true" : "false"}
+                  tabIndex={i === index ? 0 : -1}
+                  onClick={() => setIndex(i)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div role="tabpanel">{tabs[index].content}</div>
+          </div>
+        );
+      }
+    tests:
+      sample:
+        - args: [[{ "label": "One", "content": "first" }, { "label": "Two", "content": "second" }, { "label": "Three", "content": "third" }], [["click", 2], ["key", "ArrowRight"], ["key", "ArrowLeft"], ["key", "ArrowLeft"]]]
+      hidden:
+        - args: [[{ "label": "A", "content": "alpha" }, { "label": "B", "content": "beta" }], [["key", "ArrowLeft"], ["key", "ArrowLeft"], ["click", 0]]]
+    explanation: |
+      Roles and `aria-selected` let screen readers announce "tab 2 of 3, selected"; arrow keys are the expected keyboard model for a tablist (Tab moves focus *into* the panel, which is why unselected tabs get `tabIndex={-1}`). Modular arithmetic — `(i - 1 + n) % n` — wraps both ends. Handling keys on the tablist means one handler serves every tab.
+
+  - id: react-use-debounced-value
+    type: code
+    language: javascript
+    title: A useDebouncedValue hook
+    difficulty: medium
+    access: pro
+    tags: [react, hooks, effects, debounce]
+    prompt: |
+      Write a hook `useDebouncedValue(value, delay)` that returns `value`, but only after it has stopped changing for `delay` ms. The first render returns the initial value immediately. Clean up pending timers when the value changes or the component unmounts.
+
+      The test renders a component that shows the hook's result, changes `value` at the given times (fake clock) and records what's displayed.
+    expose: [useDebouncedValue]
+    driver: |
+      function Probe({ value, delay }) {
+        return <span data-testid="out">{useDebouncedValue(value, delay)}</span>;
+      }
+
+      async function check(changes, delay) {
+        const clock = __lx.useFakeTimers();
+        const view = await __lx.render(<Probe value={changes[0][1]} delay={delay} />);
+        const shown = () => __lx.text(__lx.byTestId(view.container, "out"));
+        const timeline = [[0, shown()]];
+        let t = 0;
+        for (const [at, value] of changes.slice(1)) {
+          await __lx.act(() => clock.tick(at - t));
+          t = at;
+          timeline.push([t, shown()]);
+          await view.rerender(<Probe value={value} delay={delay} />);
+        }
+        for (const step of [delay - 1, 1, delay]) {
+          await __lx.act(() => clock.tick(step));
+          t += step;
+          timeline.push([t, shown()]);
+        }
+        await view.unmount();
+        return { timeline, timersLeftAfterUnmount: clock.pending() };
+      }
+    function:
+      name: check
+      params:
+        - { name: changes, type: list }
+        - { name: delay, type: int }
+      returns: "what was displayed over time, and leftover timers"
+    starter: |
+      import { useEffect, useState } from "react";
+
+      export function useDebouncedValue(value, delay) {
+        const [debounced, setDebounced] = useState(value);
+        useEffect(() => {
+          setTimeout(() => setDebounced(value), delay);
+        }, [value, delay]);
+        return debounced;
+      }
+    solution: |
+      import { useEffect, useState } from "react";
+
+      export function useDebouncedValue(value, delay) {
+        const [debounced, setDebounced] = useState(value);
+        useEffect(() => {
+          const timer = setTimeout(() => setDebounced(value), delay);
+          return () => clearTimeout(timer);
+        }, [value, delay]);
+        return debounced;
+      }
+    tests:
+      sample:
+        - args: [[[0, "r"], [100, "re"], [150, "rea"], [220, "reac"]], 300]
+      hidden:
+        - args: [[[0, "a"], [500, "b"], [1000, "c"]], 200]
+        - args: [[[0, "x"]], 100]
+    explanation: |
+      Each change starts a timer; the effect's **cleanup** cancels the previous one, so only the last value in a burst gets through — a debounce built from React's own lifecycle. Without cleanup (the starter) every intermediate value is applied in turn, causing flicker and wasted searches, and a timer can fire after unmount.
+
+  - id: react-fetch-race
+    type: code
+    language: javascript
+    title: Fetching without race conditions
+    difficulty: hard
+    access: pro
+    tags: [react, effects, async, race-conditions]
+    prompt: |
+      Build `UserCard({ userId, fetchUser })`. `fetchUser(id)` returns a promise of `{ name }` (or rejects with an `Error`). Render a `<p data-testid="status">` that shows:
+
+      - `Loading...` while the current user's request is pending;
+      - the user's `name` once it arrives;
+      - `Error: <message>` if it fails.
+
+      When `userId` changes, start a new request and show `Loading...` again. A response for an **old** `userId` that arrives late must never be shown.
+    expose: [UserCard]
+    driver: |
+      async function check(delays, failing, sequence) {
+        const clock = __lx.useFakeTimers();
+        const calls = [];
+        const fetchUser = (id) => {
+          calls.push(id);
+          return new Promise((resolve, reject) => setTimeout(() => (failing.includes(id) ? reject(new Error("user " + id + " not found")) : resolve({ name: "User " + id })), delays[id]));
+        };
+        const status = (c) => __lx.text(__lx.byTestId(c, "status"));
+        const [firstAt, firstId] = sequence[0];
+        const view = await __lx.render(<UserCard userId={firstId} fetchUser={fetchUser} />);
+        const timeline = [[firstAt, status(view.container)]];
+        let t = firstAt;
+        for (const [at, id] of sequence.slice(1)) {
+          await __lx.act(() => clock.tick(at - t));
+          t = at;
+          timeline.push([t, status(view.container)]);
+          await view.rerender(<UserCard userId={id} fetchUser={fetchUser} />);
+          timeline.push([t, status(view.container)]);
+        }
+        for (let i = 0; i < 6; i++) {
+          await __lx.act(() => clock.tick(100));
+          t += 100;
+          timeline.push([t, status(view.container)]);
+        }
+        return { timeline, calls };
+      }
+    function:
+      name: check
+      params:
+        - { name: delays, type: dict }
+        - { name: failing, type: list }
+        - { name: sequence, type: list }
+      returns: "the status text over time and which ids were fetched"
+    starter: |
+      import { useEffect, useState } from "react";
+
+      export default function UserCard({ userId, fetchUser }) {
+        const [text, setText] = useState("Loading...");
+        useEffect(() => {
+          fetchUser(userId).then(
+            (user) => setText(user.name),
+            (err) => setText("Error: " + err.message),
+          );
+        }, [userId]);
+        return <p data-testid="status">{text}</p>;
+      }
+    solution: |
+      import { useEffect, useState } from "react";
+
+      export default function UserCard({ userId, fetchUser }) {
+        const [state, setState] = useState({ status: "loading" });
+        useEffect(() => {
+          let current = true;
+          setState({ status: "loading" });
+          fetchUser(userId).then(
+            (user) => { if (current) setState({ status: "done", name: user.name }); },
+            (err) => { if (current) setState({ status: "error", message: err.message }); },
+          );
+          return () => { current = false; };
+        }, [userId, fetchUser]);
+        const text = state.status === "loading" ? "Loading..." : state.status === "error" ? "Error: " + state.message : state.name;
+        return <p data-testid="status">{text}</p>;
+      }
+    tests:
+      sample:
+        - args: [{ "1": 400, "2": 100 }, [], [[0, 1], [50, 2]]]
+      hidden:
+        - args: [{ "1": 100, "2": 300 }, [2], [[0, 1], [200, 2]]]
+        - args: [{ "1": 50 }, [], [[0, 1]]]
+        - args: [{ "1": 300, "2": 300, "3": 50 }, [1], [[0, 1], [100, 2], [150, 3]]]
+    hints:
+      - "The effect's cleanup runs when `userId` changes. What could it set so the old request's `.then` knows it's stale?"
+    explanation: |
+      Each effect run gets its own `current` flag; the cleanup — which React runs as soon as `userId` changes — flips it, so a slow old response finds `current === false` and is dropped. The starter shows whichever response arrives **last**, so a slow request for user 1 overwrites user 2, and it never shows `Loading...` again after the first load. `AbortController` can cancel the request itself; data libraries like TanStack Query do this for you.

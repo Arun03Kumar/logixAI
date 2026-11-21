@@ -1,0 +1,448 @@
+id: js-utilities
+title: Data structures and utilities
+summary: The "build it yourself" questions — an LRU cache, an event emitter, deep equality and cloning, flatten, safe property paths and groupBy.
+prerequisites: [js-closures]
+lesson: |
+  ## Maps, Sets and insertion order
+
+  `Map` keeps keys in **insertion order** and accepts any key type, which makes it the right tool for caches: deleting and re-inserting a key moves it to the end, and `map.keys().next().value` is the oldest key. Plain objects coerce keys to strings and have prototype keys to trip over.
+
+  ## Classes
+
+  ```js
+  class Stack {
+    #items = [];                 // private field
+    push(x) { this.#items.push(x); return this; }
+    get size() { return this.#items.length; }
+  }
+  ```
+
+  ## Recursion over JSON-like values
+
+  Deep equality, cloning and flattening all walk a value recursively. Decide each case explicitly: `null` (whose `typeof` is `"object"`), arrays vs plain objects, `Date`, `Map`/`Set`, and **cycles** (an object that contains itself), which need a `Map` from originals to copies.
+
+  ## Complexity
+
+  Interviewers expect you to state it: an LRU cache with a `Map` gives O(1) `get` and `put`; a naive array-based one is O(n).
+items:
+  - id: js-lru-cache
+    type: code
+    language: javascript
+    title: LRU cache
+    difficulty: medium
+    tags: [javascript, data-structures, caching, map]
+    prompt: |
+      Implement `class LRUCache` with a `capacity`:
+
+      - `get(key)` returns the value, or `-1` if missing. A successful `get` makes the key the **most recently used**.
+      - `put(key, value)` inserts or updates the key (making it most recently used). If that pushes the size over `capacity`, evict the **least recently used** key.
+
+      Both should be O(1). The test runs a list of operations and records what each `get` returns.
+    expose: [LRUCache]
+    driver: |
+      function check(capacity, ops) {
+        const cache = new LRUCache(capacity);
+        const out = [];
+        for (const [op, key, value] of ops) {
+          if (op === "put") cache.put(key, value);
+          else out.push(cache.get(key));
+        }
+        return out;
+      }
+    function:
+      name: check
+      params:
+        - { name: capacity, type: int }
+        - { name: ops, type: list }
+      returns: "the result of every get"
+    starter: |
+      class LRUCache {
+        constructor(capacity) {
+          this.capacity = capacity;
+          this.map = new Map();
+        }
+
+        get(key) {
+          return this.map.has(key) ? this.map.get(key) : -1;
+        }
+
+        put(key, value) {
+          this.map.set(key, value);
+          if (this.map.size > this.capacity) {
+            this.map.delete(this.map.keys().next().value);
+          }
+        }
+      }
+    solution: |
+      class LRUCache {
+        constructor(capacity) {
+          this.capacity = capacity;
+          this.map = new Map();
+        }
+
+        get(key) {
+          if (!this.map.has(key)) return -1;
+          const value = this.map.get(key);
+          this.map.delete(key);
+          this.map.set(key, value);
+          return value;
+        }
+
+        put(key, value) {
+          this.map.delete(key);
+          this.map.set(key, value);
+          if (this.map.size > this.capacity) {
+            this.map.delete(this.map.keys().next().value);
+          }
+        }
+      }
+    tests:
+      sample:
+        - args: [2, [["put", 1, 1], ["put", 2, 2], ["get", 1], ["put", 3, 3], ["get", 2], ["get", 1], ["get", 3]]]
+      hidden:
+        - args: [1, [["put", "a", 1], ["put", "b", 2], ["get", "a"], ["get", "b"]]]
+        - args: [2, [["put", 1, 1], ["put", 2, 2], ["put", 1, 10], ["put", 3, 3], ["get", 1], ["get", 2], ["get", 3]]]
+        - args: [3, [["get", 9]]]
+    explanation: |
+      A `Map` iterates in insertion order, so deleting and re-setting a key moves it to the "newest" end, and the first key is always the least recently used. The starter never refreshes a key on `get` or on an update, so it evicts by insertion time (FIFO), not by use. In languages without an ordered map, the classic answer is a hash map plus a doubly linked list.
+
+  - id: js-event-emitter
+    type: code
+    language: javascript
+    title: Event emitter
+    difficulty: medium
+    tags: [javascript, classes, events]
+    prompt: |
+      Implement `class EventEmitter`:
+
+      - `on(event, listener)` subscribes and returns an **unsubscribe** function;
+      - `once(event, listener)` subscribes for one call only;
+      - `off(event, listener)` removes that listener;
+      - `emit(event, ...args)` calls the event's listeners **in subscription order** with `args` and returns `true` if there were any, `false` otherwise.
+
+      A listener removed while an event is being emitted still runs for that emit (iterate over a copy).
+    expose: [EventEmitter]
+    driver: |
+      function check(ops) {
+        const em = new EventEmitter();
+        const log = [];
+        const listeners = {};
+        const unsubs = {};
+        const make = (name) => (listeners[name] ??= (...args) => {
+          log.push(name + ":" + args.join(","));
+          if (name.startsWith("self-remover")) em.off("tick", listeners[name]);
+        });
+        const returns = [];
+        for (const [op, event, arg] of ops) {
+          if (op === "on") unsubs[arg] = em.on(event, make(arg));
+          else if (op === "once") em.once(event, make(arg));
+          else if (op === "off") em.off(event, make(arg));
+          else if (op === "unsub") unsubs[arg]();
+          else returns.push(em.emit(event, ...(arg ?? [])));
+        }
+        return { log, emitReturned: returns };
+      }
+    function:
+      name: check
+      params:
+        - { name: ops, type: list }
+      returns: "the listener calls and what emit returned"
+    starter: |
+      class EventEmitter {
+        constructor() {
+          this.events = {};
+        }
+
+        on(event, listener) {
+          (this.events[event] ||= []).push(listener);
+          return () => this.off(event, listener);
+        }
+
+        once(event, listener) {
+          this.on(event, listener);
+        }
+
+        off(event, listener) {
+          this.events[event] = (this.events[event] || []).filter((l) => l !== listener);
+        }
+
+        emit(event, ...args) {
+          (this.events[event] || []).forEach((l) => l(...args));
+          return true;
+        }
+      }
+    solution: |
+      class EventEmitter {
+        #events = new Map();
+
+        on(event, listener) {
+          if (!this.#events.has(event)) this.#events.set(event, []);
+          this.#events.get(event).push(listener);
+          return () => this.off(event, listener);
+        }
+
+        once(event, listener) {
+          const wrapper = (...args) => {
+            this.off(event, wrapper);
+            listener(...args);
+          };
+          return this.on(event, wrapper);
+        }
+
+        off(event, listener) {
+          const list = this.#events.get(event);
+          if (!list) return;
+          const i = list.indexOf(listener);
+          if (i >= 0) list.splice(i, 1);
+        }
+
+        emit(event, ...args) {
+          const list = this.#events.get(event);
+          if (!list || list.length === 0) return false;
+          for (const l of [...list]) l(...args);
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [[["on", "msg", "A"], ["once", "msg", "B"], ["emit", "msg", [1]], ["emit", "msg", [2, 3]], ["emit", "other"]]]
+      hidden:
+        - args: [[["on", "x", "A"], ["on", "x", "C"], ["unsub", "x", "A"], ["emit", "x", ["hi"]], ["off", "x", "C"], ["emit", "x"]]]
+        - args: [[["on", "tick", "self-remover"], ["on", "tick", "after"], ["emit", "tick", [1]], ["emit", "tick", [2]]]]
+    explanation: |
+      `once` wraps the listener in a function that removes **itself** before calling the original (removing the original wouldn't work — it was never registered). Iterating over a copy (`[...list]`) keeps a listener that unsubscribes during `emit` from shifting the array and skipping its neighbour. `emit` reports whether anyone was listening, like Node's `EventEmitter`.
+
+  - id: js-deep-equal
+    type: code
+    language: javascript
+    title: Deep equality
+    difficulty: medium
+    tags: [javascript, recursion, objects]
+    prompt: |
+      Implement `deepEqual(a, b)` for JSON-like values (numbers, strings, booleans, `null`, arrays and plain objects): `true` when they have the same structure and values. Object key **order doesn't matter**; array order does.
+    function:
+      name: deepEqual
+      params:
+        - { name: a, type: dict }
+        - { name: b, type: dict }
+      returns: "boolean"
+    starter: |
+      function deepEqual(a, b) {
+        return JSON.stringify(a) === JSON.stringify(b);
+      }
+    solution: |
+      function deepEqual(a, b) {
+        if (a === b) return true;
+        if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+        if (Array.isArray(a) !== Array.isArray(b)) return false;
+        const ka = Object.keys(a);
+        const kb = Object.keys(b);
+        if (ka.length !== kb.length) return false;
+        return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+      }
+    tests:
+      sample:
+        - args: [{ "x": 1, "y": [1, 2] }, { "y": [1, 2], "x": 1 }]
+        - args: [[1, 2, 3], [1, 3, 2]]
+      hidden:
+        - args: [{ "a": null }, { "a": {} }]
+        - args: [{ "a": { "b": { "c": [1, { "d": 2 }] } } }, { "a": { "b": { "c": [1, { "d": 2 }] } } }]
+        - args: [[], {}]
+        - args: [{ "a": 1 }, { "a": 1, "b": 2 }]
+        - args: [1, 1]
+        - args: [{ "a": 1, "b": 2 }, { "b": 2, "a": 1 }]
+    explanation: |
+      Compare primitives with `===`, then recurse: same kind (array vs object — `[]` and `{}` both have zero keys), same number of keys, and every key present in both with deep-equal values. `typeof null === "object"` needs its own check. `JSON.stringify` fails on key order, drops `undefined` values and can't handle cycles.
+
+  - id: js-get-path
+    type: code
+    language: javascript
+    title: Safe property path
+    difficulty: medium
+    tags: [javascript, strings, objects]
+    prompt: |
+      Implement `get(obj, path, fallback)` like lodash's: `path` is a string such as `"user.address[0].city"` (dots for keys, `[n]` for array indexes). Return the value at that path, or `fallback` if any step is missing (`undefined` or `null` along the way). An existing value of `null`, `0`, `false` or `""` at the end is returned as is.
+    function:
+      name: get
+      params:
+        - { name: obj, type: dict }
+        - { name: path, type: str }
+        - { name: fallback, type: str }
+      returns: "the value or the fallback"
+    starter: |
+      function get(obj, path, fallback) {
+        let cur = obj;
+        for (const key of path.split(".")) {
+          cur = cur?.[key];
+        }
+        return cur || fallback;
+      }
+    solution: |
+      function get(obj, path, fallback) {
+        const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
+        let cur = obj;
+        for (const key of keys) {
+          if (cur === null || cur === undefined) return fallback;
+          cur = cur[key];
+        }
+        return cur === undefined ? fallback : cur;
+      }
+    tests:
+      sample:
+        - args: [{ "user": { "address": [{ "city": "Pune" }] } }, "user.address[0].city", "none"]
+      hidden:
+        - args: [{ "a": { "b": 0 } }, "a.b", "none"]
+        - args: [{ "a": null }, "a.b.c", "none"]
+        - args: [{ "items": [[1, 2], [3, 4]] }, "items[1][0]", "none"]
+        - args: [{ "a": { "b": null } }, "a.b", "none"]
+        - args: [{ "a": "" }, "a", "none"]
+    explanation: |
+      Normalise `[n]` to `.n` and split, then walk one key at a time, stopping at `null`/`undefined`. Return the fallback only for a **missing** value: the starter's `cur || fallback` swaps real values like `0`, `false` and `""` for the fallback — a common bug in config-reading code. (Optional chaining `a?.b` is the language-level version of this.)
+
+  - id: js-flatten-depth
+    type: code
+    language: javascript
+    title: Flatten to a depth
+    difficulty: easy
+    tags: [javascript, arrays, recursion]
+    prompt: |
+      Implement `flatten(arr, depth)` without `Array.prototype.flat`: flatten nested arrays up to `depth` levels (`depth` 0 returns a shallow copy). Keep the order.
+    function:
+      name: flatten
+      params:
+        - { name: arr, type: list }
+        - { name: depth, type: int }
+      returns: "array"
+    starter: |
+      function flatten(arr, depth) {
+        const out = [];
+        for (const x of arr) {
+          if (Array.isArray(x)) out.push(...flatten(x));
+          else out.push(x);
+        }
+        return out;
+      }
+    solution: |
+      function flatten(arr, depth) {
+        const out = [];
+        for (const x of arr) {
+          if (Array.isArray(x) && depth > 0) out.push(...flatten(x, depth - 1));
+          else out.push(x);
+        }
+        return out;
+      }
+    tests:
+      sample:
+        - args: [[1, [2, [3, [4]]], 5], 1]
+      hidden:
+        - args: [[1, [2, [3, [4]]], 5], 0]
+        - args: [[1, [2, [3, [4]]], 5], 10]
+        - args: [[[], [[]], 1], 1]
+    explanation: |
+      Recurse into arrays while `depth > 0`, passing `depth - 1` down; at depth 0 nested arrays are copied in as they are. The starter recurses forever deep (its `depth` is `undefined` after the first level). For very deep arrays an explicit stack avoids hitting the recursion limit.
+
+  - id: js-group-by
+    type: code
+    language: javascript
+    title: groupBy
+    difficulty: easy
+    tags: [javascript, arrays, objects]
+    prompt: |
+      Implement `groupBy(items, key)`: return an object mapping each value of `item[key]` to the array of items with that value, in their original order.
+    function:
+      name: groupBy
+      params:
+        - { name: items, type: list }
+        - { name: key, type: str }
+      returns: "object of arrays"
+    starter: |
+      function groupBy(items, key) {
+        const out = {};
+        for (const item of items) out[item[key]] = item;
+        return out;
+      }
+    solution: |
+      function groupBy(items, key) {
+        const out = {};
+        for (const item of items) {
+          (out[item[key]] ??= []).push(item);
+        }
+        return out;
+      }
+    tests:
+      sample:
+        - args: [[{ "name": "Asha", "city": "Pune" }, { "name": "Ravi", "city": "Delhi" }, { "name": "Meera", "city": "Pune" }], "city"]
+      hidden:
+        - args: [[], "city"]
+        - args: [[{ "id": 1, "ok": true }, { "id": 2, "ok": false }, { "id": 3, "ok": true }], "ok"]
+    explanation: |
+      `??=` creates the array the first time a group appears, then `push` appends in order. Keys become strings (`true` → `"true"`); a `Map` keeps the original key types. Modern runtimes ship this as `Object.groupBy(items, (x) => x.city)`.
+
+  - id: js-deep-clone
+    type: code
+    language: javascript
+    title: Deep clone with cycles
+    difficulty: hard
+    access: pro
+    tags: [javascript, recursion, objects]
+    prompt: |
+      Implement `deepClone(value)` without `structuredClone`: copy plain objects, arrays, `Date`, `Map` and `Set` recursively (primitives are returned as they are), and handle **cycles** — an object that (indirectly) contains itself must be cloned into a copy that contains the copy. Shared references stay shared in the copy.
+    expose: [deepClone]
+    driver: |
+      function check(scenario) {
+        globalThis.structuredClone = undefined;
+        const shared = { tag: "shared" };
+        const source = {
+          basic: () => ({ n: 1, s: "x", nested: { list: [1, [2, 3]], flag: false }, nothing: null }),
+          types: () => ({ when: new Date(86400000), map: new Map([["k", { v: 1 }]]), set: new Set([1, 2]) }),
+          cycle: () => { const o = { name: "root", child: { name: "child" } }; o.child.parent = o; o.self = o; return o; },
+          shared: () => ({ a: shared, b: shared, list: [shared] }),
+        }[scenario]();
+        const copy = deepClone(source);
+        const report = { sameObject: copy === source };
+        if (scenario === "basic") Object.assign(report, { equal: JSON.stringify(copy) === JSON.stringify(source), nestedCopied: copy.nested !== source.nested && copy.nested.list[1] !== source.nested.list[1] });
+        if (scenario === "types") Object.assign(report, { date: copy.when instanceof Date && copy.when !== source.when && copy.when.getTime() === 86400000, map: copy.map instanceof Map && copy.map !== source.map && copy.map.get("k").v === 1 && copy.map.get("k") !== source.map.get("k"), set: copy.set instanceof Set && copy.set !== source.set && copy.set.has(2) });
+        if (scenario === "cycle") Object.assign(report, { selfPointsToCopy: copy.self === copy, parentPointsToCopy: copy.child.parent === copy, childCopied: copy.child !== source.child });
+        if (scenario === "shared") Object.assign(report, { stillShared: copy.a === copy.b && copy.b === copy.list[0], notOriginal: copy.a !== shared });
+        return report;
+      }
+    function:
+      name: check
+      params:
+        - { name: scenario, type: str }
+      returns: "checks on the copy"
+    starter: |
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+    solution: |
+      function deepClone(value, seen = new Map()) {
+        if (value === null || typeof value !== "object") return value;
+        if (seen.has(value)) return seen.get(value);
+        if (value instanceof Date) return new Date(value.getTime());
+        if (value instanceof Map) {
+          const out = new Map();
+          seen.set(value, out);
+          for (const [k, v] of value) out.set(deepClone(k, seen), deepClone(v, seen));
+          return out;
+        }
+        if (value instanceof Set) {
+          const out = new Set();
+          seen.set(value, out);
+          for (const v of value) out.add(deepClone(v, seen));
+          return out;
+        }
+        const out = Array.isArray(value) ? [] : {};
+        seen.set(value, out);
+        for (const key of Object.keys(value)) out[key] = deepClone(value[key], seen);
+        return out;
+      }
+    tests:
+      sample:
+        - args: ["basic"]
+      hidden:
+        - args: ["types"]
+        - args: ["cycle"]
+        - args: ["shared"]
+    explanation: |
+      A `Map` from each original object to its copy does two jobs: when the walk meets an object it has already copied it returns that copy, which ends cycles **and** keeps shared references shared. Register the copy before recursing into its children, or the cycle is reached first. The starter's JSON round-trip throws on cycles, turns dates into strings, and turns `Map`/`Set` into `{}`.

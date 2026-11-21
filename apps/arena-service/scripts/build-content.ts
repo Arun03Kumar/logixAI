@@ -6,7 +6,11 @@
  *    generated ones) in the judge image, records the expected outputs, checks
  *    any hand-written `expected`, and checks the starter FAILS at least one
  *    test (otherwise the item is solved before the student starts);
- *  - output items: runs the snippet and checks `answer` is exactly what it prints.
+ *  - JavaScript items run the same way in the Node judge image (one process
+ *    per test, like the judge); their generators still run in Python;
+ *  - output items: runs the snippet and checks `answer` is exactly what it prints;
+ *  - sql items: runs the reference query on every dataset, records the rows,
+ *    and checks the starter fails at least one.
  *
  * --check: don't write; exit 1 if the file is out of date (for CI).
  * Needs Docker and the image from `npm run judge:images`.
@@ -15,10 +19,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatScore, jsonValuesMatch, metricPasses, metricScore } from "@logixai/contracts";
-import { GENERATED_FILE, codeItemHash, datasetTests, isCode, readSources } from "../src/content/catalog.js";
-import { buildBatchProgram, seedFor } from "../src/content/harness.js";
-import type { CodeItemSource, GeneratedTests, ItemSource } from "../src/content/schema.js";
-import { runPython } from "./docker-python.js";
+import { GENERATED_FILE, codeItemHash, datasetTests, isCode, jsHarnessFor, readSources } from "../src/content/catalog.js";
+import { buildBatchProgram, buildSqlBatchProgram, seedFor } from "../src/content/harness.js";
+import { buildGeneratorProgram, buildJsBatchProgram } from "../src/content/harnessJs.js";
+import type { CodeItemSource, GeneratedTests, ItemSource, SqlItemSource } from "../src/content/schema.js";
+import { runNode, runPython } from "./docker-python.js";
 
 const CONTENT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "content");
 const check = process.argv.includes("--check");
@@ -26,12 +31,24 @@ const PARALLEL = 4;
 
 type BatchOutput = { generated: unknown[][]; results: ({ ok: true; value: unknown } | { ok: false; error: string })[] };
 
-async function batch(item: CodeItemSource, code: string, cases: unknown[][], withGenerator: boolean) {
+async function batch(item: CodeItemSource, code: string, cases: unknown[][], withGenerator: boolean): Promise<BatchOutput> {
+  if (item.language === "javascript") {
+    let generated: unknown[][] = [];
+    if (withGenerator && item.tests.generate) {
+      const gen = await runPython(buildGeneratorProgram(item.tests.generate, seedFor(item.id)));
+      if (gen.exitCode !== 0) throw new Error(`test generator failed: ${gen.stderr.slice(-800)}`);
+      generated = JSON.parse(gen.stdout) as unknown[][];
+    }
+    const run = await runNode(buildJsBatchProgram(jsHarnessFor(item), code, [...cases, ...generated]));
+    if (run.exitCode !== 0) throw new Error(`harness crashed (exit ${run.exitCode}): ${run.stderr.slice(-800)}`);
+    return { ...(JSON.parse(run.stdout) as BatchOutput), generated };
+  }
   const program = buildBatchProgram(
     item.function,
     code,
     cases,
     withGenerator && item.tests.generate ? { source: item.tests.generate, seed: seedFor(item.id) } : undefined,
+    item.driver,
   );
   const run = await runPython(program);
   if (run.exitCode !== 0) throw new Error(`harness crashed (exit ${run.exitCode}): ${run.stderr.slice(-800)}`);
@@ -106,8 +123,39 @@ ${r.error}`);
   return { hash: codeItemHash(item, data.hash), sample: [], hidden: [] };
 }
 
+async function buildSqlItem(item: SqlItemSource): Promise<GeneratedTests["items"][string]> {
+  const tol = { absTol: item.tolerance.abs, relTol: item.tolerance.rel };
+  const tests = [...item.tests.sample, ...item.tests.hidden];
+  const datasets = tests.map((t) => t.args[0]);
+  const runQuery = async (sql: string) => {
+    const run = await runPython(buildSqlBatchProgram({ tables: item.tables, ordered: item.ordered }, sql, datasets));
+    if (run.exitCode !== 0) throw new Error(`harness crashed (exit ${run.exitCode}): ${run.stderr.slice(-800)}`);
+    return (JSON.parse(run.stdout) as BatchOutput).results;
+  };
+  const ref = await runQuery(item.solution);
+  const encoded = ref.map((r, i) => {
+    if (!r.ok) throw new Error(`reference query fails on dataset ${i + 1}:\n${r.error}`);
+    return JSON.stringify(r.value);
+  });
+  const rowCounts = ref.map((r) => (r.ok ? (r.value as { data: unknown[] }).data.length : 0));
+  if (rowCounts.every((n) => n === 0)) throw new Error("the reference query returns no rows on any dataset");
+  if (item.tests.hidden.length && new Set(encoded).size === 1) {
+    throw new Error("every dataset gives the same answer, so hidden tests catch nothing");
+  }
+  const starter = await runQuery(item.starter);
+  if (starter.every((r, i) => r.ok && jsonValuesMatch(JSON.parse(encoded[i]!), r.value, tol))) {
+    throw new Error("the starter query already passes every dataset");
+  }
+  const n = item.tests.sample.length;
+  return {
+    hash: codeItemHash(item),
+    sample: tests.slice(0, n).map((t, i) => ({ args: t.args, expected: encoded[i]! })),
+    hidden: tests.slice(n).map((t, i) => ({ args: t.args, expected: encoded[n + i]! })),
+  };
+}
+
 async function checkOutputItem(item: Extract<ItemSource, { type: "output" }>) {
-  const run = await runPython(item.snippet);
+  const run = item.language === "javascript" ? await runNode(item.snippet) : await runPython(item.snippet);
   const printed = normalizeLines(run.stdout);
   if (run.exitCode !== 0) throw new Error(`snippet fails:\n${run.stderr.slice(-800)}`);
   if (printed !== normalizeLines(item.answer)) {
@@ -127,6 +175,8 @@ async function main() {
       try {
         if (isCode(item)) {
           generated.items[item.id] = item.dataset ? await buildDatasetItem(item) : await buildCodeItem(item);
+        } else if (item.type === "sql") {
+          generated.items[item.id] = await buildSqlItem(item);
         }
         else if (item.type === "output") await checkOutputItem(item);
         else continue;
@@ -167,7 +217,7 @@ async function main() {
     return;
   }
   writeFileSync(file, text);
-  console.log(`\n${items.length} items checked; wrote ${Object.keys(sorted.items).length} code items to ${GENERATED_FILE}.`);
+  console.log(`\n${items.length} items checked; wrote ${Object.keys(sorted.items).length} judged items to ${GENERATED_FILE}.`);
 }
 
 main().catch((err) => {

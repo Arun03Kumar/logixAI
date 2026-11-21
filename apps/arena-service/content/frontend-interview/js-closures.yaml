@@ -1,0 +1,359 @@
+id: js-closures
+title: Closures and higher-order functions
+summary: Functions that return functions — once, memoize, curry, debounce and throttle — plus the scope and `this` questions every frontend interview opens with.
+lesson: |
+  ## Closures
+
+  A function keeps access to the variables of the scope it was created in, even after that scope has returned. That's how a function can carry private state:
+
+  ```js
+  function counter() {
+    let n = 0;
+    return () => ++n;   // remembers n
+  }
+  const next = counter();
+  next(); next();       // 2
+  ```
+
+  Every "write a utility" question — `once`, `memoize`, `debounce` — is a closure over some state plus a wrapper function that forwards its arguments: `(...args) => fn(...args)`.
+
+  ## `var`, `let` and loops
+
+  `var` is scoped to the whole function, so every callback created in a `for (var i ...)` loop shares one `i`. `let` creates a fresh binding per iteration.
+
+  ## `this`
+
+  `this` is decided by **how a function is called**, not where it's defined: `obj.method()` sets it to `obj`; a bare call `f()` leaves it `undefined` in strict mode (modules and classes are strict). Arrow functions don't have their own `this`; they use the surrounding one. `fn.bind(obj)` fixes it.
+
+  ## Debounce vs throttle
+
+  Both limit how often a function runs during a burst of events:
+
+  - **debounce(fn, wait)**: run once the calls *stop* for `wait` ms (search-as-you-type, resize).
+  - **throttle(fn, wait)**: run at most once every `wait` ms *during* the burst (scroll, mouse move).
+
+  The tests here use a fake clock: `setTimeout` and `Date.now()` are controlled by the test, so timing is exact and instant.
+items:
+  - id: js-var-let-loop
+    type: output
+    language: javascript
+    title: var vs let in a loop
+    difficulty: easy
+    tags: [javascript, closures, scope]
+    prompt: |
+      What does this print (Node.js)?
+    snippet: |
+      for (var i = 0; i < 3; i++) setTimeout(() => console.log("var", i));
+      for (let j = 0; j < 3; j++) setTimeout(() => console.log("let", j));
+    answer: |
+      var 3
+      var 3
+      var 3
+      let 0
+      let 1
+      let 2
+    explanation: |
+      The callbacks run after both loops finish. With `var` there's a single `i` for the whole loop, which is 3 by then. `let` creates a new `j` for every iteration, so each callback closes over its own value. The pre-`let` fix was an IIFE: `(function (i) { setTimeout(...) })(i)`.
+
+  - id: js-this-extracted
+    type: mcq_single
+    title: A method without its object
+    difficulty: easy
+    tags: [javascript, this]
+    prompt: |
+      ```js
+      "use strict";
+      const user = {
+        name: "Asha",
+        greet() { return "hi " + this.name; },
+      };
+      const greet = user.greet;
+      greet();
+      ```
+      What happens?
+    options:
+      - { id: a, text: '"hi Asha"' }
+      - { id: b, text: '"hi undefined"' }
+      - { id: c, text: "TypeError: Cannot read properties of undefined (reading 'name')" }
+      - { id: d, text: '"hi " followed by the global name' }
+    answer: c
+    explanation: |
+      `this` comes from the call, not the definition. `greet()` is a bare call, so in strict mode `this` is `undefined` and reading `.name` throws. (In sloppy mode it would be the global object.) Fix with `user.greet.bind(user)` or call it as `user.greet()`. This is why passing `this.handleClick` as a callback loses `this` in class components.
+
+  - id: js-once
+    type: code
+    language: javascript
+    title: once
+    difficulty: easy
+    tags: [javascript, closures]
+    prompt: |
+      Implement `once(fn)`: return a function that calls `fn` (with the given arguments and `this`) the **first** time it's called and returns its result. Every later call returns that first result without calling `fn` again.
+    expose: [once]
+    driver: |
+      function check(calls) {
+        let count = 0;
+        const add = once((a, b) => { count++; return a + b; });
+        const results = calls.map((args) => add(...args));
+        return { results, timesCalled: count };
+      }
+    function:
+      name: check
+      params:
+        - { name: calls, type: list }
+      returns: "the results of each call and how many times fn ran"
+    starter: |
+      function once(fn) {
+        return function (...args) {
+          return fn.apply(this, args);
+        };
+      }
+    solution: |
+      function once(fn) {
+        let called = false;
+        let result;
+        return function (...args) {
+          if (!called) {
+            called = true;
+            result = fn.apply(this, args);
+          }
+          return result;
+        };
+      }
+    tests:
+      sample:
+        - args: [[[1, 2], [5, 5], [0, 0]]]
+      hidden:
+        - args: [[[3, 4]]]
+        - args: [[[0, 0], [9, 9]]]
+    explanation: |
+      Two pieces of closure state: whether `fn` has run and what it returned. Using a separate `called` flag (instead of checking `result === undefined`) matters when `fn` legitimately returns `undefined`. `fn.apply(this, args)` forwards both the arguments and `this`, so `once` also works on methods.
+
+  - id: js-memoize
+    type: code
+    language: javascript
+    title: memoize
+    difficulty: medium
+    tags: [javascript, closures, caching]
+    prompt: |
+      Implement `memoize(fn)`: return a function that caches `fn`'s result per argument list, so calling it again with the same arguments returns the cached value without calling `fn`. Use `JSON.stringify(args)` as the cache key (arguments are JSON values). A different argument list must not hit another list's cache entry.
+    expose: [memoize]
+    driver: |
+      function check(calls) {
+        const seen = [];
+        const slowSquareSum = memoize((...nums) => { seen.push(nums); return nums.reduce((s, x) => s + x * x, 0); });
+        const results = calls.map((args) => slowSquareSum(...args));
+        return { results, computed: seen };
+      }
+    function:
+      name: check
+      params:
+        - { name: calls, type: list }
+      returns: "results and the argument lists fn actually ran with"
+    starter: |
+      function memoize(fn) {
+        let lastArgs = null;
+        let lastResult;
+        return (...args) => {
+          if (lastArgs !== null && args[0] === lastArgs[0]) return lastResult;
+          lastArgs = args;
+          lastResult = fn(...args);
+          return lastResult;
+        };
+      }
+    solution: |
+      function memoize(fn) {
+        const cache = new Map();
+        return (...args) => {
+          const key = JSON.stringify(args);
+          if (!cache.has(key)) cache.set(key, fn(...args));
+          return cache.get(key);
+        };
+      }
+    tests:
+      sample:
+        - args: [[[1, 2], [1, 2], [3], [1, 2]]]
+      hidden:
+        - args: [[[2], [2, 0], [2], [2, 0], [0, 2]]]
+        - args: [[[]]]
+    hints:
+      - "A `Map` keyed by `JSON.stringify(args)` handles any number of arguments."
+    explanation: |
+      The cache must be keyed by **all** the arguments: the starter remembers only the last call and compares only the first argument, so `(2)` and `(2, 0)` collide. `Map.has` (instead of checking for `undefined`) caches results that are falsy too. In interviews, mention that this cache grows forever — an LRU limit (see the LRU cache problem) or a `WeakMap` for object keys fixes that.
+
+  - id: js-curry
+    type: code
+    language: javascript
+    title: curry
+    difficulty: medium
+    tags: [javascript, closures, functional]
+    prompt: |
+      Implement `curry(fn)`. The curried function collects arguments over any number of calls — one or several at a time — and calls `fn` as soon as it has `fn.length` arguments:
+
+      ```js
+      const f = curry((a, b, c) => a + b + c);
+      f(1)(2)(3);   // 6
+      f(1, 2)(3);   // 6
+      f(1)(2, 3);   // 6
+      ```
+      Each partial call returns a new function and doesn't change the earlier ones.
+    expose: [curry]
+    driver: |
+      function check(arity, groups) {
+        const fns = { 1: (a) => [a], 2: (a, b) => [a, b], 3: (a, b, c) => [a, b, c], 4: (a, b, c, d) => [a, b, c, d] };
+        const curried = curry(fns[arity]);
+        let f = curried;
+        for (const g of groups) f = f(...g);
+        // Reusing a partial application must not be affected by the calls above.
+        const first = groups[0];
+        let g2 = curried(...first);
+        for (let i = first.length; i < arity; i++) g2 = g2("x" + i);
+        return { result: f, reused: g2 };
+      }
+    function:
+      name: check
+      params:
+        - { name: arity, type: int }
+        - { name: groups, type: list }
+      returns: "the final result and a second use of the first partial"
+    starter: |
+      function curry(fn) {
+        const collected = [];
+        return function curried(...args) {
+          collected.push(...args);
+          if (collected.length >= fn.length) return fn(...collected);
+          return curried;
+        };
+      }
+    solution: |
+      function curry(fn) {
+        return function curried(...args) {
+          if (args.length >= fn.length) return fn(...args);
+          return (...more) => curried(...args, ...more);
+        };
+      }
+    tests:
+      sample:
+        - args: [3, [[1], [2], [3]]]
+      hidden:
+        - args: [3, [[1, 2], [3]]]
+        - args: [4, [[1], [2, 3], [4]]]
+        - args: [1, [[7]]]
+    explanation: |
+      Each call returns a new function that closes over the arguments gathered **so far** (`args`), so partial applications are independent. The starter keeps one shared `collected` array, so a second use of the same curried function sees leftovers from the first. `fn.length` is the number of declared parameters (it ignores rest and default parameters, a good follow-up to mention).
+
+  - id: js-debounce
+    type: code
+    language: javascript
+    title: debounce
+    difficulty: medium
+    tags: [javascript, closures, timers, debounce]
+    prompt: |
+      Implement `debounce(fn, wait)`: return a function that delays calling `fn` until `wait` ms have passed **since the last call**. If it's called again before then, the timer restarts. `fn` receives the arguments of the **last** call.
+
+      The test calls the debounced function at the times listed in `events` (`[time, value]` pairs) on a fake clock and records when `fn` ran and with what.
+    expose: [debounce]
+    driver: |
+      async function check(events, wait) {
+        const clock = __lx.useFakeTimers();
+        const calls = [];
+        const debounced = debounce((value) => calls.push([Date.now(), value]), wait);
+        let t = 0;
+        for (const [at, value] of events) {
+          await clock.tick(at - t);
+          t = at;
+          debounced(value);
+        }
+        await clock.tick(10 * wait + 1);
+        return calls;
+      }
+    function:
+      name: check
+      params:
+        - { name: events, type: list }
+        - { name: wait, type: int }
+      returns: "[time, value] for every call of fn"
+    starter: |
+      function debounce(fn, wait) {
+        return (...args) => {
+          setTimeout(() => fn(...args), wait);
+        };
+      }
+    solution: |
+      function debounce(fn, wait) {
+        let timer = null;
+        return function (...args) {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            timer = null;
+            fn.apply(this, args);
+          }, wait);
+        };
+      }
+    tests:
+      sample:
+        - args: [[[0, "a"], [50, "b"], [300, "c"]], 100]
+      hidden:
+        - args: [[[0, "x"]], 200]
+        - args: [[[0, 1], [99, 2], [198, 3], [297, 4], [500, 5], [599, 6]], 100]
+        - args: [[[0, "a"], [100, "b"], [200, "c"]], 100]
+    explanation: |
+      Keep the pending timer in the closure and clear it on every call, so only the last call in a burst survives. The starter schedules a call per event, so nothing is debounced. The last hidden test calls exactly `wait` ms apart: each call's timer is due at the moment the next call happens, and since the timer was scheduled first it fires first — so all three run.
+
+  - id: js-throttle
+    type: code
+    language: javascript
+    title: throttle
+    difficulty: medium
+    tags: [javascript, closures, timers, throttle]
+    prompt: |
+      Implement `throttle(fn, wait)` (leading edge only): the first call runs `fn` immediately; after that, calls are **ignored** until at least `wait` ms have passed since `fn` last ran, and then the next call runs immediately again. Use `Date.now()` or timers.
+
+      The test calls the throttled function at the times in `events` on a fake clock and records when `fn` ran.
+    expose: [throttle]
+    driver: |
+      async function check(events, wait) {
+        const clock = __lx.useFakeTimers();
+        const calls = [];
+        const throttled = throttle((value) => calls.push([Date.now(), value]), wait);
+        let t = 0;
+        for (const [at, value] of events) {
+          await clock.tick(at - t);
+          t = at;
+          throttled(value);
+        }
+        await clock.tick(10 * wait + 1);
+        return calls;
+      }
+    function:
+      name: check
+      params:
+        - { name: events, type: list }
+        - { name: wait, type: int }
+      returns: "[time, value] for every call of fn"
+    starter: |
+      function throttle(fn, wait) {
+        let timer = null;
+        return (...args) => {
+          clearTimeout(timer);
+          timer = setTimeout(() => fn(...args), wait);
+        };
+      }
+    solution: |
+      function throttle(fn, wait) {
+        let last = -Infinity;
+        return function (...args) {
+          const now = Date.now();
+          if (now - last >= wait) {
+            last = now;
+            fn.apply(this, args);
+          }
+        };
+      }
+    tests:
+      sample:
+        - args: [[[0, "a"], [30, "b"], [60, "c"], [100, "d"], [150, "e"]], 100]
+      hidden:
+        - args: [[[0, 1]], 50]
+        - args: [[[10, 1], [20, 2], [30, 3], [40, 4], [50, 5], [60, 6], [70, 7]], 25]
+    explanation: |
+      Throttle keeps the time `fn` last ran and lets a call through only when `wait` ms have passed, so a steady stream of events produces one call per `wait` ms. The starter is a debounce, which waits for the stream to stop — a classic mix-up. A production throttle often adds a trailing call so the last event isn't lost; say so in the interview.

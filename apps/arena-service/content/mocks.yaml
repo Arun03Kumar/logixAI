@@ -1,0 +1,55 @@
+# Mock-interview templates, shown on /practice/mock. Each session draws fresh
+# questions from these pools (unsolved ones first). Every slot needs at least
+# twice `count` free items; the service checks this at startup.
+- id: data-scientist-screen
+  title: Data scientist screen
+  summary: The first technical round for data roles — two SQL queries, a Pandas task and quick-fire concept questions.
+  durationMin: 45
+  slots:
+    - { label: SQL, tracks: [sql-interview], types: [sql], difficulty: [medium, hard], count: 2 }
+    - { label: Pandas, tracks: [pandas-interview], types: [code, debug], count: 1 }
+    - { label: Concepts, tracks: [ml-fundamentals, sql-interview], types: [mcq_single, mcq_multi, numeric], count: 2 }
+
+- id: sql-sprint
+  title: SQL sprint
+  summary: Three SQL questions in half an hour, from joins to window functions.
+  durationMin: 30
+  slots:
+    - { label: SQL, tracks: [sql-interview], types: [sql], difficulty: [easy, medium], count: 2 }
+    - { label: Harder SQL, tracks: [sql-interview], types: [sql], difficulty: [medium, hard], count: 1 }
+
+- id: ml-engineer-coding
+  title: ML engineer coding round
+  summary: Implement ML from scratch — one NumPy problem, two PyTorch problems and concept checks on deep learning.
+  durationMin: 60
+  slots:
+    - { label: NumPy, tracks: [numpy-interview], types: [code, debug], count: 1 }
+    - { label: PyTorch, tracks: [pytorch-interview], types: [code, debug], count: 2 }
+    - { label: Concepts, tracks: [pytorch-interview, ml-fundamentals], types: [mcq_single, mcq_multi, numeric, output], count: 2 }
+
+- id: frontend-coding
+  title: Frontend coding round
+  summary: Two JavaScript utilities (closures, promises, data structures), one React component and a quick question.
+  durationMin: 60
+  slots:
+    - { label: JavaScript, tracks: [frontend-interview], topics: [js-closures, js-async, js-utilities], types: [code, debug], count: 2 }
+    - { label: React, tracks: [frontend-interview], topics: [react-components], types: [code, debug], count: 1 }
+    - { label: Quiz, tracks: [frontend-interview], types: [mcq_single, mcq_multi, output], count: 1 }
+
+- id: system-design-round
+  title: System design round
+  summary: Build a component against simulated traffic, do an estimate, then write up a design and check it against the rubric.
+  durationMin: 60
+  slots:
+    - { label: Component, tracks: [system-design], types: [code, debug], count: 1 }
+    - { label: Estimate, tracks: [system-design], types: [numeric], count: 1 }
+    - { label: Design, tracks: [system-design], types: [design], count: 1 }
+
+- id: llm-engineer
+  title: LLM engineer round
+  summary: A RAG or agent coding task, a LangGraph task and two questions on LLM apps.
+  durationMin: 50
+  slots:
+    - { label: RAG / agents, tracks: [llm-agents], topics: [llm-foundations, llm-agents-from-scratch], types: [code, debug], count: 1 }
+    - { label: LangGraph, tracks: [llm-agents], topics: [langgraph-labs], types: [code, debug], count: 1 }
+    - { label: Quiz, tracks: [llm-agents], types: [mcq_single, mcq_multi], count: 2 }

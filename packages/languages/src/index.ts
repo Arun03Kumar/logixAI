@@ -8,7 +8,7 @@
  * This module is pure data, so it is safe to import in the browser.
  */
 
-export const LANGUAGE_IDS = ["JAVA", "CPP", "PYTHON", "PYTHON_ML"] as const;
+export const LANGUAGE_IDS = ["JAVA", "CPP", "PYTHON", "PYTHON_ML", "NODE_WEB"] as const;
 
 export type LanguageId = (typeof LANGUAGE_IDS)[number];
 
@@ -82,12 +82,26 @@ export const LANGUAGES: Readonly<Record<LanguageId, LanguageDefinition>> = {
     label: "Python (ML)",
     monacoId: "python",
     // Built from judge-images/python-ml (npm run judge:images).
-    dockerImage: "logixai/python-ml:1",
+    dockerImage: "logixai/python-ml:4",
     sourceFile: "main.py",
     compileCommand: null,
     runCommand: "python3 -B main.py",
     // Importing NumPy / scikit-learn alone takes most of a second.
     timeMultiplier: 3,
+    memoryMb: 512,
+    purpose: "arena",
+  },
+  NODE_WEB: {
+    id: "NODE_WEB",
+    label: "JavaScript / React",
+    monacoId: "javascript",
+    // Built from judge-images/node-web (npm run judge:images): Node 22, React, jsdom, Sucrase.
+    dockerImage: "logixai/node-web:1",
+    sourceFile: "main.js",
+    compileCommand: null,
+    runCommand: "node main.js",
+    // Loading jsdom and React takes about half a second.
+    timeMultiplier: 2,
     memoryMb: 512,
     purpose: "arena",
   },

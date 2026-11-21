@@ -22,9 +22,14 @@ export const ARENA_ITEM_TYPES = [
   "code",
   /** Fix a broken implementation; judged like `code`. */
   "debug",
+  /** Write a SQL query; run on sample and hidden datasets, rows compared. */
+  "sql",
+  /** Write a design, then self-check it against a rubric and a model answer. */
+  "design",
 ] as const;
 export type ArenaItemType = (typeof ARENA_ITEM_TYPES)[number];
-export const isCodeItem = (type: ArenaItemType) => type === "code" || type === "debug";
+/** Items answered with code the judge runs (Run / Submit). */
+export const isCodeItem = (type: ArenaItemType) => type === "code" || type === "debug" || type === "sql";
 
 export const ARENA_DIFFICULTIES = ["easy", "medium", "hard", "expert"] as const;
 export type ArenaDifficulty = (typeof ARENA_DIFFICULTIES)[number];
@@ -61,6 +66,13 @@ export interface ItemSummary {
   access: AccessLevel;
   /** Signed-in user's progress; null when not started or signed out. */
   status: ItemStatus | null;
+}
+
+/** A table shown to the learner: a sample's input, or a database's columns. */
+export interface TablePreview {
+  name: string;
+  columns: string[];
+  rows: unknown[][];
 }
 
 export interface TopicRef {
@@ -111,10 +123,12 @@ export interface FunctionSignature {
 }
 
 export interface SampleTest {
-  /** Python-style call, e.g. `dot([1, 2], [3, 4])`. */
+  /** Python-style call, e.g. `dot([1, 2], [3, 4])`; for SQL, "Sample data 1". */
   call: string;
-  /** Expected return value as JSON. */
+  /** Expected return value as JSON. A table is {"columns": [...], "data": [[...]]}. */
   expected: string;
+  /** DataFrame arguments and SQL tables of this sample, to show as tables. */
+  tables?: TablePreview[];
 }
 
 export interface ItemView extends ItemSummary {
@@ -130,11 +144,24 @@ export interface ItemView extends ItemSummary {
   options?: { id: string; text: string }[];
   /** output: the snippet whose output is asked for. */
   snippet?: string;
+  /** output / code / debug: python or javascript (JSX allowed). */
+  language?: "python" | "javascript";
+  /** design: the rubric and model answer, once the learner has written a design (or revealed it). */
+  rubric?: RubricPoint[];
+  modelAnswer?: string;
+  /** design: share of rubric points needed to count as solved (e.g. 0.7). */
+  passShare?: number;
+  /** code items: chart each test's output (simulations). */
+  visual?: SimVisual;
+  /** javascript items: the learner's component rendered live in the browser. */
+  preview?: { component: string; props: Record<string, unknown> };
   /** numeric: e.g. "rounded to 2 decimals". */
   answerFormat?: string;
   /** code / debug */
   starterCode?: string;
   signature?: FunctionSignature;
+  /** code / debug: test driver run after the learner's code (defines the function the examples call). */
+  driver?: string;
   samples?: SampleTest[];
   hiddenTestCount?: number;
   /** Shown once solved or revealed. */
@@ -144,6 +171,10 @@ export interface ItemView extends ItemSummary {
   answer?: string[] | string;
   /** The signed-in user's last answer or code, to restore the page. */
   lastAnswer?: unknown;
+  /** sql: the database schema ([column, type] per table). */
+  sqlTables?: { name: string; columns: [string, string][] }[];
+  /** sql: whether row order is checked. */
+  ordered?: boolean;
   /** Dataset challenges: how predictions are scored. */
   scoring?: { metric: Metric; threshold: number };
   /** Dataset challenges: the first rows and split sizes. */
@@ -166,7 +197,11 @@ export interface ItemView extends ItemSummary {
 export const AnswerInputSchema = z.union([
   z.object({ selectedOptionIds: z.array(z.string().min(1).max(50)).min(1).max(20) }),
   z.object({ value: z.number().finite() }),
-  z.object({ text: z.string().max(5000) }),
+  /**
+   * output: the predicted output. design: the written design; `checked` (the
+   * rubric points the learner covered) is sent once they've seen the rubric.
+   */
+  z.object({ text: z.string().max(20_000), checked: z.array(z.string().min(1).max(50)).max(40).optional() }),
 ]);
 export type AnswerInput = z.infer<typeof AnswerInputSchema>;
 
@@ -179,6 +214,25 @@ export interface AnswerResult {
   /** Present when correct (or when the item was already revealed). */
   explanation?: string;
   answer?: string[] | string;
+  /** design: shown once the learner has written a design. */
+  rubric?: RubricPoint[];
+  modelAnswer?: string;
+}
+
+/** design items: one point a strong answer covers. */
+export interface RubricPoint {
+  id: string;
+  point: string;
+  detail?: string;
+}
+
+/** code items: how to chart a test's output (system-design simulations). */
+export interface SimVisual {
+  /** timeline: [time, allowed] or [time, key, allowed] rows; bars: { label: number }. */
+  kind: "timeline" | "bars";
+  /** The output field holding the data (the whole output when omitted). */
+  field?: string;
+  title?: string;
 }
 
 /* ── Code items ── */
@@ -228,6 +282,43 @@ export interface ArenaSubmissionSummary {
   passed: number;
   total: number;
   createdAt: string;
+}
+
+/* ── Problem list and curated lists ── */
+
+export const ProblemQuerySchema = z.object({
+  q: z.string().trim().max(100).optional(),
+  type: z.enum(ARENA_ITEM_TYPES).optional(),
+  difficulty: z.enum(ARENA_DIFFICULTIES).optional(),
+  status: z.enum(["solved", "attempted", "todo"]).optional(),
+  track: z.string().max(100).optional(),
+  tag: z.string().max(60).optional(),
+  list: z.string().max(100).optional(),
+  access: z.enum(ACCESS_LEVELS).optional(),
+});
+export type ProblemQuery = z.infer<typeof ProblemQuerySchema>;
+
+export interface ProblemRow extends ItemSummary {
+  tags: string[];
+  topic: TopicRef;
+  track: TopicRef;
+}
+
+/** GET /arena/problems: every matching problem (the catalog is small), in learning order. */
+export interface ProblemList {
+  items: ProblemRow[];
+  total: number;
+  solved: number;
+  /** Tags across the matching problems, most common first. */
+  tags: { tag: string; count: number }[];
+}
+
+export interface ProblemListSummary {
+  id: string;
+  title: string;
+  summary: string;
+  itemCount: number;
+  solvedCount: number;
 }
 
 /* ── Progress ── */

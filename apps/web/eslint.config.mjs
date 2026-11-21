@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated live-preview bundle (scripts/build-preview.mjs).
+    "public/arena-preview/**",
   ]),
 ]);
 

@@ -57,7 +57,7 @@ function initialAnswer(item) {
 }
 
 /** Multiple choice, numeric and predict-the-output items: graded instantly. */
-export default function AnswerPlayer({ item, signedIn, onItemChange, reviewMode = false }) {
+export default function AnswerPlayer({ item, signedIn, onItemChange, reviewMode = false, inSession = false }) {
   // A review starts blank: recall it, don't re-read it.
   const [answer, setAnswer] = useState(() => (reviewMode ? initialAnswer({}) : initialAnswer(item)));
   const [result, setResult] = useState(null);
@@ -172,7 +172,7 @@ export default function AnswerPlayer({ item, signedIn, onItemChange, reviewMode 
               {hints ? "Another hint" : "Hint"}
             </Button>
           ) : null}
-          {signedIn && !open && !reviewMode ? (
+          {signedIn && !open && !reviewMode && !inSession ? (
             <Button variant="ghost" onClick={reveal} className="ml-auto">
               Show answer
             </Button>

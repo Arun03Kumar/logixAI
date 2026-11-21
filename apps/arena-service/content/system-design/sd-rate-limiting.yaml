@@ -1,0 +1,472 @@
+id: sd-rate-limiting
+title: Rate limiting
+summary: Fixed windows, sliding logs, sliding-window counters and token buckets — built, then replayed against bursts of traffic — and how to run one across many servers.
+prerequisites: [js-closures]
+lesson: |
+  ## Why limit
+
+  A rate limiter caps how many requests a client (an API key, a user, an IP) may make per period. It protects the service from overload and abuse, keeps one noisy client from starving the rest, and enforces pricing tiers. Rejected requests get **HTTP 429 Too Many Requests**, ideally with a `Retry-After` header.
+
+  ## Four algorithms
+
+  | Algorithm | State per client | Behaviour |
+  | --- | --- | --- |
+  | **Fixed window** | a counter and the window number | simple and cheap, but allows **2× the limit** across a window boundary (end of one window + start of the next) |
+  | **Sliding log** | a timestamp per allowed request | exact, but memory grows with the limit |
+  | **Sliding window counter** | two counters | approximates the sliding log: weight the previous window's count by how much of it still overlaps the last `window` ms |
+  | **Token bucket** | tokens and a last-refill time | allows bursts up to the bucket size, then a steady rate; refill lazily on each request |
+
+  Token bucket: the bucket holds at most `capacity` tokens and refills at `rate` tokens per second. Each request takes one token; with no token it's rejected. Refill **lazily** — on each request add `elapsed × rate` tokens, capped at `capacity` — instead of running a timer per client.
+
+  ## Across many servers
+
+  Behind a load balancer, every gateway must see the same counts, so the state lives in a shared store such as Redis, updated **atomically** (`INCR` with `EXPIRE`, or a Lua script for a token bucket). Then decide what happens when that store is unreachable (fail open and risk overload, or fail closed and risk an outage), and how to keep the extra network hop cheap.
+
+  The problems here call your limiter with the request time (`allow(key, now)`, in milliseconds), replay a sequence of requests and chart which ones you allowed.
+items:
+  - id: sd-limiter-bursts
+    type: mcq_single
+    title: Which one allows bursts?
+    difficulty: easy
+    tags: [system-design, rate-limiting]
+    prompt: |
+      A client has been idle for a minute. Which limiter lets it send a short burst of requests at once, and then holds it to a steady rate?
+    options:
+      - { id: a, text: "Fixed window" }
+      - { id: b, text: "Sliding log" }
+      - { id: c, text: "Token bucket" }
+      - { id: d, text: "Leaky bucket queue that sends requests out at a fixed rate" }
+    answer: c
+    explanation: |
+      Idle time refills the bucket up to its capacity, so a burst of `capacity` requests passes immediately; after that, requests pass only as fast as tokens refill. A leaky bucket **smooths** output to a constant rate (bursts wait in its queue), and window-based limiters reason about counts per window rather than saved-up credit.
+
+  - id: sd-fixed-window
+    type: code
+    language: javascript
+    title: Fixed-window limiter
+    difficulty: easy
+    tags: [system-design, rate-limiting]
+    prompt: |
+      Implement `class FixedWindowLimiter` with `constructor(limit, windowMs)` and `allow(key, now)`:
+
+      - time is split into windows `[0, windowMs)`, `[windowMs, 2 × windowMs)`, ... (window number = `Math.floor(now / windowMs)`);
+      - each key may make at most `limit` **allowed** requests per window; return `true` to allow, `false` to reject;
+      - keys are independent.
+
+      The test replays `[time, key]` requests in time order and records each decision.
+    expose: [FixedWindowLimiter]
+    visual: { kind: timeline, field: decisions, title: "Requests (green allowed, red rejected)" }
+    driver: |
+      function check(limit, windowMs, requests) {
+        const limiter = new FixedWindowLimiter(limit, windowMs);
+        return { decisions: requests.map(([t, key]) => [t, key, limiter.allow(key, t)]) };
+      }
+    function:
+      name: check
+      params:
+        - { name: limit, type: int }
+        - { name: windowMs, type: int }
+        - { name: requests, type: list }
+      returns: "[time, key, allowed] per request"
+    starter: |
+      class FixedWindowLimiter {
+        constructor(limit, windowMs) {
+          this.limit = limit;
+          this.windowMs = windowMs;
+          this.counts = new Map();
+        }
+
+        allow(key, now) {
+          const count = this.counts.get(key) ?? 0;
+          if (count >= this.limit) return false;
+          this.counts.set(key, count + 1);
+          return true;
+        }
+      }
+    solution: |
+      class FixedWindowLimiter {
+        constructor(limit, windowMs) {
+          this.limit = limit;
+          this.windowMs = windowMs;
+          this.state = new Map(); // key -> { window, count }
+        }
+
+        allow(key, now) {
+          const window = Math.floor(now / this.windowMs);
+          let s = this.state.get(key);
+          if (!s || s.window !== window) {
+            s = { window, count: 0 };
+            this.state.set(key, s);
+          }
+          if (s.count >= this.limit) return false;
+          s.count += 1;
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [2, 1000, [[0, "a"], [100, "a"], [200, "a"], [999, "b"], [1000, "a"], [1500, "a"], [1600, "a"]]]
+      hidden:
+        - args: [1, 500, [[0, "x"], [499, "x"], [500, "x"], [5000, "x"]]]
+      generate: |
+        def cases(rng):
+            out = []
+            for _ in range(2):
+                times = np.sort(rng.integers(0, 5000, size=40))
+                keys = rng.choice(["k1", "k2", "k3"], size=40)
+                out.append([3, 1000, [[int(t), str(k)] for t, k in zip(times, keys)]])
+            return out
+    explanation: |
+      Store the window number with the count and reset when it changes. The starter never resets, so a client is locked out forever after `limit` requests. Note the boundary weakness: 2 requests at 900 ms and 2 more at 1000 ms all pass with a limit of 2 per second — the next problem fixes that.
+
+  - id: sd-sliding-log
+    type: code
+    language: javascript
+    title: Sliding-log limiter
+    difficulty: medium
+    tags: [system-design, rate-limiting]
+    prompt: |
+      Implement `class SlidingLogLimiter` with `constructor(limit, windowMs)` and `allow(key, now)`: allow a request when the key has had fewer than `limit` **allowed** requests in the last `windowMs` ms — that is, with a timestamp `t > now - windowMs`. Rejected requests aren't counted.
+
+      Unlike a fixed window, this must stop a burst that straddles a window boundary.
+    expose: [SlidingLogLimiter]
+    visual: { kind: timeline, field: decisions, title: "Requests (green allowed, red rejected)" }
+    driver: |
+      function check(limit, windowMs, requests) {
+        const limiter = new SlidingLogLimiter(limit, windowMs);
+        return { decisions: requests.map(([t, key]) => [t, key, limiter.allow(key, t)]) };
+      }
+    function:
+      name: check
+      params:
+        - { name: limit, type: int }
+        - { name: windowMs, type: int }
+        - { name: requests, type: list }
+      returns: "[time, key, allowed] per request"
+    starter: |
+      class SlidingLogLimiter {
+        constructor(limit, windowMs) {
+          this.limit = limit;
+          this.windowMs = windowMs;
+          this.state = new Map();
+        }
+
+        // A fixed window: lets 2 x limit through around each boundary.
+        allow(key, now) {
+          const window = Math.floor(now / this.windowMs);
+          let s = this.state.get(key);
+          if (!s || s.window !== window) s = { window, count: 0 };
+          this.state.set(key, s);
+          if (s.count >= this.limit) return false;
+          s.count += 1;
+          return true;
+        }
+      }
+    solution: |
+      class SlidingLogLimiter {
+        constructor(limit, windowMs) {
+          this.limit = limit;
+          this.windowMs = windowMs;
+          this.logs = new Map(); // key -> timestamps of allowed requests, oldest first
+        }
+
+        allow(key, now) {
+          let log = this.logs.get(key);
+          if (!log) this.logs.set(key, (log = []));
+          while (log.length && log[0] <= now - this.windowMs) log.shift();
+          if (log.length >= this.limit) return false;
+          log.push(now);
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [2, 1000, [[900, "a"], [950, "a"], [1000, "a"], [1050, "a"], [1900, "a"], [1950, "a"]]]
+      hidden:
+        - args: [3, 100, [[0, "x"], [10, "x"], [20, "x"], [30, "x"], [100, "x"], [110, "x"], [119, "x"], [120, "x"]]]
+      generate: |
+        def cases(rng):
+            times = np.sort(rng.integers(0, 4000, size=50))
+            keys = rng.choice(["u1", "u2"], size=50)
+            return [[4, 1000, [[int(t), str(k)] for t, k in zip(times, keys)]]]
+    explanation: |
+      Keep the timestamps of allowed requests per key, drop the ones that have slid out of the window, and allow when fewer than `limit` remain. The sample's 4 requests between 900 and 1050 ms would all pass a fixed window (two in each window) but only 2 belong in any 1-second span. The cost is memory: one timestamp per allowed request, per client (in Redis, a sorted set per key).
+
+  - id: sd-token-bucket
+    type: code
+    language: javascript
+    title: Token bucket
+    difficulty: medium
+    tags: [system-design, rate-limiting]
+    prompt: |
+      Implement `class TokenBucket` with `constructor(capacity, refillPerSecond)` and `allow(key, now)`:
+
+      - each key has its own bucket, which starts **full** (`capacity` tokens) at the key's first request;
+      - before each decision, refill lazily: add `(now - lastRefill) / 1000 × refillPerSecond` tokens, **never exceeding** `capacity`;
+      - if at least one token is available, take one and allow; otherwise reject.
+    expose: [TokenBucket]
+    visual: { kind: timeline, field: decisions, title: "Requests (green allowed, red rejected)" }
+    driver: |
+      function check(capacity, rate, requests) {
+        const bucket = new TokenBucket(capacity, rate);
+        return { decisions: requests.map(([t, key]) => [t, key, bucket.allow(key, t)]) };
+      }
+    function:
+      name: check
+      params:
+        - { name: capacity, type: int }
+        - { name: rate, type: int }
+        - { name: requests, type: list }
+      returns: "[time, key, allowed] per request"
+    starter: |
+      class TokenBucket {
+        constructor(capacity, refillPerSecond) {
+          this.capacity = capacity;
+          this.rate = refillPerSecond;
+          this.buckets = new Map();
+        }
+
+        allow(key, now) {
+          let b = this.buckets.get(key);
+          if (!b) this.buckets.set(key, (b = { tokens: this.capacity, last: now }));
+          b.tokens += ((now - b.last) / 1000) * this.rate;
+          b.last = now;
+          if (b.tokens < 1) return false;
+          b.tokens -= 1;
+          return true;
+        }
+      }
+    solution: |
+      class TokenBucket {
+        constructor(capacity, refillPerSecond) {
+          this.capacity = capacity;
+          this.rate = refillPerSecond;
+          this.buckets = new Map(); // key -> { tokens, last }
+        }
+
+        allow(key, now) {
+          let b = this.buckets.get(key);
+          if (!b) this.buckets.set(key, (b = { tokens: this.capacity, last: now }));
+          b.tokens = Math.min(this.capacity, b.tokens + ((now - b.last) / 1000) * this.rate);
+          b.last = now;
+          if (b.tokens < 1) return false;
+          b.tokens -= 1;
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [3, 2, [[0, "a"], [0, "a"], [0, "a"], [0, "a"], [500, "a"], [500, "a"], [10000, "a"], [10000, "a"], [10000, "a"], [10000, "a"], [10000, "a"]]]
+      hidden:
+        - args: [1, 4, [[0, "x"], [125, "x"], [250, "x"], [250, "y"], [500, "x"], [750, "x"]]]
+      generate: |
+        def cases(rng):
+            times = np.sort(rng.integers(0, 40, size=60)) * 250
+            keys = rng.choice(["a", "b"], size=60)
+            return [[5, 2, [[int(t), str(k)] for t, k in zip(times, keys)]]]
+    hints:
+      - "What should a client that's been idle for an hour be allowed to send at once?"
+    explanation: |
+      `Math.min(capacity, ...)` is the whole point of the bucket's size: it caps the burst a client can save up. The starter lets tokens grow without bound, so after 10 s idle the client could send 20 requests at once instead of 3. Lazy refill means no timers: the bucket's state is just two numbers, which is why a token bucket fits in a Redis hash updated by one Lua script.
+
+  - id: sd-token-bucket-units
+    type: debug
+    language: javascript
+    title: The limiter that never limits
+    difficulty: easy
+    tags: [system-design, rate-limiting, debugging]
+    prompt: |
+      This token bucket (capacity, refill per second, times in ms) was deployed, and clients are never rejected. Find and fix the bug.
+    expose: [TokenBucket]
+    visual: { kind: timeline, field: decisions, title: "Requests (green allowed, red rejected)" }
+    driver: |
+      function check(capacity, rate, requests) {
+        const bucket = new TokenBucket(capacity, rate);
+        return { decisions: requests.map(([t, key]) => [t, key, bucket.allow(key, t)]) };
+      }
+    function:
+      name: check
+      params:
+        - { name: capacity, type: int }
+        - { name: rate, type: int }
+        - { name: requests, type: list }
+      returns: "[time, key, allowed] per request"
+    starter: |
+      class TokenBucket {
+        constructor(capacity, refillPerSecond) {
+          this.capacity = capacity;
+          this.rate = refillPerSecond;
+          this.buckets = new Map();
+        }
+
+        allow(key, now) {
+          let b = this.buckets.get(key);
+          if (!b) this.buckets.set(key, (b = { tokens: this.capacity, last: now }));
+          b.tokens = Math.min(this.capacity, b.tokens + (now - b.last) * this.rate);
+          b.last = now;
+          if (b.tokens < 1) return false;
+          b.tokens -= 1;
+          return true;
+        }
+      }
+    solution: |
+      class TokenBucket {
+        constructor(capacity, refillPerSecond) {
+          this.capacity = capacity;
+          this.rate = refillPerSecond;
+          this.buckets = new Map();
+        }
+
+        allow(key, now) {
+          let b = this.buckets.get(key);
+          if (!b) this.buckets.set(key, (b = { tokens: this.capacity, last: now }));
+          b.tokens = Math.min(this.capacity, b.tokens + ((now - b.last) / 1000) * this.rate);
+          b.last = now;
+          if (b.tokens < 1) return false;
+          b.tokens -= 1;
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [2, 1, [[0, "a"], [10, "a"], [20, "a"], [30, "a"], [1030, "a"], [1040, "a"]]]
+      hidden:
+        - args: [1, 2, [[0, "a"], [250, "a"], [500, "a"], [750, "a"], [1000, "a"]]]
+    explanation: |
+      `now - b.last` is in **milliseconds** while the rate is per **second**, so every millisecond refills a whole second's worth of tokens and the bucket is always full. Divide by 1000. Unit mismatches like this survive tests that only check a single request — replaying a burst is what exposes them.
+
+  - id: sd-sliding-window-counter
+    type: code
+    language: javascript
+    title: Sliding-window counter
+    difficulty: hard
+    access: pro
+    tags: [system-design, rate-limiting]
+    prompt: |
+      A sliding log costs memory per request. The **sliding-window counter** keeps two counters per key — this fixed window's and the previous one's — and estimates the requests in the last `windowMs`:
+
+      $$\text{estimate} = \text{previous} \times \frac{\text{windowMs} - \text{elapsed}}{\text{windowMs}} + \text{current}$$
+
+      where `elapsed = now - windowStart` is how far we are into the current window (windows start at multiples of `windowMs`). Allow (and increment `current`) when `estimate < limit`. When a new window starts, `previous` becomes the old `current` — or 0 if one or more whole windows were skipped — and `current` resets to 0.
+
+      Implement `class SlidingWindowCounter` with `constructor(limit, windowMs)` and `allow(key, now)`.
+    expose: [SlidingWindowCounter]
+    visual: { kind: timeline, field: decisions, title: "Requests (green allowed, red rejected)" }
+    driver: |
+      function check(limit, windowMs, requests) {
+        const limiter = new SlidingWindowCounter(limit, windowMs);
+        return { decisions: requests.map(([t, key]) => [t, key, limiter.allow(key, t)]) };
+      }
+    function:
+      name: check
+      params:
+        - { name: limit, type: int }
+        - { name: windowMs, type: int }
+        - { name: requests, type: list }
+      returns: "[time, key, allowed] per request"
+    starter: |
+      class SlidingWindowCounter {
+        constructor(limit, windowMs) {
+          this.limit = limit;
+          this.windowMs = windowMs;
+          this.state = new Map();
+        }
+
+        allow(key, now) {
+          const window = Math.floor(now / this.windowMs);
+          let s = this.state.get(key);
+          if (!s || s.window !== window) s = { window, current: 0 };
+          this.state.set(key, s);
+          if (s.current >= this.limit) return false;
+          s.current += 1;
+          return true;
+        }
+      }
+    solution: |
+      class SlidingWindowCounter {
+        constructor(limit, windowMs) {
+          this.limit = limit;
+          this.windowMs = windowMs;
+          this.state = new Map(); // key -> { window, previous, current }
+        }
+
+        allow(key, now) {
+          const window = Math.floor(now / this.windowMs);
+          let s = this.state.get(key);
+          if (!s) this.state.set(key, (s = { window, previous: 0, current: 0 }));
+          if (window !== s.window) {
+            s.previous = window === s.window + 1 ? s.current : 0;
+            s.current = 0;
+            s.window = window;
+          }
+          const elapsed = now - window * this.windowMs;
+          const estimate = (s.previous * (this.windowMs - elapsed)) / this.windowMs + s.current;
+          if (estimate >= this.limit) return false;
+          s.current += 1;
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [4, 1000, [[500, "a"], [625, "a"], [750, "a"], [875, "a"], [1000, "a"], [1250, "a"], [1500, "a"], [1750, "a"], [1875, "a"]]]
+      hidden:
+        - args: [2, 1000, [[0, "a"], [125, "a"], [2125, "a"], [2250, "a"], [2375, "a"]]]
+      generate: |
+        def cases(rng):
+            times = np.sort(rng.integers(0, 48, size=60)) * 125
+            keys = rng.choice(["a", "b"], size=60)
+            return [[5, 1000, [[int(t), str(k)] for t, k in zip(times, keys)]]]
+    explanation: |
+      Weighting the previous window by how much of it still overlaps the sliding window approximates the sliding log with two integers per key, assuming the previous window's requests were spread evenly. At 1000 ms in the sample, the previous window had 4 requests and fully overlaps, so nothing more is allowed until enough of it slides away. Cloudflare reported this approximation was off by only a few hundredths of a percent on real traffic. Skipped windows must reset `previous` to 0, or a client returning after an hour is judged on stale counts.
+
+  - id: sd-sliding-log-memory
+    type: numeric
+    title: The cost of a sliding log
+    difficulty: medium
+    tags: [system-design, rate-limiting, estimation]
+    prompt: |
+      A sliding-log limiter stores one entry per allowed request. There are 1,000,000 active API keys, each allowed 100 requests per minute, and each stored entry costs about 16 bytes. In the worst case (every key at its limit), how many **gigabytes** (10⁹ bytes) do the logs take?
+    answer: 1.6
+    tolerance: 0.05
+    answerFormat: "GB, e.g. 2.5"
+    explanation: |
+      $10^6 \times 100 \times 16 = 1.6 \times 10^9$ bytes = 1.6 GB, and real sorted-set entries cost several times more. A sliding-window counter needs two counters per key — about 16 MB here — which is why large-scale limiters use counters or token buckets.
+
+  - id: sd-design-rate-limiter
+    type: design
+    title: Design a distributed rate limiter
+    difficulty: hard
+    tags: [system-design, rate-limiting, design]
+    prompt: |
+      Design the rate limiter for a public API: each API key gets **100 requests per minute** (paid tiers more), traffic arrives at **20 gateway servers** behind a load balancer, and the limiter may add at most a few milliseconds of latency.
+
+      Write your design: where the limiter runs, the algorithm, where its state lives and how it's updated, what clients see when limited, and what happens when parts fail. Then compare with the rubric.
+    rubric:
+      - { id: requirements, point: "Clarifies requirements: per-key limits, tiers, hard vs soft limits, scale (keys, QPS)", detail: "e.g. 1M keys, 50k QPS peak; limits configurable per tier" }
+      - { id: algorithm, point: "Chooses an algorithm and explains the trade-off", detail: "token bucket for bursts, or sliding-window counter; why not fixed window (boundary bursts) or sliding log (memory)" }
+      - { id: shared-state, point: "Keeps counters in a shared store so all gateways agree", detail: "Redis keyed by API key, sharded or clustered" }
+      - { id: atomicity, point: "Updates state atomically", detail: "INCR + EXPIRE, or a Lua script for check-and-decrement; avoids read-modify-write races between gateways" }
+      - { id: placement, point: "Places the check in the gateway or middleware, before expensive work" }
+      - { id: response, point: "Returns 429 with Retry-After and rate-limit headers", detail: "X-RateLimit-Limit / Remaining / Reset" }
+      - { id: failure, point: "Decides fail-open vs fail-closed when the store is down, with a fallback", detail: "e.g. fail open with a local in-memory limiter as a backstop" }
+      - { id: latency, point: "Keeps latency low", detail: "one round trip per request, pipelining, or local token pre-allocation synced periodically" }
+      - { id: hot-keys, point: "Considers hot keys and store scaling", detail: "shard by key; a single huge customer may need local limiting" }
+      - { id: observability, point: "Mentions monitoring and configuration", detail: "metrics on rejections, dashboards, limits changed without deploys" }
+    modelAnswer: |
+      **Requirements.** Per-API-key limits (100/min free, more for paid tiers) across 20 gateways; ~1M keys; added latency under ~2 ms; limits configurable without deploys.
+
+      **Algorithm.** A token bucket per key (capacity = burst size, refill = limit/60 per second): it tolerates short bursts and keeps only two numbers per key. A fixed window would allow 2× bursts at boundaries; a sliding log costs memory per request.
+
+      **State.** Redis Cluster, sharded by key. Each check runs a small Lua script that refills, checks and decrements atomically, so two gateways can't both spend the last token. Keys get a TTL so idle clients don't occupy memory.
+
+      **Placement.** In the API gateway, right after authentication (we need the key) and before routing to services.
+
+      **Responses.** Allowed requests carry `X-RateLimit-Limit`, `-Remaining` and `-Reset`; rejected ones get `429` with `Retry-After`.
+
+      **Failures.** If Redis is unreachable, fail **open** (availability matters more than exact limits for this API) but apply a coarse in-memory limiter per gateway (limit ÷ 20) as a backstop; alert on the fallback.
+
+      **Latency and scale.** One pipelined Redis round trip (~0.5 ms in-region). For very hot keys, gateways can lease a batch of tokens locally and sync periodically, trading a little accuracy for fewer round trips.
+
+      **Operations.** Limits live in a config service; metrics on allowed/rejected per key and tier; alerts when rejections spike.
+    explanation: |
+      Interviewers look for a justified algorithm choice, a correct story for shared state across servers (atomic updates — the classic bug is read-then-write races), and an explicit decision about failure modes. Mentioning response headers and fallback behaviour shows production experience.

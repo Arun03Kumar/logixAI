@@ -1,0 +1,279 @@
+id: torch-autograd
+title: Autograd
+summary: How PyTorch computes gradients — the graph, backward, accumulation, no_grad and detach, in-place pitfalls and custom autograd functions.
+prerequisites: [torch-tensors, gradients]
+lesson: |
+  ## The graph
+
+  When a tensor has `requires_grad=True`, every operation on it records how to compute its own derivative. `loss.backward()` walks that record backwards (reverse-mode differentiation) and **adds** $\partial \text{loss} / \partial w$ into `w.grad` for every leaf tensor `w` that requires grad.
+
+  ```python
+  w = torch.tensor(3.0, requires_grad=True)
+  loss = w ** 2
+  loss.backward()
+  w.grad            # tensor(6.)
+  ```
+
+  ## Gradients accumulate
+
+  `backward()` adds to `.grad`; it never overwrites it. That's deliberate (it lets you sum gradients from several losses or micro-batches), and it's why training loops call `optimizer.zero_grad()` every step.
+
+  ## Turning tracking off
+
+  | Tool | Use it for |
+  | --- | --- |
+  | `with torch.no_grad():` | evaluation and manual weight updates — nothing inside is recorded |
+  | `x.detach()` | a tensor with the same values that's cut from the graph (targets, logging, stop-gradient) |
+  | `loss.item()` | a plain Python number — use it for running totals, or you keep every step's graph alive |
+
+  ## In-place operations
+
+  Some operations save their inputs or outputs for the backward pass (`exp` saves its output, multiplication saves both inputs). Modifying a saved tensor in place (`y += 1`, `y.relu_()`) makes backward fail with *"one of the variables needed for gradient computation has been modified by an inplace operation"*. Write `y = y + 1` instead.
+
+  ## Custom functions
+
+  `torch.autograd.Function` lets you define both directions yourself — for operations without a useful derivative (rounding, sampling) or with a cheaper hand-written one:
+
+  ```python
+  class Square(torch.autograd.Function):
+      @staticmethod
+      def forward(ctx, x):
+          ctx.save_for_backward(x)
+          return x * x
+
+      @staticmethod
+      def backward(ctx, grad_out):
+          (x,) = ctx.saved_tensors
+          return grad_out * 2 * x
+
+  y = Square.apply(x)
+  ```
+items:
+  - id: autograd-accumulates
+    type: output
+    title: Three backward calls
+    difficulty: easy
+    tags: [pytorch, autograd, zero-grad]
+    prompt: |
+      What does this print?
+    snippet: |
+      import torch
+      w = torch.tensor(2.0, requires_grad=True)
+      for _ in range(3):
+          loss = w * w
+          loss.backward()
+      print(w.grad.item())
+    answer: |
+      12.0
+    explanation: |
+      Each `backward()` adds $d(w^2)/dw = 2w = 4$ to `w.grad`; three calls give 12. In a training loop this is the "forgot `zero_grad()`" bug: every step uses the sum of all previous gradients.
+
+  - id: autograd-why-accumulate
+    type: mcq_single
+    title: Why gradients add up
+    difficulty: easy
+    tags: [pytorch, autograd]
+    prompt: |
+      Why does `backward()` add into `.grad` instead of replacing it?
+    options:
+      - { id: a, text: "It's a historical bug kept for backwards compatibility" }
+      - { id: b, text: "So gradients from several losses or several micro-batches can be summed before one optimizer step (gradient accumulation)" }
+      - { id: c, text: "Adding is faster than overwriting on GPUs" }
+      - { id: d, text: "So the optimizer can compute momentum from the running sum" }
+    answer: b
+    explanation: |
+      Summing is what you want when a model has several loss terms computed in separate passes, or when a batch doesn't fit in memory and you accumulate gradients over micro-batches. Momentum is kept by the optimizer in its own state, not in `.grad`.
+
+  - id: autograd-derivative
+    type: code
+    title: Derivatives with autograd
+    difficulty: easy
+    tags: [pytorch, autograd]
+    prompt: |
+      Let $f(x) = x^3 \sin x + e^{-x^2}$. Implement `derivative_at(xs)`: given a 1-D tensor of points, return the tensor of $f'(x)$ at each point. Use autograd (don't differentiate by hand).
+    function:
+      name: derivative_at
+      params:
+        - { name: xs, type: tensor }
+      returns: "tensor, same shape as xs"
+    starter: |
+      import torch
+
+      def derivative_at(xs):
+          x = xs.clone()
+          f = x ** 3 * torch.sin(x) + torch.exp(-x ** 2)
+          return f
+    solution: |
+      import torch
+
+      def derivative_at(xs):
+          x = xs.clone().requires_grad_(True)
+          f = x ** 3 * torch.sin(x) + torch.exp(-x ** 2)
+          f.sum().backward()
+          return x.grad
+    tests:
+      sample:
+        - args: [[0.0, 1.0, -2.0]]
+      generate: |
+        def cases(rng):
+            return [[rng.uniform(-3, 3, size=6)]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "`backward()` needs a scalar. Each output depends only on its own input, so the gradient of the **sum** is every point's derivative at once."
+    explanation: |
+      Mark a copy of the input with `requires_grad_(True)`, compute $f$, and call `backward()` on the sum: since $\partial (\sum_j f(x_j)) / \partial x_i = f'(x_i)$, `x.grad` holds every derivative. The starter returns $f$ itself.
+
+  - id: autograd-saliency
+    type: code
+    title: Input gradient of a class probability
+    difficulty: medium
+    tags: [pytorch, autograd, interpretability]
+    prompt: |
+      A linear classifier gives logits $z = Wx + b$ (`W` is `(k, d)`, `b` is `(k,)`, `x` is `(d,)`) and probabilities $p = \operatorname{softmax}(z)$. Implement `prob_gradient(W, b, x, c)`: the `(d,)` gradient of $p_c$ — the **probability** of class `c` — with respect to `x`. (This is a simple saliency map.)
+    function:
+      name: prob_gradient
+      params:
+        - { name: W, type: tensor }
+        - { name: b, type: tensor }
+        - { name: x, type: tensor }
+        - { name: c, type: int }
+      returns: "tensor (d,)"
+    starter: |
+      import torch
+
+      def prob_gradient(W, b, x, c):
+          x = x.clone().requires_grad_(True)
+          z = W @ x + b
+          z[c].backward()
+          return x.grad
+    solution: |
+      import torch
+
+      def prob_gradient(W, b, x, c):
+          x = x.clone().requires_grad_(True)
+          p = torch.softmax(W @ x + b, dim=0)
+          p[c].backward()
+          return x.grad
+    tests:
+      sample:
+        - args: [[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], [0.0, 0.0, 0.0], [0.5, -0.5], 0]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(4, 5)), rng.normal(size=4), rng.normal(size=5), 2], [rng.normal(size=(3, 2)), rng.normal(size=3), rng.normal(size=2), 0]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      Back-propagating from `p[c]` gives $\nabla_x p_c = p_c \,(W_c - \sum_j p_j W_j)$: the class's weight row minus the probability-weighted average row, scaled by $p_c$. The starter differentiates the **logit**, whose gradient is just `W[c]` — it ignores how raising $z_c$ also changes the competition with every other class.
+
+  - id: autograd-inplace-bug
+    type: debug
+    title: Modified by an in-place operation
+    difficulty: medium
+    tags: [pytorch, autograd, in-place, debugging]
+    prompt: |
+      `softplus_grad(x)` should return the derivative of $\sum_i \log(1 + e^{x_i})$ with respect to `x` (which is the sigmoid of each $x_i$). It crashes in `backward()`. Find and fix the bug — keep using autograd.
+    function:
+      name: softplus_grad
+      params:
+        - { name: x, type: tensor }
+      returns: "tensor, same shape as x"
+    starter: |
+      import torch
+
+      def softplus_grad(x):
+          x = x.clone().requires_grad_(True)
+          y = torch.exp(x)
+          y += 1
+          torch.log(y).sum().backward()
+          return x.grad
+    solution: |
+      import torch
+
+      def softplus_grad(x):
+          x = x.clone().requires_grad_(True)
+          y = torch.exp(x) + 1
+          torch.log(y).sum().backward()
+          return x.grad
+    tests:
+      sample:
+        - args: [[0.0, 2.0, -1.0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=8) * 2]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "Read the error: which tensor did autograd save, and what changed it?"
+    explanation: |
+      `exp` saves its **output** for the backward pass (since $\frac{d}{dx} e^x = e^x$). `y += 1` overwrites that saved output in place, so autograd detects the version change and refuses. `y = torch.exp(x) + 1` creates a new tensor and leaves the saved one intact.
+
+  - id: autograd-no-grad-detach
+    type: mcq_multi
+    title: no_grad, detach and item
+    difficulty: medium
+    tags: [pytorch, autograd]
+    prompt: |
+      Which statements are true? Select all that apply.
+    options:
+      - { id: a, text: "Inside torch.no_grad(), operations aren't recorded, so evaluation uses less memory" }
+      - { id: b, text: "model.eval() turns off gradient tracking" }
+      - { id: c, text: "x.detach() returns a tensor with the same values that gradients won't flow back through" }
+      - { id: d, text: "total += loss (instead of loss.item()) in a training loop keeps every step's graph in memory" }
+      - { id: e, text: "torch.no_grad() changes how Dropout behaves" }
+    answer: [a, c, d]
+    explanation: |
+      `no_grad` controls recording; `eval()` controls layer behaviour (Dropout off, BatchNorm uses running statistics). They're independent, and evaluation normally needs both. Adding the `loss` tensor to a running total links every step's graph together — a slow memory leak; `loss.item()` gives a plain float.
+
+  - id: autograd-straight-through
+    type: code
+    title: Straight-through rounding
+    difficulty: hard
+    access: pro
+    tags: [pytorch, autograd, custom-function, quantization]
+    prompt: |
+      Rounding has gradient 0 almost everywhere, so a network can't learn through it. The **straight-through estimator** rounds in the forward pass but passes the gradient through unchanged in the backward pass, as if the operation were the identity.
+
+      Implement `RoundSTE`, a `torch.autograd.Function` whose `forward` returns `torch.round(x)` and whose `backward` returns the incoming gradient unchanged.
+    driver: |
+      import torch
+
+      def check(x):
+          x = x.clone().requires_grad_(True)
+          y = RoundSTE.apply(x)
+          weights = torch.arange(1.0, len(x) + 1)
+          (y * weights).sum().backward()
+          return {"forward": y.detach(), "grad": x.grad}
+    function:
+      name: check
+      params:
+        - { name: x, type: tensor }
+      returns: "dict with forward values and the gradient"
+    starter: |
+      import torch
+
+      class RoundSTE(torch.autograd.Function):
+          @staticmethod
+          def forward(ctx, x):
+              return torch.round(x)
+
+          @staticmethod
+          def backward(ctx, grad_output):
+              return torch.zeros_like(grad_output)
+    solution: |
+      import torch
+
+      class RoundSTE(torch.autograd.Function):
+          @staticmethod
+          def forward(ctx, x):
+              return torch.round(x)
+
+          @staticmethod
+          def backward(ctx, grad_output):
+              return grad_output
+    tests:
+      sample:
+        - args: [[0.2, 1.7, -2.4]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=6) * 3 + 0.123]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      `backward` receives $\partial L / \partial y$ and must return $\partial L / \partial x$; returning it unchanged pretends $\partial y / \partial x = 1$. The forward pass is still a real rounding, so the network trains against quantised values. The starter returns the true (zero) gradient, which stops learning — the problem the estimator exists to solve. Quantisation-aware training and VQ-VAEs use this trick.

@@ -1,0 +1,388 @@
+id: torch-attention
+title: Attention and transformers from scratch
+summary: Scaled dot-product attention with masks, multi-head self-attention as an nn.Module, positional encodings, and decoding — greedy, temperature and top-k.
+prerequisites: [torch-modules, torch-tensors]
+lesson: |
+  ## Scaled dot-product attention
+
+  Each query scores every key, the scores become weights with a softmax, and the output is the weighted sum of the values:
+
+  $$\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^\top}{\sqrt{d}}\right) V$$
+
+  Shapes for a batch: `Q` is `(b, t, d)`, `K` is `(b, s, d)`, `V` is `(b, s, d_v)`; the scores are `(b, t, s)` and the output `(b, t, d_v)`.
+
+  - **Why $\sqrt d$?** A dot product of two random $d$-dimensional vectors has variance about $d$. Large scores saturate the softmax into a one-hot whose gradients vanish; dividing by $\sqrt d$ keeps the variance near 1.
+  - **Masks** set blocked scores to $-\infty$ **before** the softmax, so they get weight exactly 0. A causal (decoder) mask blocks every key after the query's position.
+
+  ## Multi-head attention
+
+  Project the input to queries, keys and values (often with one `Linear(d, 3d)`), split the model dimension into `h` heads of size `d / h`, attend in each head independently, concatenate and project back:
+
+  ```python
+  q = q.view(b, t, h, d // h).transpose(1, 2)    # (b, h, t, d_head)
+  ...
+  out = out.transpose(1, 2).reshape(b, t, d)     # heads back together
+  ```
+
+  Each head can attend to different positions for different reasons, at the same total cost as one big head.
+
+  ## Positions
+
+  Attention itself ignores order, so position information is added. The original transformer adds fixed sinusoids, $PE_{p, 2i} = \sin(p / 10000^{2i/d})$ and $PE_{p, 2i+1} = \cos(p / 10000^{2i/d})$; most current LLMs rotate queries and keys instead (RoPE).
+
+  ## Decoding
+
+  A language model returns logits for the next token at every position; generation uses only the **last** position's logits, appends the chosen token and repeats.
+
+  - **Greedy**: take the argmax.
+  - **Temperature** $T$: sample from $\operatorname{softmax}(z / T)$ — $T < 1$ sharpens, $T > 1$ flattens, $T \to 0$ approaches greedy.
+  - **Top-k**: keep the $k$ largest logits, set the rest to $-\infty$, then sample.
+  - A **KV cache** stores past keys and values, so each new token costs one query against the cache instead of re-running the whole sequence.
+items:
+  - id: attn-why-sqrt-d
+    type: mcq_single
+    title: Why divide by √d?
+    difficulty: easy
+    tags: [transformers, attention]
+    prompt: |
+      Why does scaled dot-product attention divide the scores by $\sqrt{d}$?
+    options:
+      - { id: a, text: "To make the attention weights sum to 1" }
+      - { id: b, text: "Dot products of d-dimensional vectors grow with d; large scores saturate the softmax and its gradients vanish, so scaling keeps their variance near 1" }
+      - { id: c, text: "To reduce the cost of the matrix multiplication" }
+      - { id: d, text: "To make the output independent of the batch size" }
+    answer: b
+    explanation: |
+      For random vectors with unit-variance entries, $q \cdot k$ has variance $d$. With $d = 512$ typical scores are around ±22, the softmax becomes nearly one-hot and almost no gradient flows to the other keys. The softmax already makes weights sum to 1.
+
+  - id: attn-causal-count
+    type: numeric
+    title: Causal attention weights
+    difficulty: easy
+    tags: [transformers, masks]
+    prompt: |
+      A decoder applies causal self-attention to a sequence of 6 tokens. How many entries of the `6 × 6` attention-weight matrix can be non-zero?
+    answer: 21
+    tolerance: 0
+    explanation: |
+      Token $i$ attends to positions $1..i$, so the counts are $1 + 2 + \dots + 6 = 21$ — the lower triangle including the diagonal, $n(n+1)/2$.
+
+  - id: attn-temperature
+    type: mcq_multi
+    title: Temperature and top-k
+    difficulty: medium
+    tags: [llm, sampling]
+    prompt: |
+      Which statements about sampling from a language model are true? Select all that apply.
+    options:
+      - { id: a, text: "Dividing logits by a temperature below 1 makes the distribution sharper" }
+      - { id: b, text: "As the temperature approaches 0, sampling approaches greedy decoding" }
+      - { id: c, text: "Top-k sampling with k = 1 is the same as greedy decoding" }
+      - { id: d, text: "Temperature changes which token has the highest probability" }
+    answer: [a, b, c]
+    explanation: |
+      Scaling by $1/T$ multiplies every gap between logits, so $T < 1$ widens the gaps (sharper) and $T \to 0$ puts all mass on the argmax. Keeping only the top 1 token is greedy decoding. Dividing by a positive number never changes the **order** of the logits, so the most likely token stays the same.
+
+  - id: attn-sdpa
+    type: code
+    title: Scaled dot-product attention with a mask
+    difficulty: medium
+    tags: [pytorch, transformers, attention, masks]
+    prompt: |
+      Implement `attention(Q, K, V, mask)`. `Q` is `(b, t, d)`, `K` is `(b, s, d)`, `V` is `(b, s, d_v)`, and `mask` is `(t, s)` with **1 where query `i` may attend to key `j`** and 0 where it may not (every row has at least one 1). Return the `(b, t, d_v)` output of
+      $$\operatorname{softmax}\!\left(\frac{QK^\top}{\sqrt d} \text{ with blocked scores } = -\infty\right) V$$
+      Don't use `F.scaled_dot_product_attention`.
+    function:
+      name: attention
+      params:
+        - { name: Q, type: tensor }
+        - { name: K, type: tensor }
+        - { name: V, type: tensor }
+        - { name: mask, type: tensor_int }
+      returns: "tensor (b, t, d_v)"
+    starter: |
+      import torch
+
+      def attention(Q, K, V, mask):
+          scores = Q @ K.transpose(-2, -1)
+          scores = scores.masked_fill(mask == 0, float("-inf"))
+          return torch.softmax(scores, dim=-1) @ V
+    solution: |
+      import math
+      import torch
+
+      def attention(Q, K, V, mask):
+          scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.shape[-1])   # (b, t, s)
+          scores = scores.masked_fill(mask == 0, float("-inf"))
+          return torch.softmax(scores, dim=-1) @ V
+    tests:
+      sample:
+        - args:
+            - [[[1.0, 0.0], [0.0, 1.0]]]
+            - [[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]]
+            - [[[1.0], [2.0], [3.0]]]
+            - [[1, 0, 1], [1, 1, 0]]
+      generate: |
+        def cases(rng):
+            out = []
+            t = 4
+            causal = np.tril(np.ones((t, t), dtype=int))
+            out.append([rng.normal(size=(2, t, 8)), rng.normal(size=(2, t, 8)), rng.normal(size=(2, t, 3)), causal])
+            full = np.ones((3, 5), dtype=int)
+            out.append([rng.normal(size=(1, 3, 16)) * 2, rng.normal(size=(1, 5, 16)) * 2, rng.normal(size=(1, 5, 4)), full])
+            return out
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      `K.transpose(-2, -1)` turns `(b, s, d)` into `(b, d, s)`, so `Q @ ...` gives `(b, t, s)` scores; the `(t, s)` mask broadcasts over the batch. Blocked scores become $-\infty$, whose softmax weight is exactly 0. The starter forgets the $1/\sqrt d$ scaling — still a valid-looking attention, but sharper than the transformer's, and it fails the comparison.
+
+  - id: attn-sinusoidal-pe
+    type: code
+    title: Sinusoidal positional encoding
+    difficulty: medium
+    tags: [pytorch, transformers, positional-encoding]
+    prompt: |
+      Implement `positional_encoding(t, d)` for an even `d`: a `(t, d)` tensor with
+      $$PE_{p,\,2i} = \sin\!\left(\frac{p}{10000^{2i/d}}\right), \qquad PE_{p,\,2i+1} = \cos\!\left(\frac{p}{10000^{2i/d}}\right)$$
+      for positions $p = 0 \dots t-1$ and $i = 0 \dots d/2 - 1$.
+    function:
+      name: positional_encoding
+      params:
+        - { name: t, type: int }
+        - { name: d, type: int }
+      returns: "tensor (t, d)"
+    starter: |
+      import torch
+
+      def positional_encoding(t, d):
+          pos = torch.arange(t, dtype=torch.float32)[:, None]
+          i = torch.arange(d // 2, dtype=torch.float32)[None, :]
+          angle = pos / 10000 ** (i / d)
+          pe = torch.zeros(t, d)
+          pe[:, 0::2] = torch.sin(angle)
+          pe[:, 1::2] = torch.cos(angle)
+          return pe
+    solution: |
+      import torch
+
+      def positional_encoding(t, d):
+          pos = torch.arange(t, dtype=torch.float32)[:, None]          # (t, 1)
+          i = torch.arange(d // 2, dtype=torch.float32)[None, :]       # (1, d/2)
+          angle = pos / 10000 ** (2 * i / d)                           # (t, d/2)
+          pe = torch.zeros(t, d)
+          pe[:, 0::2] = torch.sin(angle)
+          pe[:, 1::2] = torch.cos(angle)
+          return pe
+    tests:
+      sample:
+        - args: [3, 4]
+      hidden:
+        - args: [1, 2]
+        - args: [10, 16]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      The exponent uses $2i$ — the index of the **even** column — so frequencies run from 1 down to about $1/10000$ across the dimensions. Using $i$ halves the exponent and squeezes all frequencies into the fast end. Each pair of columns is a sine and cosine at one frequency, which lets the model express "position $p + k$" as a fixed rotation of "position $p$".
+
+  - id: attn-top-k-probs
+    type: code
+    title: Top-k sampling probabilities
+    difficulty: medium
+    access: pro
+    tags: [pytorch, llm, sampling]
+    prompt: |
+      Implement `top_k_probs(logits, k, temperature)`: `logits` is `(n, V)`. For each row, divide by `temperature`, keep only the `k` largest logits (set the rest to $-\infty$) and return the softmax — the distribution top-k sampling draws from. Logits within a row are distinct.
+    function:
+      name: top_k_probs
+      params:
+        - { name: logits, type: tensor }
+        - { name: k, type: int }
+        - { name: temperature, type: float }
+      returns: "tensor (n, V)"
+    starter: |
+      import torch
+
+      def top_k_probs(logits, k, temperature):
+          probs = torch.softmax(logits / temperature, dim=-1)
+          return probs
+    solution: |
+      import torch
+
+      def top_k_probs(logits, k, temperature):
+          z = logits / temperature
+          kth = z.topk(k, dim=-1).values[:, -1:]                 # k-th largest per row, (n, 1)
+          z = z.masked_fill(z < kth, float("-inf"))
+          return torch.softmax(z, dim=-1)
+    tests:
+      sample:
+        - args: [[[2.0, 1.0, 0.5, -1.0]], 2, 1.0]
+      hidden:
+        - args: [[[0.3, 0.1, 0.2]], 3, 0.5]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(3, 10)) * 2, 4, 0.7], [rng.normal(size=(2, 6)), 1, 1.5]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      Filtering must happen **before** the softmax so the kept tokens' probabilities are renormalised to sum to 1; masking with $-\infty$ gives the others exactly 0. Filtering after the softmax (or not at all, like the starter) leaves probability on the long tail of unlikely tokens, which is where incoherent generations come from.
+
+  - id: attn-mha
+    type: code
+    title: Multi-head self-attention module
+    difficulty: hard
+    access: pro
+    tags: [pytorch, transformers, attention, nn-module]
+    prompt: |
+      Implement `MultiHeadSelfAttention(d_model, n_heads)` as an `nn.Module` with exactly two layers:
+
+      - `self.qkv = nn.Linear(d_model, 3 * d_model)` — its output splits into `q, k, v` **in that order** along the last dim (`chunk(3, dim=-1)`);
+      - `self.out = nn.Linear(d_model, d_model)`.
+
+      `forward(x, causal=False)` takes `x` of shape `(b, t, d_model)`: split `q, k, v` into `n_heads` heads of size `d_model // n_heads` (head `h` uses columns `h*d_head ... (h+1)*d_head − 1`), apply scaled dot-product attention in each head (with a causal mask when `causal=True`), concatenate the heads back to `(b, t, d_model)` and apply `out`.
+    driver: |
+      import torch
+
+      def check(x, n_heads, causal, seed):
+          d = x.shape[-1]
+          g = torch.Generator().manual_seed(seed)
+          weights = {
+              "qkv.weight": torch.randn(3 * d, d, generator=g) / d ** 0.5,
+              "qkv.bias": torch.randn(3 * d, generator=g) * 0.1,
+              "out.weight": torch.randn(d, d, generator=g) / d ** 0.5,
+              "out.bias": torch.randn(d, generator=g) * 0.1,
+          }
+          attn = MultiHeadSelfAttention(d, n_heads)
+          attn.load_state_dict(weights)
+          attn.eval()
+          with torch.no_grad():
+              return attn(x, causal=causal)
+    function:
+      name: check
+      params:
+        - { name: x, type: tensor }
+        - { name: n_heads, type: int }
+        - { name: causal, type: bool }
+        - { name: seed, type: int }
+      returns: "tensor (b, t, d_model)"
+    starter: |
+      import math
+      import torch
+      from torch import nn
+
+      class MultiHeadSelfAttention(nn.Module):
+          def __init__(self, d_model, n_heads):
+              super().__init__()
+              self.n_heads = n_heads
+              self.qkv = nn.Linear(d_model, 3 * d_model)
+              self.out = nn.Linear(d_model, d_model)
+
+          def forward(self, x, causal=False):
+              b, t, d = x.shape
+              q, k, v = self.qkv(x).chunk(3, dim=-1)
+              # TODO: split into heads; this is single-head attention
+              scores = q @ k.transpose(-2, -1) / math.sqrt(d)
+              if causal:
+                  mask = torch.triu(torch.ones(t, t, dtype=torch.bool), diagonal=1)
+                  scores = scores.masked_fill(mask, float("-inf"))
+              return self.out(torch.softmax(scores, dim=-1) @ v)
+    solution: |
+      import math
+      import torch
+      from torch import nn
+
+      class MultiHeadSelfAttention(nn.Module):
+          def __init__(self, d_model, n_heads):
+              super().__init__()
+              assert d_model % n_heads == 0
+              self.n_heads = n_heads
+              self.qkv = nn.Linear(d_model, 3 * d_model)
+              self.out = nn.Linear(d_model, d_model)
+
+          def forward(self, x, causal=False):
+              b, t, d = x.shape
+              h, dh = self.n_heads, d // self.n_heads
+              q, k, v = self.qkv(x).chunk(3, dim=-1)
+              # (b, t, d) -> (b, h, t, dh)
+              q, k, v = (z.view(b, t, h, dh).transpose(1, 2) for z in (q, k, v))
+              scores = q @ k.transpose(-2, -1) / math.sqrt(dh)          # (b, h, t, t)
+              if causal:
+                  mask = torch.triu(torch.ones(t, t, dtype=torch.bool), diagonal=1)
+                  scores = scores.masked_fill(mask, float("-inf"))
+              y = torch.softmax(scores, dim=-1) @ v                     # (b, h, t, dh)
+              y = y.transpose(1, 2).reshape(b, t, d)
+              return self.out(y)
+    tests:
+      sample:
+        - args: [[[[1.0, 0.0, -1.0, 0.5], [0.0, 2.0, 1.0, -0.5], [1.0, 1.0, 0.0, 0.0]]], 2, true, 0]
+      hidden:
+        - args: [[[[1.0, 0.0, -1.0, 0.5], [0.0, 2.0, 1.0, -0.5], [1.0, 1.0, 0.0, 0.0]]], 1, false, 3]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(2, 5, 8)), 4, True, 1], [rng.normal(size=(1, 6, 12)), 3, False, 2]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "`view(b, t, h, dh).transpose(1, 2)` gives `(b, h, t, d_head)`; batched matmul then treats each head separately."
+      - "Scale by $\\sqrt{d_{head}}$, not $\\sqrt{d_{model}}$."
+      - "After `transpose` the tensor isn't contiguous: use `reshape` (or `.contiguous().view`) to merge the heads."
+    explanation: |
+      Reshaping to `(b, h, t, d_head)` makes heads a batch dimension, so one matmul computes every head's `(t, t)` scores. Each head scales by $\sqrt{d_{head}}$, its own dot-product size. Merging is the reverse: `transpose(1, 2)` back to `(b, t, h, d_head)` and `reshape` to `(b, t, d_model)`. With one head this is exactly the starter, which is why the single-head hidden test passes for it and the others don't.
+
+  - id: attn-greedy-decode
+    type: code
+    title: Greedy decoding loop
+    difficulty: medium
+    access: pro
+    tags: [pytorch, llm, decoding]
+    prompt: |
+      Implement `greedy_decode(model, ids, max_new_tokens)`. `model` maps a `(1, t)` tensor of token ids to `(1, t, vocab)` logits (one prediction per position). Starting from `ids` (`(1, t)`), repeat `max_new_tokens` times: run the model on the whole sequence, pick the argmax token from the **last** position's logits and append it. Return the full `(1, t + max_new_tokens)` sequence.
+    driver: |
+      import torch
+      from torch import nn
+
+      class TinyLM(nn.Module):
+          """Predicts from the average embedding of every token so far."""
+          def __init__(self, seed, vocab=12, dim=8):
+              super().__init__()
+              g = torch.Generator().manual_seed(seed)
+              self.emb = nn.Parameter(torch.randn(vocab, dim, generator=g))
+              self.head = nn.Parameter(torch.randn(dim, vocab, generator=g))
+
+          def forward(self, ids):                       # (b, t) -> (b, t, vocab)
+              e = self.emb[ids]
+              counts = torch.arange(1, ids.shape[1] + 1).view(1, -1, 1)
+              return (e.cumsum(dim=1) / counts) @ self.head
+
+      def check(prompt, max_new_tokens, seed):
+          model = TinyLM(seed).eval()
+          with torch.no_grad():
+              return greedy_decode(model, torch.tensor([prompt]), max_new_tokens)
+    function:
+      name: check
+      params:
+        - { name: prompt, type: list }
+        - { name: max_new_tokens, type: int }
+        - { name: seed, type: int }
+      returns: "tensor (1, t + max_new_tokens) of token ids"
+    starter: |
+      import torch
+
+      def greedy_decode(model, ids, max_new_tokens):
+          for _ in range(max_new_tokens):
+              logits = model(ids)
+              next_id = logits[:, 0].argmax(dim=-1, keepdim=True)
+              ids = torch.cat([ids, next_id], dim=1)
+          return ids
+    solution: |
+      import torch
+
+      def greedy_decode(model, ids, max_new_tokens):
+          for _ in range(max_new_tokens):
+              logits = model(ids)                                  # (1, t, vocab)
+              next_id = logits[:, -1].argmax(dim=-1, keepdim=True) # (1, 1)
+              ids = torch.cat([ids, next_id], dim=1)
+          return ids
+    tests:
+      sample:
+        - args: [[3, 7], 5, 0]
+      hidden:
+        - args: [[1], 6, 1]
+        - args: [[4, 4, 9, 2], 4, 2]
+    explanation: |
+      The logits at position $i$ predict token $i + 1$, so the next token comes from the **last** position, `logits[:, -1]`. `keepdim=True` keeps the `(1, 1)` shape for `torch.cat` along the sequence dim. Re-running the whole sequence each step costs $O(t^2)$ per token in a real transformer; a KV cache keeps past keys and values so each step only processes the new token.

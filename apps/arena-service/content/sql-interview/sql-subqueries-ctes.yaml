@@ -1,0 +1,237 @@
+id: sql-subqueries-ctes
+title: Subqueries and CTEs
+summary: Queries inside queries — scalar subqueries, EXISTS, "the top one per group", and WITH clauses that make long queries readable.
+prerequisites: [sql-aggregation]
+lesson: |
+  ## Three kinds of subquery
+
+  | Kind | Returns | Example |
+  | --- | --- | --- |
+  | Scalar | one value | `WHERE amount > (SELECT AVG(amount) FROM orders)` |
+  | Table | rows you select from | `FROM (SELECT ...) AS t` |
+  | Correlated | is re-run per outer row | `WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` |
+
+  ## CTEs: name your steps
+
+  `WITH` gives a subquery a name, so a long query reads top to bottom:
+
+  ```sql
+  WITH spend AS (
+    SELECT customer_id, SUM(amount) AS total
+    FROM orders
+    WHERE status = 'delivered'
+    GROUP BY customer_id
+  )
+  SELECT c.name, s.total
+  FROM spend s JOIN customers c ON c.id = s.customer_id
+  WHERE s.total > 1500;
+  ```
+
+  In interviews, a CTE per step ("first I compute spend per customer, then ...") is easy to explain and easy to debug.
+
+  ## "The highest per group"
+
+  To find the top earner in each department, compute the maximum per department and join back to the rows that equal it. Joining back keeps **ties** — two people sharing the top salary both appear — which is usually what the question wants. Window functions (next topic) offer another route.
+
+  ## "All of them" questions
+
+  "Customers whose every order was delivered" is easiest flipped around: customers with orders but with **no** order that was *not* delivered — a `NOT EXISTS`, or `HAVING COUNT(*) = SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END)`.
+items:
+  - id: sql-above-average-orders
+    type: sql
+    title: Orders above average
+    difficulty: easy
+    tags: [sql, subquery]
+    database: shop
+    prompt: |
+      Return the `id` and `amount` of orders worth **more than the average** order amount (over all orders, every status).
+    starter: |
+      SELECT id, amount
+      FROM orders
+      WHERE amount > 1000;
+    solution: |
+      SELECT id, amount
+      FROM orders
+      WHERE amount > (SELECT AVG(amount) FROM orders);
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `WHERE amount > AVG(amount)` isn't allowed — aggregates can't appear in `WHERE`. A scalar subquery computes the average once, and each row is compared with it.
+
+  - id: sql-second-highest-salary
+    type: sql
+    title: Second-highest salary
+    difficulty: medium
+    tags: [sql, subquery, classic]
+    database: hr
+    prompt: |
+      Return the **second-highest distinct** salary as a single row with column `second_highest`. If there isn't one (everyone earns the same), return one row with NULL.
+    starter: |
+      SELECT salary AS second_highest
+      FROM employees
+      ORDER BY salary DESC
+      LIMIT 1 OFFSET 1;
+    solution: |
+      SELECT MAX(salary) AS second_highest
+      FROM employees
+      WHERE salary < (SELECT MAX(salary) FROM employees);
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - The starter is right on the sample. What if the top salary is shared, or everyone earns the same?
+      - "`MAX` over zero rows is NULL — which is exactly the required answer."
+    explanation: |
+      The highest salary *below* the maximum is the second-highest distinct salary, and `MAX` of nothing returns one NULL row. `LIMIT 1 OFFSET 1` takes the second **row**, which is wrong when the top salary appears twice, and returns no row at all when there's only one distinct value. `DENSE_RANK() = 2` is the window-function version.
+
+  - id: sql-department-top-earners
+    type: sql
+    title: Top earner in each department
+    difficulty: medium
+    tags: [sql, subquery, ties]
+    database: hr
+    prompt: |
+      For each department, return the employee(s) with the highest salary in it. If several share the top salary, return all of them.
+
+      Columns: `department` (the department's name), `name`, `salary`. Ignore employees without a department.
+    starter: |
+      SELECT d.name AS department, MAX(e.name) AS name, MAX(e.salary) AS salary
+      FROM employees e
+      JOIN departments d ON d.id = e.dept_id
+      GROUP BY d.name;
+    solution: |
+      WITH top AS (
+        SELECT dept_id, MAX(salary) AS salary
+        FROM employees
+        GROUP BY dept_id
+      )
+      SELECT d.name AS department, e.name, e.salary
+      FROM employees e
+      JOIN top t ON t.dept_id = e.dept_id AND t.salary = e.salary
+      JOIN departments d ON d.id = e.dept_id;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Compute the top salary per department, then join back to the employees who earn exactly that. The starter takes `MAX(name)` and `MAX(salary)` separately — they can come from different people.
+
+  - id: sql-always-delivered
+    type: sql
+    title: Customers with only delivered orders
+    difficulty: medium
+    tags: [sql, not-exists, having]
+    database: shop
+    prompt: |
+      Return the `id` and `name` of customers who have at least one order and whose orders were **all** delivered.
+    starter: |
+      SELECT DISTINCT c.id, c.name
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      WHERE o.status = 'delivered';
+    solution: |
+      SELECT c.id, c.name
+      FROM customers c
+      WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)
+        AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id AND o.status <> 'delivered');
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      "All delivered" = "has orders, and none that isn't delivered". The starter finds customers with *some* delivered order. An aggregate version also works: group by customer and keep `HAVING COUNT(*) = COUNT(CASE WHEN status = 'delivered' THEN 1 END)`.
+
+  - id: sql-first-order-each
+    type: sql
+    title: Each customer's first order
+    difficulty: medium
+    tags: [sql, correlated-subquery, ties]
+    database: shop
+    prompt: |
+      For each customer with orders, return their **first** order: `customer_id`, the order's id as `first_order_id`, and `order_date`. If two orders share the earliest date, the smaller id is first.
+    starter: |
+      SELECT customer_id, MIN(id) AS first_order_id, MIN(order_date) AS order_date
+      FROM orders
+      GROUP BY customer_id;
+    solution: |
+      SELECT o.customer_id, o.id AS first_order_id, o.order_date
+      FROM orders o
+      WHERE NOT EXISTS (
+        SELECT 1 FROM orders p
+        WHERE p.customer_id = o.customer_id
+          AND (p.order_date < o.order_date OR (p.order_date = o.order_date AND p.id < o.id))
+      );
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - "`MIN(id)` and `MIN(order_date)` are computed separately. Could they come from different orders?"
+    explanation: |
+      An order is first if no other order of the same customer comes before it (earlier date, or same date and smaller id). `ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date, id) = 1` is the window-function way. The starter happens to work while ids grow with dates; it breaks when they don't.
+
+  - id: sql-big-spenders
+    type: sql
+    title: Big spenders
+    difficulty: easy
+    tags: [sql, cte, having]
+    database: shop
+    prompt: |
+      Return the `name` and total delivered spend as `total` for customers whose delivered orders add up to **more than 1500**.
+    starter: |
+      SELECT c.name, SUM(o.amount) AS total
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.id, c.name
+      HAVING SUM(o.amount) > 1500;
+    solution: |
+      WITH spend AS (
+        SELECT customer_id, SUM(amount) AS total
+        FROM orders
+        WHERE status = 'delivered'
+        GROUP BY customer_id
+      )
+      SELECT c.name, s.total
+      FROM spend s
+      JOIN customers c ON c.id = s.customer_id
+      WHERE s.total > 1500;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      The CTE computes delivered spend per customer; the outer query adds names and filters. The starter forgets that only **delivered** orders count, so cancelled and returned orders inflate totals.
+
+  - id: sql-bought-electronics
+    type: sql
+    title: Electronics buyers
+    difficulty: medium
+    tags: [sql, exists, join]
+    database: shop
+    prompt: |
+      Return the `id` and `name` of customers who have ordered at least one product in the **Electronics** category (any order status). Each customer once.
+    starter: |
+      SELECT c.id, c.name
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      JOIN order_items oi ON oi.order_id = o.id
+      JOIN products p ON p.id = oi.product_id
+      WHERE p.category = 'Electronics';
+    solution: |
+      SELECT c.id, c.name
+      FROM customers c
+      WHERE EXISTS (
+        SELECT 1
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        JOIN products p ON p.id = oi.product_id
+        WHERE o.customer_id = c.id AND p.category = 'Electronics'
+      );
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Joining all the way through gives one row per electronics line item, so customers who bought several appear several times. `EXISTS` asks the yes/no question once per customer; `SELECT DISTINCT` on the join also works.
+
+  - id: sql-shared-names
+    type: sql
+    title: Names used by more than one customer
+    difficulty: easy
+    tags: [sql, group-by, having, duplicates]
+    database: shop
+    prompt: |
+      Return each customer `name` that belongs to **more than one** customer.
+    starter: |
+      SELECT DISTINCT name
+      FROM customers;
+    solution: |
+      SELECT name
+      FROM customers
+      GROUP BY name
+      HAVING COUNT(*) > 1;
+    tests: { sample: [full], hidden: [small, edge] }
+    explanation: |
+      Group by the name and keep groups with more than one row. This is the standard "find duplicates" query; to see the duplicate rows themselves, join back on the name.

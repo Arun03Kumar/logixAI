@@ -1,0 +1,247 @@
+id: sql-select-filter
+title: Selecting and filtering
+summary: SELECT, WHERE, ORDER BY, LIMIT, DISTINCT, CASE and NULL — the first five minutes of every SQL round.
+lesson: |
+  ## How a query runs
+
+  You write `SELECT ... FROM ... WHERE ... ORDER BY ... LIMIT`, but the database works in a different order:
+
+  1. `FROM` picks the table(s),
+  2. `WHERE` keeps the rows that match,
+  3. `SELECT` computes the columns you asked for,
+  4. `ORDER BY` sorts, and `LIMIT` cuts.
+
+  That's why a column alias made in `SELECT` can be used in `ORDER BY` but not in `WHERE`.
+
+  ```sql
+  SELECT id, amount
+  FROM orders
+  WHERE status = 'delivered' AND amount > 500
+  ORDER BY amount DESC, id
+  LIMIT 3;
+  ```
+
+  ## NULL is not a value
+
+  `NULL` means "unknown". Any comparison with it is unknown too, so `city = NULL` and even `city <> 'Delhi'` never match a row whose city is NULL. Use `IS NULL` / `IS NOT NULL`, and `COALESCE(city, 'Unknown')` to replace it.
+
+  ## CASE
+
+  `CASE WHEN ... THEN ... ELSE ... END` turns conditions into values — bucketing amounts, labelling statuses, building flags:
+
+  ```sql
+  SELECT id, CASE WHEN amount < 500 THEN 'small' ELSE 'large' END AS size FROM orders;
+  ```
+
+  ## How these problems are judged
+
+  Your query runs on the sample data you see and on hidden datasets with more rows, ties and NULLs. Column **names** must match the question (any letter case); row **order** only matters when the question says to sort. Practice databases run on DuckDB, whose SQL is close to PostgreSQL.
+items:
+  - id: sql-delivered-big-orders
+    type: sql
+    title: Big delivered orders
+    difficulty: easy
+    tags: [sql, where]
+    database: shop
+    prompt: |
+      List the orders that were **delivered** and are worth **more than 500**.
+
+      Return columns `id` and `amount`, in any order.
+    starter: |
+      SELECT id, amount
+      FROM orders;
+    solution: |
+      SELECT id, amount
+      FROM orders
+      WHERE status = 'delivered' AND amount > 500;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - Combine two conditions in `WHERE` with `AND`.
+    explanation: |
+      `WHERE` keeps a row only when both conditions are true. "More than 500" is `> 500`, so an order of exactly 500 is left out — the hidden data has some.
+
+  - id: sql-customers-in-mumbai
+    type: sql
+    title: Customers in one city
+    difficulty: easy
+    tags: [sql, where, order-by]
+    database: shop
+    prompt: |
+      Return the `name` of every customer who lives in **Mumbai**, sorted alphabetically (A to Z).
+    ordered: true
+    starter: |
+      SELECT name
+      FROM customers;
+    solution: |
+      SELECT name
+      FROM customers
+      WHERE city = 'Mumbai'
+      ORDER BY name;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Filter with `WHERE city = 'Mumbai'`, then `ORDER BY name`. Ascending is the default, so `ASC` is optional.
+
+  - id: sql-top-three-orders
+    type: sql
+    title: Three largest orders
+    difficulty: easy
+    tags: [sql, order-by, limit, ties]
+    database: shop
+    prompt: |
+      Return the **three** largest orders by `amount`, largest first. When two orders have the same amount, the one with the smaller `id` comes first.
+
+      Columns: `id`, `amount`.
+    ordered: true
+    starter: |
+      SELECT id, amount
+      FROM orders
+      LIMIT 3;
+    solution: |
+      SELECT id, amount
+      FROM orders
+      ORDER BY amount DESC, id
+      LIMIT 3;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - "`ORDER BY` can take several columns: the second one only breaks ties in the first."
+    explanation: |
+      `ORDER BY amount DESC, id` sorts by amount and breaks ties by id, so the result is the same every time. Without a tie-breaker the database may return either of two equal orders — the hidden data has ties.
+
+  - id: sql-distinct-cities
+    type: sql
+    title: Cities we sell to
+    difficulty: easy
+    tags: [sql, distinct, nulls]
+    database: shop
+    prompt: |
+      Return each **city** that at least one customer lives in, once. Leave out customers whose city is unknown (NULL).
+
+      Column: `city`.
+    starter: |
+      SELECT city
+      FROM customers;
+    solution: |
+      SELECT DISTINCT city
+      FROM customers
+      WHERE city IS NOT NULL;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `DISTINCT` removes duplicate rows. `WHERE city IS NOT NULL` drops unknown cities — `city <> NULL` would drop *every* row, because comparing with NULL is never true.
+
+  - id: sql-missing-city
+    type: sql
+    title: Customers without a city
+    difficulty: easy
+    tags: [sql, nulls]
+    database: shop
+    prompt: |
+      Some customers never told us their city. Return their `id` and `name`.
+
+      (The sample data has one such customer.)
+    starter: |
+      SELECT id, name
+      FROM customers
+      WHERE city = NULL;
+    solution: |
+      SELECT id, name
+      FROM customers
+      WHERE city IS NULL;
+    tests: { sample: [edge], hidden: [small] }
+    hints:
+      - Why does `city = NULL` return nothing?
+    explanation: |
+      `= NULL` is never true — not even for NULL — so the starter returns no rows. `IS NULL` is the only way to test for a missing value. (Hidden data includes a database where nobody's city is missing, and the answer is then empty.)
+
+  - id: sql-order-size-buckets
+    type: sql
+    title: Label orders by size
+    difficulty: easy
+    tags: [sql, case]
+    database: shop
+    prompt: |
+      Label each order by its amount:
+
+      - `small` when the amount is below 500,
+      - `medium` when it's at least 500 and below 2000,
+      - `large` otherwise.
+
+      Columns: `id`, `size`.
+    starter: |
+      SELECT id, 'small' AS size
+      FROM orders;
+    solution: |
+      SELECT id,
+             CASE
+               WHEN amount < 500 THEN 'small'
+               WHEN amount < 2000 THEN 'medium'
+               ELSE 'large'
+             END AS size
+      FROM orders;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `CASE` checks its `WHEN` branches in order and uses the first that's true, so the second branch only needs `amount < 2000` — anything below 500 was already labelled `small`. Watch the boundaries: 500 is `medium`, 2000 is `large`.
+
+  - id: sql-orders-in-march
+    type: sql
+    title: Orders in a date range
+    difficulty: easy
+    tags: [sql, dates, between]
+    database: shop
+    prompt: |
+      Return the orders placed in **March 2024** (1st to 31st, inclusive), oldest first; orders on the same day by `id`.
+
+      Columns: `id`, `order_date`.
+    ordered: true
+    starter: |
+      SELECT id, order_date
+      FROM orders
+      WHERE order_date > '2024-03-01' AND order_date < '2024-03-31'
+      ORDER BY order_date, id;
+    solution: |
+      SELECT id, order_date
+      FROM orders
+      WHERE order_date BETWEEN DATE '2024-03-01' AND DATE '2024-03-31'
+      ORDER BY order_date, id;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - Are the first and last day of the month included by `>` and `<`?
+    explanation: |
+      `BETWEEN a AND b` includes both ends. The starter's strict `>` and `<` drop orders placed on March 1st and 31st — exactly the edge cases the hidden data checks. For timestamps (not dates), prefer `>= '2024-03-01' AND < '2024-04-01'`, which also catches times later on the 31st.
+
+  - id: sql-recent-well-paid
+    type: sql
+    title: Recent hires on high pay
+    difficulty: easy
+    tags: [sql, where, dates]
+    database: hr
+    prompt: |
+      Return the `name` and `salary` of employees hired **in 2020 or later** who earn **at least 90000**.
+    starter: |
+      SELECT name, salary
+      FROM employees
+      WHERE salary > 90000;
+    solution: |
+      SELECT name, salary
+      FROM employees
+      WHERE hire_date >= DATE '2020-01-01' AND salary >= 90000;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Two conditions joined with `AND`. "At least" means `>=`, and "in 2020 or later" means on or after January 1st, 2020.
+
+  - id: sql-null-not-equal-mcq
+    type: mcq_single
+    title: NULL and not-equal
+    difficulty: easy
+    tags: [sql, nulls]
+    prompt: |
+      `customers` has 6 rows: 2 in Delhi, 3 in Mumbai and 1 whose `city` is NULL.
+
+      How many rows does `SELECT * FROM customers WHERE city <> 'Delhi'` return?
+    options:
+      - { id: a, text: "4" }
+      - { id: b, text: "3" }
+      - { id: c, text: "6" }
+      - { id: d, text: "1" }
+    answer: b
+    explanation: |
+      Only the 3 Mumbai rows. For the NULL row, `NULL <> 'Delhi'` is unknown, not true, so `WHERE` drops it. To keep it, write `WHERE city <> 'Delhi' OR city IS NULL` (or `IS DISTINCT FROM 'Delhi'`).

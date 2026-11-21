@@ -1,0 +1,309 @@
+id: torch-tensors
+title: Tensors, shapes and broadcasting
+summary: Shape bookkeeping without loops — permute, unsqueeze, broadcasting, gather, scatter and masks.
+prerequisites: [numpy-vectorisation]
+lesson: |
+  ## Tensors are NumPy arrays that remember
+
+  A `torch.Tensor` works like a NumPy array (same indexing, same broadcasting rules) with three additions: a **dtype** that defaults to `float32` (NumPy defaults to `float64`), a **device** (CPU or GPU) and, when `requires_grad=True`, a record of how it was computed so gradients can flow back.
+
+  Most interview bugs are shape bugs, so say the shape of every tensor out loud as you write.
+
+  | Operation | Shape change |
+  | --- | --- |
+  | `x.unsqueeze(1)` | `(4, 5)` → `(4, 1, 5)` |
+  | `x.squeeze(1)` | removes a size-1 dim |
+  | `x.permute(2, 0, 1)` | reorders dims: `(a, b, c)` → `(c, a, b)` |
+  | `x.transpose(-2, -1)` | swaps the last two dims |
+  | `x.sum(dim=1, keepdim=True)` | keeps the reduced dim as size 1 |
+  | `x.view(...)` / `x.reshape(...)` | same elements, new shape |
+
+  `view` never copies, so it needs a compatible memory layout; after `transpose` or `permute` call `.contiguous()` first, or use `reshape`, which copies when it must.
+
+  ## Broadcasting
+
+  Align shapes from the right. Two dims are compatible when they're equal or one of them is 1; missing dims count as 1. `(8, 1, 6) + (7, 1)` → `(8, 7, 6)`.
+
+  Broadcasting builds "all pairs" tables without loops: `X[:, None, :] - Y[None, :, :]` has shape `(n, m, d)`.
+
+  ## Picking and placing by index
+
+  - `x.gather(1, idx)` picks, for each row `i`, the entries `x[i, idx[i, j]]`. `idx` has the same number of dims as `x`.
+  - `x.scatter(1, idx, value)` is the reverse: writes `value` into those positions.
+  - Boolean masks select or blank out entries: `x.masked_fill(mask, 0.0)`, `torch.where(cond, a, b)`.
+items:
+  - id: torch-shape-tracking
+    type: output
+    title: Track the shapes
+    difficulty: easy
+    tags: [pytorch, shapes]
+    prompt: |
+      What does this print?
+    snippet: |
+      import torch
+      x = torch.zeros(4, 3, 5)
+      print(x.permute(2, 0, 1).shape)
+      print(x.unsqueeze(1).shape)
+      print(x.sum(dim=1, keepdim=True).shape)
+      print(x[:, 0].shape)
+    answer: |
+      torch.Size([5, 4, 3])
+      torch.Size([4, 1, 3, 5])
+      torch.Size([4, 1, 5])
+      torch.Size([4, 5])
+    explanation: |
+      `permute(2, 0, 1)` puts old dim 2 first. `unsqueeze(1)` inserts a size-1 dim at position 1. `keepdim=True` keeps the summed dim as size 1 instead of dropping it, which is what you want before broadcasting the result back against `x`. Indexing a dim with an integer (`x[:, 0]`) removes that dim.
+
+  - id: torch-broadcast-shape
+    type: mcq_single
+    title: Broadcast the shapes
+    difficulty: easy
+    tags: [pytorch, broadcasting]
+    prompt: |
+      `a` has shape `(8, 1, 6)` and `b` has shape `(7, 1)`. What is the shape of `a + b`?
+    options:
+      - { id: a, text: "(8, 7, 6)" }
+      - { id: b, text: "(8, 1, 6)" }
+      - { id: c, text: "(7, 8, 6)" }
+      - { id: d, text: "It raises an error: the shapes don't match" }
+    answer: a
+    explanation: |
+      Align from the right: `b` becomes `(1, 7, 1)`. Dim by dim, `8 vs 1 → 8`, `1 vs 7 → 7`, `6 vs 1 → 6`. Shapes only fail to broadcast when two aligned dims differ and neither is 1.
+
+  - id: torch-view-contiguous
+    type: mcq_single
+    title: view after transpose
+    difficulty: medium
+    tags: [pytorch, memory-layout]
+    prompt: |
+      ```python
+      x = torch.randn(3, 4)
+      y = x.t().view(12)
+      ```
+      What happens?
+    options:
+      - { id: a, text: "y holds x's elements in column order" }
+      - { id: b, text: "y holds x's elements in row order" }
+      - { id: c, text: "A RuntimeError: view needs a compatible memory layout; use .reshape(12) or .contiguous().view(12)" }
+      - { id: d, text: "A copy is made silently, the same as reshape" }
+    answer: c
+    explanation: |
+      `t()` returns a view with swapped strides, so its elements aren't laid out row by row in memory. `view` never copies and refuses when the new shape can't be expressed with strides over the existing memory. `reshape` copies in that case; `.contiguous()` makes the copy explicit.
+
+  - id: torch-pairwise-sq-dists
+    type: code
+    title: Pairwise squared distances
+    difficulty: medium
+    tags: [pytorch, broadcasting, distances]
+    prompt: |
+      Implement `pairwise_sq_dists(X, Y)`: for `X` of shape `(n, d)` and `Y` of shape `(m, d)`, return the `(n, m)` tensor of squared Euclidean distances, `out[i, j] = ||X[i] − Y[j]||²`. No Python loops.
+    function:
+      name: pairwise_sq_dists
+      params:
+        - { name: X, type: tensor }
+        - { name: Y, type: tensor }
+      returns: "tensor (n, m)"
+    starter: |
+      import torch
+
+      def pairwise_sq_dists(X, Y):
+          return X @ Y.T
+    solution: |
+      import torch
+
+      def pairwise_sq_dists(X, Y):
+          diff = X[:, None, :] - Y[None, :, :]   # (n, m, d)
+          return (diff ** 2).sum(dim=-1)
+    tests:
+      sample:
+        - args: [[[0, 0], [1, 1]], [[1, 0], [0, 2], [3, 4]]]
+      hidden:
+        - args: [[[2, 3]], [[2, 3]]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(5, 3)), rng.normal(size=(4, 3))], [rng.normal(size=(8, 6)), rng.normal(size=(2, 6))]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "`X[:, None, :]` has shape `(n, 1, d)` and `Y[None, :, :]` has shape `(1, m, d)`: subtract and they broadcast to `(n, m, d)`."
+    explanation: |
+      Broadcasting builds every pair at once; summing the squared differences over the last dim gives `(n, m)`. For large `n, m, d` the expansion $\|x\|^2 - 2x\cdot y + \|y\|^2$ avoids the `(n, m, d)` intermediate (that's what `torch.cdist` does). The starter only computes the cross term $x \cdot y$.
+
+  - id: torch-target-logprobs
+    type: code
+    title: Log-probability of the target class
+    difficulty: medium
+    tags: [pytorch, gather, softmax]
+    prompt: |
+      Implement `target_logprobs(logits, y)`: `logits` has shape `(n, k)` and `y` holds `n` class indices. Return the `(n,)` tensor whose `i`-th entry is the log-softmax of row `i` at class `y[i]`. Use `gather` (or indexing), no loops.
+    function:
+      name: target_logprobs
+      params:
+        - { name: logits, type: tensor }
+        - { name: y, type: tensor_int }
+      returns: "tensor (n,)"
+    starter: |
+      import torch
+
+      def target_logprobs(logits, y):
+          logp = torch.log_softmax(logits, dim=0)
+          return logp.gather(1, y.unsqueeze(1)).squeeze(1)
+    solution: |
+      import torch
+
+      def target_logprobs(logits, y):
+          logp = torch.log_softmax(logits, dim=1)
+          return logp.gather(1, y.unsqueeze(1)).squeeze(1)
+    tests:
+      sample:
+        - args: [[[2.0, 1.0, 0.1], [0.5, 2.5, 0.0]], [0, 1]]
+      hidden:
+        - args: [[[1000.0, 0.0]], [1]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(6, 4)) * 3, rng.integers(0, 4, size=6)], [rng.normal(size=(10, 7)), rng.integers(0, 7, size=10)]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      Softmax is over the classes, which is `dim=1` for an `(n, k)` batch; `dim=0` normalises each class across the batch, a classic silent bug because the shapes still work. `gather(1, y[:, None])` picks one entry per row. The mean of the negated result is exactly `F.cross_entropy(logits, y)`.
+
+  - id: torch-masked-mean
+    type: code
+    title: Mean over a padded sequence
+    difficulty: medium
+    tags: [pytorch, masks, nlp]
+    prompt: |
+      A batch of sequences was padded to the same length. `x` has shape `(b, t, d)` and `mask` has shape `(b, t)` with 1 for real tokens and 0 for padding. Implement `masked_mean(x, mask)`: the `(b, d)` mean of each sequence's **real** positions. A sequence with no real positions gives zeros.
+    function:
+      name: masked_mean
+      params:
+        - { name: x, type: tensor }
+        - { name: mask, type: tensor_int }
+      returns: "tensor (b, d)"
+    starter: |
+      import torch
+
+      def masked_mean(x, mask):
+          return x.mean(dim=1)
+    solution: |
+      import torch
+
+      def masked_mean(x, mask):
+          m = mask.unsqueeze(-1).to(x.dtype)          # (b, t, 1)
+          return (x * m).sum(dim=1) / m.sum(dim=1).clamp(min=1)
+    tests:
+      sample:
+        - args: [[[[1, 2], [3, 4], [9, 9]], [[5, 6], [0, 0], [0, 0]]], [[1, 1, 0], [1, 0, 0]]]
+      hidden:
+        - args: [[[[1, 1], [2, 2]]], [[0, 0]]]
+      generate: |
+        def cases(rng):
+            out = []
+            for b, t, d in [(3, 5, 4), (4, 6, 2)]:
+                lengths = rng.integers(1, t + 1, size=b)
+                mask = (np.arange(t)[None, :] < lengths[:, None]).astype(int)
+                out.append([rng.normal(size=(b, t, d)), mask])
+            return out
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "Turn the mask into `(b, t, 1)` floats so it broadcasts over `d`."
+      - "Divide by the number of real tokens, clamped to at least 1."
+    explanation: |
+      Multiplying by the mask zeroes the padding, and dividing by the count of real tokens (not `t`) gives the true mean. `clamp(min=1)` turns 0/0 into 0/1 for an all-padding row. A plain `mean(dim=1)` lets padding drag every short sequence's average toward zero — a real bug in sentence-embedding code.
+
+  - id: torch-one-hot
+    type: code
+    title: One-hot with scatter
+    difficulty: easy
+    tags: [pytorch, scatter]
+    prompt: |
+      Implement `one_hot(y, k)`: given `n` class indices, return a float `(n, k)` tensor with a 1 in column `y[i]` of row `i` and 0 elsewhere. Use `scatter` or indexing (not `F.one_hot`).
+    function:
+      name: one_hot
+      params:
+        - { name: y, type: tensor_int }
+        - { name: k, type: int }
+      returns: "tensor (n, k), float"
+    starter: |
+      import torch
+
+      def one_hot(y, k):
+          out = torch.zeros(len(y), k)
+          return out
+    solution: |
+      import torch
+
+      def one_hot(y, k):
+          out = torch.zeros(len(y), k)
+          return out.scatter(1, y.unsqueeze(1), 1.0)
+    tests:
+      sample:
+        - args: [[0, 2, 1], 3]
+      hidden:
+        - args: [[4], 5]
+        - args: [[1, 1, 1, 0], 2]
+    explanation: |
+      `scatter(1, idx, 1.0)` writes 1.0 at column `idx[i, 0]` of row `i`. `idx` needs the same number of dims as the target, hence `y.unsqueeze(1)`. Equivalent: `out[torch.arange(n), y] = 1`.
+
+  - id: torch-causal-mask
+    type: code
+    title: Causal attention mask
+    difficulty: easy
+    tags: [pytorch, masks, transformers]
+    prompt: |
+      Implement `causal_mask(t)`: a boolean `(t, t)` tensor that is `True` where position `i` must **not** attend to position `j` — that is, where `j > i` (the future).
+    function:
+      name: causal_mask
+      params:
+        - { name: t, type: int }
+      returns: "bool tensor (t, t)"
+    starter: |
+      import torch
+
+      def causal_mask(t):
+          return torch.tril(torch.ones(t, t, dtype=torch.bool))
+    solution: |
+      import torch
+
+      def causal_mask(t):
+          return torch.triu(torch.ones(t, t, dtype=torch.bool), diagonal=1)
+    tests:
+      sample:
+        - args: [3]
+      hidden:
+        - args: [1]
+        - args: [5]
+    explanation: |
+      Entries above the diagonal (`j > i`) are the future; `triu(..., diagonal=1)` keeps exactly those. The starter builds the opposite mask (positions that *may* be attended). Both conventions exist — `masked_fill` wants True = hide, while `scaled_dot_product_attention`'s boolean `attn_mask` wants True = keep — so always check which one an API expects.
+
+  - id: torch-topk-mask
+    type: code
+    title: Keep the top k per row
+    difficulty: medium
+    tags: [pytorch, topk, scatter]
+    prompt: |
+      Implement `topk_mask(scores, k)`: return a float tensor shaped like `scores` (`(n, m)`) with 1.0 at the `k` largest entries of each **row** and 0.0 elsewhere. Values in a row are distinct.
+    function:
+      name: topk_mask
+      params:
+        - { name: scores, type: tensor }
+        - { name: k, type: int }
+      returns: "tensor (n, m)"
+    starter: |
+      import torch
+
+      def topk_mask(scores, k):
+          idx = scores.topk(k, dim=0).indices
+          return torch.zeros_like(scores).scatter(0, idx, 1.0)
+    solution: |
+      import torch
+
+      def topk_mask(scores, k):
+          idx = scores.topk(k, dim=1).indices          # (n, k)
+          return torch.zeros_like(scores).scatter(1, idx, 1.0)
+    tests:
+      sample:
+        - args: [[[0.1, 0.9, 0.5], [0.7, 0.2, 0.3]], 2]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(4, 6)), 3], [rng.normal(size=(3, 5)), 1]]
+    explanation: |
+      `topk(k, dim=1)` returns, per row, the column indices of the `k` largest values; `scatter` along the same dim writes ones there. The starter works per column (`dim=0`), which here even fails outright when `k` exceeds the number of rows. This is the core of top-k sampling and of mixture-of-experts routing.

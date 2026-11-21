@@ -1,0 +1,10 @@
+id: pandas-interview
+title: Pandas for data interviews
+summary: The Pandas take-home and live-coding tasks — cleaning messy data, groupby, joins, reshaping and time series — on realistic tables.
+level: interview
+order: 5
+topics:
+  - pandas-cleaning
+  - pandas-groupby-interview
+  - pandas-joins-reshape
+  - pandas-time-series

@@ -1,0 +1,311 @@
+id: pandas-cleaning
+title: Cleaning and filtering
+summary: Boolean filters, string cleanup, duplicates, missing values and outliers — the first hour of every real dataset.
+prerequisites: [pandas-groupby]
+lesson: |
+  ## Filtering
+
+  Build a boolean mask, then index with it. Combine masks with `&` and `|` and **wrap each condition in parentheses**:
+
+  ```python
+  big = df[(df["status"] == "delivered") & (df["amount"] > 500)]
+  ```
+
+  `df.query("status == 'delivered' and amount > 500")` reads well too.
+
+  ## Strings
+
+  The `.str` accessor applies string methods to a whole column: `.str.strip()`, `.str.lower()`, `.str.title()`, `.str.contains(...)`. To collapse repeated spaces, split and re-join: `.str.split().str.join(" ")`.
+
+  ## Duplicates
+
+  `df.drop_duplicates(subset=["id"], keep="last")` keeps one row per id. Which one you keep is a business decision: if later rows are corrections, keep the last.
+
+  ## Missing values
+
+  - `df.isna().mean()` — share of missing values per column, the quickest data-quality report.
+  - `fillna(value)` — one value for everything;
+  - group-wise: `df["age"].fillna(df.groupby("city")["age"].transform("median"))` fills each gap with its own group's median.
+
+  ## Outliers
+
+  `s.clip(upper=s.quantile(0.95))` caps extreme values instead of dropping rows (winsorising). Decide on train data only, then apply the same cap to test data.
+
+  ## How these are judged
+
+  Your function gets real DataFrames and is checked against hidden tables with more rows and missing values. Returned DataFrames are compared by their columns and rows in order (the index is ignored); dicts by keys and values.
+items:
+  - id: pd-big-delivered-ids
+    type: code
+    title: Big delivered orders
+    difficulty: easy
+    tags: [pandas, filtering]
+    prompt: |
+      Implement `big_delivered(orders, min_amount)`: the `order_id`s of orders whose `status` is `"delivered"` and whose `amount` is **greater than** `min_amount`, as a sorted list.
+    function:
+      name: big_delivered
+      params:
+        - { name: orders, type: dataframe }
+        - { name: min_amount, type: float }
+      returns: "list of order ids, ascending"
+    starter: |
+      import pandas as pd
+
+      def big_delivered(orders, min_amount):
+          return sorted(orders["order_id"].tolist())
+    solution: |
+      import pandas as pd
+
+      def big_delivered(orders, min_amount):
+          mask = (orders["status"] == "delivered") & (orders["amount"] > min_amount)
+          return sorted(orders.loc[mask, "order_id"].tolist())
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }, 500]
+      hidden:
+        - args: [{ $frame: orders_b }, 1000]
+        - args: [{ $frame: orders_b }, 4500]
+    explanation: |
+      Two boolean Series combined with `&` (each comparison in parentheses, because `&` binds tighter than `==`), then `.loc[mask, "order_id"]` selects the matching ids.
+
+  - id: pd-clean-contacts
+    type: code
+    title: Tidy names and emails
+    difficulty: easy
+    tags: [pandas, strings, cleaning]
+    prompt: |
+      Implement `clean_contacts(people)`. Return a DataFrame with columns `id`, `name`, `email`, one row per input row in the same order, where:
+
+      - `name` has leading/trailing spaces removed, runs of spaces collapsed to one, and each word capitalised (`"  asha  rao "` → `"Asha Rao"`);
+      - `email` is trimmed and lower-cased; a missing email becomes `""`.
+    function:
+      name: clean_contacts
+      params:
+        - { name: people, type: dataframe }
+      returns: "DataFrame [id, name, email]"
+    starter: |
+      import pandas as pd
+
+      def clean_contacts(people):
+          return people[["id", "name", "email"]]
+    solution: |
+      import pandas as pd
+
+      def clean_contacts(people):
+          out = people[["id", "name", "email"]].copy()
+          out["name"] = out["name"].str.split().str.join(" ").str.title()
+          out["email"] = out["email"].fillna("").str.strip().str.lower()
+          return out
+    tests:
+      sample:
+        - args: [{ $frame: messy_a }]
+      hidden:
+        - args: [{ $frame: messy_b }]
+    explanation: |
+      `.str.split()` with no argument splits on any run of whitespace and drops the ends; joining with one space normalises the spacing, and `.str.title()` capitalises each word. Fill missing emails before using `.str`, so they become `""` rather than staying missing.
+
+  - id: pd-dedupe-keep-last
+    type: code
+    title: Keep the latest record per id
+    difficulty: easy
+    tags: [pandas, duplicates]
+    prompt: |
+      Some ids appear more than once; later rows are corrections. Implement `latest_records(people)`: keep only the **last** row for each `id`, with all columns, sorted by `id`.
+    function:
+      name: latest_records
+      params:
+        - { name: people, type: dataframe }
+      returns: "DataFrame (same columns), one row per id, sorted by id"
+    starter: |
+      import pandas as pd
+
+      def latest_records(people):
+          return people.drop_duplicates(subset=["id"]).sort_values("id")
+    solution: |
+      import pandas as pd
+
+      def latest_records(people):
+          return people.drop_duplicates(subset=["id"], keep="last").sort_values("id")
+    tests:
+      sample:
+        - args: [{ $frame: messy_a }]
+      hidden:
+        - args: [{ $frame: messy_b }]
+    explanation: |
+      `drop_duplicates` keeps the **first** occurrence by default; `keep="last"` keeps the correction. Sorting afterwards gives a stable order.
+
+  - id: pd-fill-age-by-city
+    type: code
+    title: Fill missing ages by city
+    difficulty: medium
+    tags: [pandas, missing-values, groupby, transform]
+    prompt: |
+      Implement `fill_ages(people)`:
+
+      1. keep only the **last** row for each `id`;
+      2. fill each missing `age` with the **median age of people in the same city**;
+      3. if nobody in that city has an age, use the median of all known ages.
+
+      Return a dict `{id: age}`.
+    function:
+      name: fill_ages
+      params:
+        - { name: people, type: dataframe }
+      returns: "dict {id: age}"
+    starter: |
+      import pandas as pd
+
+      def fill_ages(people):
+          df = people.drop_duplicates(subset=["id"], keep="last")
+          return dict(zip(df["id"], df["age"].fillna(df["age"].median())))
+    solution: |
+      import pandas as pd
+
+      def fill_ages(people):
+          df = people.drop_duplicates(subset=["id"], keep="last").copy()
+          by_city = df.groupby("city")["age"].transform("median")
+          df["age"] = df["age"].fillna(by_city).fillna(df["age"].median())
+          return dict(zip(df["id"], df["age"]))
+    tests:
+      sample:
+        - args: [{ $frame: messy_a }]
+      hidden:
+        - args: [{ $frame: messy_b }]
+    hints:
+      - "`groupby(...).transform('median')` returns one value per original row, aligned with it."
+    explanation: |
+      `transform` broadcasts each city's median back onto the city's rows, so `fillna` can use it row by row. A city with no known ages has a NaN median; the second `fillna` falls back to the overall median.
+
+  - id: pd-top-cities
+    type: code
+    title: Busiest cities
+    difficulty: easy
+    tags: [pandas, value-counts, ties]
+    prompt: |
+      Implement `top_cities(orders, k)`: the `k` cities with the most orders (any status), most first. Cities with the same number of orders are ordered alphabetically.
+    function:
+      name: top_cities
+      params:
+        - { name: orders, type: dataframe }
+        - { name: k, type: int }
+      returns: "list of city names"
+    starter: |
+      import pandas as pd
+
+      def top_cities(orders, k):
+          return orders["city"].unique()[:k].tolist()
+    solution: |
+      import pandas as pd
+
+      def top_cities(orders, k):
+          counts = orders["city"].value_counts()
+          ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+          return [city for city, _ in ranked[:k]]
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }, 2]
+      hidden:
+        - args: [{ $frame: orders_b }, 3]
+        - args: [{ $frame: orders_b }, 4]
+        - args: [{ $frame: orders_a }, 3]
+    explanation: |
+      `value_counts()` counts per city, but its order among ties isn't something to rely on. Sorting by (negative count, name) makes ties alphabetical. In pandas: `counts.rename_axis("city").reset_index().sort_values(["count", "city"], ascending=[False, True])`.
+
+  - id: pd-cap-outliers
+    type: code
+    title: Cap extreme amounts
+    difficulty: medium
+    tags: [pandas, outliers, quantile]
+    prompt: |
+      Implement `cap_amounts(orders, q)`: return the `amount` column as a list (in row order) where every value above the `q` quantile of `amount` is replaced by that quantile. Use pandas' default quantile (linear interpolation).
+    function:
+      name: cap_amounts
+      params:
+        - { name: orders, type: dataframe }
+        - { name: q, type: float }
+      returns: "list of amounts"
+    starter: |
+      import pandas as pd
+
+      def cap_amounts(orders, q):
+          return orders["amount"].tolist()
+    solution: |
+      import pandas as pd
+
+      def cap_amounts(orders, q):
+          cap = orders["amount"].quantile(q)
+          return orders["amount"].clip(upper=cap).tolist()
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }, 0.9]
+      hidden:
+        - args: [{ $frame: orders_b }, 0.75]
+        - args: [{ $frame: orders_b }, 0.5]
+    explanation: |
+      `quantile(q)` finds the cut-off; `clip(upper=cap)` replaces anything above it and leaves the rest. Capping keeps every row, unlike dropping outliers.
+
+  - id: pd-orders-in-month
+    type: code
+    title: Orders in a month
+    difficulty: easy
+    tags: [pandas, dates]
+    prompt: |
+      `order_date` holds dates as text like `"2024-02-14"`. Implement `orders_in_month(orders, month)` where `month` looks like `"2024-02"`: the sorted `order_id`s of orders placed in that month.
+    function:
+      name: orders_in_month
+      params:
+        - { name: orders, type: dataframe }
+        - { name: month, type: str }
+      returns: "list of order ids, ascending"
+    starter: |
+      import pandas as pd
+
+      def orders_in_month(orders, month):
+          return sorted(orders["order_id"].tolist())
+    solution: |
+      import pandas as pd
+
+      def orders_in_month(orders, month):
+          dates = pd.to_datetime(orders["order_date"])
+          mask = dates.dt.strftime("%Y-%m") == month
+          return sorted(orders.loc[mask, "order_id"].tolist())
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }, "2024-02"]
+      hidden:
+        - args: [{ $frame: orders_b }, "2024-02"]
+        - args: [{ $frame: orders_b }, "2024-04"]
+        - args: [{ $frame: orders_b }, "2024-05"]
+    explanation: |
+      Parse with `pd.to_datetime`, then compare the formatted year-month — or use `dates.dt.to_period("M") == month`. Comparing years and months as numbers works too; comparing only the month number would mix up different years.
+
+  - id: pd-missing-report
+    type: code
+    title: Missing-value report
+    difficulty: easy
+    tags: [pandas, missing-values, data-quality]
+    prompt: |
+      Implement `missing_share(df)`: for every column, the share of its values that are missing (0 to 1), as a dict `{column: share}`.
+    function:
+      name: missing_share
+      params:
+        - { name: df, type: dataframe }
+      returns: "dict {column: share}"
+    starter: |
+      import pandas as pd
+
+      def missing_share(df):
+          return df.isna().sum().to_dict()
+    solution: |
+      import pandas as pd
+
+      def missing_share(df):
+          return df.isna().mean().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: messy_a }]
+      hidden:
+        - args: [{ $frame: messy_b }]
+        - args: [{ $frame: orders_a }]
+    explanation: |
+      `isna()` gives True/False per cell; the **mean** of booleans is the share of Trues. The sum gives counts, which are harder to compare across tables of different sizes.

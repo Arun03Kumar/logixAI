@@ -9,7 +9,7 @@ import {
 import type { Logger } from "@logixai/service-kit";
 import type { ArenaService, JudgeGateway } from "./services/arenaService.js";
 
-/** Sends arena code to the shared judge (PYTHON_ML sandbox, JSON comparison). */
+/** Sends arena code to the shared judge (PYTHON_ML or NODE_WEB sandbox, JSON comparison). */
 export function createQueueJudge(connection: Redis): JudgeGateway {
   const queue = new Queue(QUEUE_NAMES.SUBMISSION, { connection });
   return {
@@ -17,7 +17,7 @@ export function createQueueJudge(connection: Redis): JudgeGateway {
       const payload = SubmissionJobPayloadSchema.parse({
         [request.submissionId]: {
           code: request.program,
-          language: "PYTHON_ML",
+          language: request.language,
           inputCase: request.tests[0]?.input ?? "",
           userId: request.userId,
           submissionId: request.submissionId,

@@ -1,0 +1,478 @@
+id: sd-caching-resilience
+title: Caching and resilience
+summary: TTL caches, request coalescing against cache stampedes, Bloom filters, and circuit breakers that stop a failing dependency from taking everything down with it.
+prerequisites: [js-async, sd-load-balancing]
+lesson: |
+  ## Caching patterns
+
+  - **Cache-aside** (the default): read from the cache; on a miss, load from the database and fill the cache. Writes go to the database and **invalidate** (delete) the cache entry.
+  - **Write-through**: writes update cache and database together. **Write-back**: writes go to the cache and are flushed later (fast, but data can be lost).
+  - **TTL** (time to live) bounds staleness; **eviction** (LRU, LFU) bounds memory.
+
+  Average latency is a weighted sum: with hit rate $h$, $\text{latency} \approx t_{cache} + (1-h)\,t_{db}$.
+
+  ## Stampedes
+
+  When a hot key expires, thousands of requests miss at once and all hit the database. Remedies: **request coalescing** (only one load per key in flight; everyone else waits for it), jittered TTLs, serving stale data while one request refreshes, and early refresh before expiry.
+
+  ## Bloom filters
+
+  A bit array plus $k$ hash functions: adding an item sets $k$ bits; a lookup says "maybe present" only if all $k$ bits are set. No false negatives, a tunable false-positive rate, and a tiny memory footprint — used to skip disk reads for keys that certainly don't exist. For $n$ items and false-positive rate $p$: $m = -\dfrac{n \ln p}{(\ln 2)^2}$ bits and $k = \dfrac{m}{n}\ln 2$ hashes.
+
+  ## Circuit breakers
+
+  Calls to a struggling dependency pile up, hold threads and spread the failure. A circuit breaker counts consecutive failures; past a threshold it **opens** and fails calls fast; after a cooldown it lets **one trial** call through (**half-open**): success closes the circuit, failure reopens it.
+items:
+  - id: sd-cache-latency
+    type: numeric
+    title: Average latency with a cache
+    difficulty: easy
+    tags: [system-design, caching, estimation]
+    prompt: |
+      Every request checks a cache (2 ms). On a miss it also queries the database (50 ms). With a **90%** hit rate, what is the average latency in ms?
+    answer: 7
+    tolerance: 0.05
+    answerFormat: "ms"
+    explanation: |
+      Every request pays the cache check, and 10% also pay the database: $2 + 0.1 \times 50 = 7$ ms. Raising the hit rate to 99% gives 2.5 ms — the reason small hit-rate gains matter so much.
+
+  - id: sd-ttl-cache
+    type: code
+    language: javascript
+    title: A cache with expiry
+    difficulty: easy
+    tags: [system-design, caching]
+    prompt: |
+      Implement `class TTLCache` with `constructor(defaultTtlMs)` and:
+
+      - `set(key, value, now, ttlMs)` — stores the value until `now + ttlMs` (use `defaultTtlMs` when `ttlMs` is `undefined`); setting a key again replaces it and its expiry;
+      - `get(key, now)` — the value, or `null` if missing or expired (an entry is expired when `now >= expiresAt`);
+      - `size(now)` — how many entries are still live; it should also drop the expired ones so memory doesn't grow forever.
+    expose: [TTLCache]
+    driver: |
+      function check(defaultTtl, ops) {
+        const cache = new TTLCache(defaultTtl);
+        const out = [];
+        for (const [op, t, key, value, ttl] of ops) {
+          if (op === "set") cache.set(key, value, t, ttl ?? undefined);
+          else if (op === "get") out.push([t, key, cache.get(key, t)]);
+          else out.push([t, "size", cache.size(t)]);
+        }
+        return out;
+      }
+    function:
+      name: check
+      params:
+        - { name: defaultTtl, type: int }
+        - { name: ops, type: list }
+      returns: "results of each get and size"
+    starter: |
+      class TTLCache {
+        constructor(defaultTtlMs) {
+          this.defaultTtl = defaultTtlMs;
+          this.map = new Map();
+        }
+
+        set(key, value, now, ttlMs) {
+          this.map.set(key, value);
+        }
+
+        get(key, now) {
+          return this.map.has(key) ? this.map.get(key) : null;
+        }
+
+        size(now) {
+          return this.map.size;
+        }
+      }
+    solution: |
+      class TTLCache {
+        constructor(defaultTtlMs) {
+          this.defaultTtl = defaultTtlMs;
+          this.map = new Map(); // key -> { value, expiresAt }
+        }
+
+        set(key, value, now, ttlMs) {
+          this.map.set(key, { value, expiresAt: now + (ttlMs ?? this.defaultTtl) });
+        }
+
+        get(key, now) {
+          const e = this.map.get(key);
+          if (!e) return null;
+          if (now >= e.expiresAt) {
+            this.map.delete(key);
+            return null;
+          }
+          return e.value;
+        }
+
+        size(now) {
+          for (const [key, e] of this.map) if (now >= e.expiresAt) this.map.delete(key);
+          return this.map.size;
+        }
+      }
+    tests:
+      sample:
+        - args: [1000, [["set", 0, "a", 1], ["set", 0, "b", 2, 300], ["get", 299, "b"], ["get", 300, "b"], ["get", 999, "a"], ["size", 999], ["get", 1000, "a"], ["size", 1000]]]
+      hidden:
+        - args: [100, [["set", 0, "k", "v1"], ["set", 90, "k", "v2"], ["get", 150, "k"], ["get", 190, "k"], ["get", 5, "missing"], ["size", 500]]]
+    explanation: |
+      Store the expiry time with each value and treat expired entries as missing (lazy expiry); sweep them in `size` so memory is reclaimed. Real caches combine lazy expiry with a periodic sampled sweep (Redis tests a random sample of keys with TTLs several times a second). Re-setting a key must reset its expiry, as the hidden test checks.
+
+  - id: sd-request-coalescing
+    type: code
+    language: javascript
+    title: Request coalescing (single flight)
+    difficulty: medium
+    tags: [system-design, caching, promises, stampede]
+    prompt: |
+      Implement `createCoalescer(load)`, where `load(key)` returns a promise (a slow database query). Return a function `get(key)` such that:
+
+      - concurrent `get`s for the **same key** share **one** in-flight `load` call and all receive its result (or its error);
+      - once that call settles, the next `get` for the key calls `load` again (this is not a cache);
+      - different keys load independently.
+
+      The test's `load` takes 100 ms (fake clock) and counts its calls.
+    expose: [createCoalescer]
+    driver: |
+      async function check(gets, failing) {
+        const clock = __lx.useFakeTimers();
+        let calls = 0;
+        const load = (key) => {
+          calls += 1;
+          const n = calls;
+          return new Promise((resolve, reject) =>
+            setTimeout(() => (failing.includes(key) ? reject(new Error(key + " failed")) : resolve(key + " v" + n)), 100),
+          );
+        };
+        const get = createCoalescer(load);
+        const results = [];
+        let t = 0;
+        for (const [at, key] of gets) {
+          await clock.tick(at - t);
+          t = at;
+          get(key).then(
+            (v) => results.push([at, key, Date.now(), v]),
+            (e) => results.push([at, key, Date.now(), "error: " + e.message]),
+          );
+        }
+        await clock.tick(1000);
+        results.sort((p, q) => p[0] - q[0] || p[1].localeCompare(q[1]) || String(p[3]).localeCompare(String(q[3])));
+        return { results, loadCalls: calls };
+      }
+    function:
+      name: check
+      params:
+        - { name: gets, type: list }
+        - { name: failing, type: list }
+      returns: "[asked at, key, answered at, value] per get, and the number of loads"
+    starter: |
+      function createCoalescer(load) {
+        return (key) => load(key);
+      }
+    solution: |
+      function createCoalescer(load) {
+        const inFlight = new Map();
+        return (key) => {
+          if (inFlight.has(key)) return inFlight.get(key);
+          const p = Promise.resolve()
+            .then(() => load(key))
+            .finally(() => inFlight.delete(key));
+          inFlight.set(key, p);
+          return p;
+        };
+      }
+    tests:
+      sample:
+        - args: [[[0, "hot"], [10, "hot"], [50, "hot"], [50, "cold"], [150, "hot"]], []]
+      hidden:
+        - args: [[[0, "x"], [20, "x"], [200, "x"]], ["x"]]
+        - args: [[[0, "a"], [0, "a"], [0, "a"], [0, "a"]], []]
+    explanation: |
+      A map from key to the in-flight promise lets every concurrent caller await the same load; `finally` removes the entry when it settles, so the next request triggers a fresh load and a failure isn't cached. In front of a cache this turns a stampede of 10,000 misses on an expired hot key into one database query. Go's `singleflight` package is the well-known implementation.
+
+  - id: sd-stampede-fixes
+    type: mcq_multi
+    title: Taming a cache stampede
+    difficulty: medium
+    tags: [system-design, caching, stampede]
+    prompt: |
+      A hot key's cache entry expires and 5,000 requests miss at the same moment. Which measures reduce the load on the database? Select all that apply.
+    options:
+      - { id: a, text: "Coalesce misses so only one request per key loads from the database" }
+      - { id: b, text: "Add random jitter to TTLs so many keys don't expire at the same moment" }
+      - { id: c, text: "Serve the stale value while one request refreshes it in the background" }
+      - { id: d, text: "Shorten the TTL of hot keys" }
+      - { id: e, text: "Refresh hot keys shortly before they expire" }
+    answer: [a, b, c, e]
+    explanation: |
+      Coalescing, jitter, stale-while-revalidate and early refresh all stop many requests from hitting the database together. A shorter TTL makes hot keys expire **more** often, causing more stampedes, not fewer.
+
+  - id: sd-bloom-filter
+    type: code
+    language: javascript
+    title: Bloom filter
+    difficulty: medium
+    tags: [system-design, probabilistic, hashing]
+    prompt: |
+      Implement:
+
+      - `optimalParams(n, p)` returning `{ m, k }` for `n` items and false-positive rate `p`: `m = Math.ceil(-n * Math.log(p) / Math.LN2 ** 2)` bits and `k = Math.max(1, Math.round(m / n * Math.LN2))` hashes;
+      - `class BloomFilter` with `constructor(m, k)`, `add(item)` and `mightContain(item)`, using **double hashing**: the `i`-th position is `(h1 + i × h2) mod m` for `i = 0 … k-1`, with `h1` and `h2` from the starter's two hash functions.
+
+      The test adds `n` items, checks there are no false negatives and that the false-positive rate on 20,000 other items is at most twice `p`.
+    expose: [BloomFilter, optimalParams]
+    driver: |
+      function check(n, p) {
+        const params = optimalParams(n, p);
+        const bf = new BloomFilter(params.m, params.k);
+        for (let i = 0; i < n; i++) bf.add("member:" + i);
+        let missing = 0;
+        for (let i = 0; i < n; i++) if (!bf.mightContain("member:" + i)) missing += 1;
+        let falsePositives = 0;
+        const trials = 20000;
+        for (let i = 0; i < trials; i++) if (bf.mightContain("stranger:" + i)) falsePositives += 1;
+        return { params, noFalseNegatives: missing === 0, falsePositiveRateAtMostTwiceP: falsePositives / trials <= 2 * p };
+      }
+    function:
+      name: check
+      params:
+        - { name: n, type: int }
+        - { name: p, type: float }
+      returns: "the parameters and two checks"
+    starter: |
+      function hashA(str) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193);
+        h ^= h >>> 15;
+        return Math.imul(h, 0x2c1b3c6d) >>> 0;
+      }
+
+      function hashB(str) {
+        let h = 0x9747b28c;
+        for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x5bd1e995);
+        h ^= h >>> 13;
+        return (Math.imul(h, 0x297a2d39) | 1) >>> 0; // odd (never 0), and unsigned
+      }
+
+      function optimalParams(n, p) {
+        const m = Math.ceil((-n * Math.log(p)) / Math.LN2);
+        return { m, k: Math.max(1, Math.round((m / n) * Math.LN2)) };
+      }
+
+      class BloomFilter {
+        constructor(m, k) {
+          this.m = m;
+          this.k = k;
+          this.bits = new Uint8Array(m);
+        }
+
+        add(item) {
+          for (let i = 0; i < this.k; i++) this.bits[hashA(item) % this.m] = 1;
+        }
+
+        mightContain(item) {
+          for (let i = 0; i < this.k; i++) if (!this.bits[hashA(item) % this.m]) return false;
+          return true;
+        }
+      }
+    solution: |
+      function hashA(str) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193);
+        h ^= h >>> 15;
+        return Math.imul(h, 0x2c1b3c6d) >>> 0;
+      }
+
+      function hashB(str) {
+        let h = 0x9747b28c;
+        for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x5bd1e995);
+        h ^= h >>> 13;
+        return (Math.imul(h, 0x297a2d39) | 1) >>> 0; // odd (never 0), and unsigned
+      }
+
+      function optimalParams(n, p) {
+        const m = Math.ceil((-n * Math.log(p)) / Math.LN2 ** 2);
+        return { m, k: Math.max(1, Math.round((m / n) * Math.LN2)) };
+      }
+
+      class BloomFilter {
+        constructor(m, k) {
+          this.m = m;
+          this.k = k;
+          this.bits = new Uint8Array(m);
+        }
+
+        *positions(item) {
+          const h1 = hashA(item);
+          const h2 = hashB(item);
+          for (let i = 0; i < this.k; i++) yield (h1 + i * h2) % this.m;
+        }
+
+        add(item) {
+          for (const pos of this.positions(item)) this.bits[pos] = 1;
+        }
+
+        mightContain(item) {
+          for (const pos of this.positions(item)) if (!this.bits[pos]) return false;
+          return true;
+        }
+      }
+    tests:
+      sample:
+        - args: [1000, 0.01]
+      hidden:
+        - args: [500, 0.05]
+        - args: [2000, 0.001]
+    hints:
+      - "All `k` positions in the starter are the same bit. What does that do to the false-positive rate?"
+    explanation: |
+      With $k$ identical positions the filter behaves like one hash function, and the starter also undersizes $m$ (it forgets to square $\ln 2$), so its false-positive rate is many times the target. Double hashing derives $k$ well-spread positions from two hashes — as good as $k$ independent ones in practice (Kirsch and Mitzenmacher). For 1,000 items at 1%, the filter needs about 9,600 bits — 1.2 KB — and 7 hashes. (`h1 + i × h2` stays exact here: it's below $2^{53}$.)
+
+  - id: sd-circuit-breaker
+    type: code
+    language: javascript
+    title: Circuit breaker
+    difficulty: hard
+    access: pro
+    tags: [system-design, resilience]
+    prompt: |
+      Implement `class CircuitBreaker` with `constructor({ failureThreshold, cooldownMs })`, `allow(now)`, `record(success, now)` and a `state` property (`"closed"`, `"open"` or `"half-open"`):
+
+      - **closed**: `allow` returns `true`. `record` counts **consecutive** failures (a success resets the count); reaching `failureThreshold` opens the circuit at that time.
+      - **open**: `allow` returns `false` until `cooldownMs` has passed since it opened; then it moves to **half-open** and returns `true` for that one trial call.
+      - **half-open**: further `allow` calls return `false` until the trial is recorded. A successful trial closes the circuit (count reset); a failed one opens it again from that time.
+
+      The test sends calls `[time, outcome]`; each allowed call's outcome is recorded right away.
+    expose: [CircuitBreaker]
+    visual: { kind: timeline, field: decisions, title: "Calls (green let through, red failed fast)" }
+    driver: |
+      function check(config, calls) {
+        const breaker = new CircuitBreaker(config);
+        const decisions = [];
+        const states = [];
+        for (const [t, outcome] of calls) {
+          const allowed = breaker.allow(t);
+          if (allowed) breaker.record(outcome === "ok", t);
+          decisions.push([t, allowed]);
+          states.push(breaker.state);
+        }
+        return { decisions, states };
+      }
+    function:
+      name: check
+      params:
+        - { name: config, type: dict }
+        - { name: calls, type: list }
+      returns: "whether each call was let through, and the state after it"
+    starter: |
+      class CircuitBreaker {
+        constructor({ failureThreshold, cooldownMs }) {
+          this.threshold = failureThreshold;
+          this.cooldown = cooldownMs;
+          this.failures = 0;
+          this.state = "closed";
+        }
+
+        allow(now) {
+          return this.state === "closed";
+        }
+
+        record(success, now) {
+          if (!success) this.failures += 1;
+          if (this.failures >= this.threshold) this.state = "open";
+        }
+      }
+    solution: |
+      class CircuitBreaker {
+        constructor({ failureThreshold, cooldownMs }) {
+          this.threshold = failureThreshold;
+          this.cooldown = cooldownMs;
+          this.failures = 0;
+          this.openedAt = 0;
+          this.state = "closed";
+          this.trialOut = false;
+        }
+
+        allow(now) {
+          if (this.state === "closed") return true;
+          if (this.state === "open") {
+            if (now - this.openedAt < this.cooldown) return false;
+            this.state = "half-open";
+            this.trialOut = true;
+            return true;
+          }
+          if (this.trialOut) return false;
+          this.trialOut = true;
+          return true;
+        }
+
+        record(success, now) {
+          if (this.state === "half-open") {
+            this.trialOut = false;
+            if (success) {
+              this.state = "closed";
+              this.failures = 0;
+            } else {
+              this.state = "open";
+              this.openedAt = now;
+            }
+            return;
+          }
+          if (success) {
+            this.failures = 0;
+            return;
+          }
+          this.failures += 1;
+          if (this.failures >= this.threshold) {
+            this.state = "open";
+            this.openedAt = now;
+          }
+        }
+      }
+    tests:
+      sample:
+        - args: [{ "failureThreshold": 3, "cooldownMs": 1000 }, [[0, "fail"], [100, "fail"], [200, "fail"], [300, "ok"], [900, "ok"], [1200, "ok"], [1300, "ok"]]]
+      hidden:
+        - args: [{ "failureThreshold": 2, "cooldownMs": 500 }, [[0, "fail"], [10, "ok"], [20, "fail"], [30, "fail"], [600, "fail"], [700, "ok"], [1100, "ok"], [1200, "fail"]]]
+        - args: [{ "failureThreshold": 1, "cooldownMs": 100 }, [[0, "ok"], [1, "fail"], [50, "ok"], [101, "ok"], [102, "fail"]]]
+    explanation: |
+      Failing fast while open protects both sides: callers stop waiting on timeouts, and the struggling dependency gets breathing room to recover. The half-open state probes with a single call instead of releasing all traffic at once, which could knock a recovering service straight back down. The starter never leaves the open state and counts total rather than consecutive failures, so occasional errors eventually trip it permanently.
+
+  - id: sd-design-cache
+    type: design
+    title: Caching a product page at 50k requests per second
+    difficulty: hard
+    tags: [system-design, caching, design]
+    prompt: |
+      An e-commerce product page gets **50,000 reads per second** at peak (a few products are extremely hot during sales) and about 100 updates per second (price and stock changes). The database handles ~5,000 queries per second.
+
+      Design the caching: what to cache and where, how entries are invalidated when prices change, how to survive hot keys and expiring entries, and what happens when the cache is down. Then compare with the rubric.
+    rubric:
+      - { id: numbers, point: "Uses the numbers: the database can serve only ~10% of reads, so the hit rate must stay above ~90%" }
+      - { id: layers, point: "Chooses cache layers", detail: "CDN/edge for static parts, a shared cache (Redis/Memcached) for product data, maybe a small in-process cache" }
+      - { id: pattern, point: "Picks a caching pattern and explains writes", detail: "cache-aside with delete-on-write (or write-through)" }
+      - { id: invalidation, point: "Handles invalidation and staleness per field", detail: "price/stock need near-real-time; description can be stale for minutes; TTL as a safety net" }
+      - { id: race, point: "Mentions the stale-write race", detail: "a slow reader refilling an old value after an invalidation; fix with versioning or short TTL or delayed double delete" }
+      - { id: stampede, point: "Prevents stampedes on hot keys", detail: "request coalescing, jittered TTLs, stale-while-revalidate" }
+      - { id: hot-keys, point: "Spreads hot keys", detail: "replicate hot keys, local in-process copies, or key suffixes across shards" }
+      - { id: failure, point: "Plans for cache failure", detail: "replicas, circuit breaker / load shedding so the database isn't flooded, warm-up" }
+      - { id: memory, point: "Estimates memory and eviction policy", detail: "e.g. 1M products × 5 KB = 5 GB; LRU/LFU" }
+    modelAnswer: |
+      **Numbers first.** 50k reads/s against a database good for 5k q/s means at most 10% may miss: we need a >90% hit rate *at peak*, and the cache must never fail all at once.
+
+      **Layers.** Images and the static page shell come from a CDN. Product data (name, description, price, stock) lives in a Redis cluster with replicas. The hottest few hundred products are also kept in a tiny in-process cache (1–2 s TTL) on each app server, which absorbs sale-time hot keys.
+
+      **Pattern.** Cache-aside: read Redis, on a miss read the database and set with a TTL. On writes, update the database, then **delete** the key (deleting is safer than writing the new value, which can race with another writer).
+
+      **Freshness.** Description: TTL 10 minutes. Price and stock: invalidated on every change via change-data-capture events, with a 60 s TTL as a safety net; checkout always re-reads price and stock from the database.
+
+      **Races.** A reader that loaded an old value before an update can write it back after the delete; include a version number in the cached value, and delete twice (immediately and after a short delay).
+
+      **Stampedes.** Coalesce concurrent misses per key (single flight), add ±10% jitter to TTLs, and serve stale values while one request refreshes.
+
+      **Failure.** If Redis is degraded, a circuit breaker sheds load: serve from the local cache or a degraded page rather than sending 50k q/s to the database. After an outage, warm the cache with the top products before taking full traffic.
+
+      **Sizing.** 1M products × ~5 KB ≈ 5 GB, comfortably in memory with LRU eviction.
+    explanation: |
+      Strong answers start from the read/write ratio and the database's capacity, then treat invalidation and stampedes as first-class problems. The classic follow-ups are "what if two writes race?" and "what if the cache dies during a sale?" — having an answer for both separates senior candidates.

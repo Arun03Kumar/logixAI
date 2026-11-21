@@ -14,6 +14,10 @@ export const arenaApi = {
   track: (id) => call(`/tracks/${encodeURIComponent(id)}`),
   topic: (id) => call(`/topics/${encodeURIComponent(id)}`),
   item: (id) => call(`/items/${encodeURIComponent(id)}`),
+  /** Every matching problem. filters: q, type, difficulty, status, track, tag, list, access */
+  problems: (filters = {}) => call(`/problems?${pageQuery(filters)}`),
+  /** Curated lists ("SQL interview set", ...), with the learner's progress. */
+  lists: () => call("/lists"),
 
   /** { selectedOptionIds } | { value } | { text } */
   answer: (id, answer) => call(`/items/${encodeURIComponent(id)}/answer`, { method: "POST", body: answer }),
@@ -27,6 +31,20 @@ export const arenaApi = {
   reviewQueue: () => call("/me/review"),
   skillMap: () => call("/skill-map"),
   myAssignments: () => call("/me/assignments"),
+
+  // Mock interviews and contests (timed sessions)
+  mocks: () => call("/mocks"),
+  startMock: (templateId) => call("/mocks", { method: "POST", body: { templateId } }),
+  session: (id) => call(`/sessions/${encodeURIComponent(id)}`),
+  finishSession: (id) => call(`/sessions/${encodeURIComponent(id)}/finish`, { method: "POST" }),
+  contests: () => call("/contests"),
+  contest: (id) => call(`/contests/${encodeURIComponent(id)}`),
+  joinContest: (id) => call(`/contests/${encodeURIComponent(id)}/join`, { method: "POST" }),
+
+  // Public profiles
+  myProfile: () => call("/me/profile"),
+  saveProfile: (input) => call("/me/profile", { method: "POST", body: input }),
+  profile: (handle) => call(`/profiles/${encodeURIComponent(handle)}`),
 
   // Institutions (instructors and admins manage; students see their batches)
   assignments: (institutionId) => call(`/institutions/${encodeURIComponent(institutionId)}/assignments`),

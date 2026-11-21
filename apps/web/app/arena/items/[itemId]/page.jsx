@@ -12,7 +12,9 @@ import { Crumbs, StatusIcon } from "../../_components/bits";
 import { ITEM_TYPE, isCodeItem } from "../../_components/labels";
 import AnswerPlayer from "./AnswerPlayer";
 import CodePlayer from "./CodePlayer";
+import DesignPlayer from "./DesignPlayer";
 import ProLock from "./ProLock";
+import { SessionBanner } from "@/app/practice/_components/session";
 
 const dayFmt = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" });
 
@@ -36,10 +38,15 @@ function ReviewLine({ item, reviewMode }) {
 
 function ItemPage() {
   const { itemId } = useParams();
-  const reviewMode = useSearchParams().get("review") === "1";
+  const params = useSearchParams();
+  const reviewMode = params.get("review") === "1";
+  const sessionId = params.get("session");
   const { status } = useSession();
   const signedIn = status === "authenticated";
   const item = useApi(() => arenaApi.item(itemId), [itemId, status], { enabled: status !== "loading" });
+  // Opened from a mock interview or contest: show its clock and progress.
+  const session = useApi(() => arenaApi.session(sessionId), [sessionId, status, item.data?.status], { enabled: signedIn && Boolean(sessionId) });
+  const inSession = Boolean(session.data && !session.data.over && session.data.items.some((i) => i.id === itemId));
   const it = item.data;
   const code = it && isCodeItem(it.type) && !it.locked;
   // Review mode only makes sense for something already solved.
@@ -48,6 +55,7 @@ function ItemPage() {
   return (
     <ArenaShell wide={Boolean(code)}>
       <Container size={code ? "xl" : "md"} className="space-y-5">
+        {session.data ? <SessionBanner session={session.data} /> : null}
         {!it ? (
           item.error ? (
             <EmptyState title="Problem not found" description={item.error.message} />
@@ -80,11 +88,15 @@ function ItemPage() {
               <ProLock item={it} signedIn={signedIn} />
             ) : code ? (
               // key: remount when moving between items so editor state resets.
-              <CodePlayer key={it.id} item={it} signedIn={signedIn} onItemChange={item.setData} reviewMode={reviewing} />
+              <CodePlayer key={it.id} item={it} signedIn={signedIn} onItemChange={item.setData} reviewMode={reviewing} inSession={inSession} />
             ) : (
               <>
                 <MathMarkdown>{it.prompt}</MathMarkdown>
-                <AnswerPlayer key={it.id} item={it} signedIn={signedIn} onItemChange={item.setData} reviewMode={reviewing} />
+                {it.type === "design" ? (
+                  <DesignPlayer key={it.id} item={it} signedIn={signedIn} onItemChange={item.setData} inSession={inSession} />
+                ) : (
+                  <AnswerPlayer key={it.id} item={it} signedIn={signedIn} onItemChange={item.setData} reviewMode={reviewing} inSession={inSession} />
+                )}
               </>
             )}
           </>

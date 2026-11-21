@@ -1,0 +1,216 @@
+id: sql-joins
+title: Joins
+summary: INNER, LEFT and self joins, anti-joins, and the row-count traps interviewers love.
+prerequisites: [sql-select-filter]
+lesson: |
+  ## Matching rows across tables
+
+  A join pairs rows from two tables on a condition, usually a key:
+
+  ```sql
+  SELECT o.id, c.name
+  FROM orders AS o
+  JOIN customers AS c ON c.id = o.customer_id;
+  ```
+
+  | Join | Keeps |
+  | --- | --- |
+  | `JOIN` (inner) | Only pairs that match |
+  | `LEFT JOIN` | Every row on the left; columns from the right are NULL when nothing matches |
+  | `FULL JOIN` | Every row from both sides |
+
+  ## Anti-joins: "who never ..."
+
+  "Customers with no orders" is a `LEFT JOIN` followed by `WHERE o.id IS NULL` — the rows that found no partner. `NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` says the same thing and is often clearer.
+
+  ## Self joins
+
+  A table can be joined to itself with two aliases. `employees e JOIN employees m ON m.id = e.manager_id` puts each employee next to their manager.
+
+  ## Row counts
+
+  A join returns one row per **matching pair**. If a customer has 3 orders, joining customers to orders gives that customer 3 rows — and summing a customer column afterwards counts it 3 times. Before aggregating after a join, ask: what does one row mean now?
+
+  A condition on the right table belongs in `ON` when you want to keep unmatched left rows. Putting it in `WHERE` turns a `LEFT JOIN` back into an inner join, because NULLs fail the test.
+items:
+  - id: sql-orders-with-customer
+    type: sql
+    title: Orders with customer names
+    difficulty: easy
+    tags: [sql, join]
+    database: shop
+    prompt: |
+      For every **delivered** order, return the order `id` and the customer's `name`.
+    starter: |
+      SELECT o.id, o.customer_id AS name
+      FROM orders o
+      WHERE o.status = 'delivered';
+    solution: |
+      SELECT o.id, c.name
+      FROM orders o
+      JOIN customers c ON c.id = o.customer_id
+      WHERE o.status = 'delivered';
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Join on the key that links the tables (`orders.customer_id` → `customers.id`) and select the column you need from each side. Table aliases (`o`, `c`) keep it short and make clear which table each column comes from.
+
+  - id: sql-customers-without-orders
+    type: sql
+    title: Customers who never ordered
+    difficulty: easy
+    tags: [sql, left-join, anti-join]
+    database: shop
+    prompt: |
+      Return the `id` and `name` of customers who have **never placed an order** (of any status).
+    starter: |
+      SELECT c.id, c.name
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id;
+    solution: |
+      SELECT c.id, c.name
+      FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id
+      WHERE o.id IS NULL;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - An inner join only keeps customers who *do* have orders. Which join keeps everyone?
+    explanation: |
+      `LEFT JOIN` keeps every customer; those without orders get NULL in every `orders` column. Keeping rows where `o.id IS NULL` leaves exactly them. `WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` is the other standard answer.
+
+  - id: sql-employee-and-manager
+    type: sql
+    title: Employee and manager
+    difficulty: medium
+    tags: [sql, self-join, left-join]
+    database: hr
+    prompt: |
+      Return every employee's `name` next to their manager's name as `manager`. Employees with no manager (the CEO) still appear, with `manager` NULL.
+    starter: |
+      SELECT e.name, e.manager_id AS manager
+      FROM employees e;
+    solution: |
+      SELECT e.name, m.name AS manager
+      FROM employees e
+      LEFT JOIN employees m ON m.id = e.manager_id;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - Join `employees` to itself, once as the employee and once as the manager.
+    explanation: |
+      A self join uses two aliases for the same table. It must be a `LEFT JOIN`: with an inner join the CEO, whose `manager_id` is NULL, would disappear.
+
+  - id: sql-earns-more-than-manager
+    type: sql
+    title: Paid more than their manager
+    difficulty: medium
+    tags: [sql, self-join]
+    database: hr
+    prompt: |
+      Return the `name` of each employee who earns **strictly more** than their manager.
+    starter: |
+      SELECT name
+      FROM employees
+      WHERE salary > 100000;
+    solution: |
+      SELECT e.name
+      FROM employees e
+      JOIN employees m ON m.id = e.manager_id
+      WHERE e.salary > m.salary;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Put each employee next to their manager with a self join, then compare the two salaries. An inner join is right here: someone without a manager can't out-earn one.
+
+  - id: sql-department-headcount
+    type: sql
+    title: Headcount per department
+    difficulty: medium
+    tags: [sql, left-join, count]
+    database: hr
+    prompt: |
+      Return every department's `name` and its number of employees as `headcount` — **including departments with nobody in them** (headcount 0).
+    starter: |
+      SELECT d.name, COUNT(*) AS headcount
+      FROM departments d
+      JOIN employees e ON e.dept_id = d.id
+      GROUP BY d.name;
+    solution: |
+      SELECT d.name, COUNT(e.id) AS headcount
+      FROM departments d
+      LEFT JOIN employees e ON e.dept_id = d.id
+      GROUP BY d.id, d.name;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - After a LEFT JOIN, an empty department still has one row. What does `COUNT(*)` count for it?
+    explanation: |
+      `LEFT JOIN` keeps empty departments, but they still produce one row with NULL employee columns. `COUNT(*)` counts that row (giving 1); `COUNT(e.id)` counts only non-NULL ids, giving 0. Grouping by `d.id` as well as the name is safer when two departments could share a name.
+
+  - id: sql-order-revenue
+    type: sql
+    title: Revenue per order from line items
+    difficulty: medium
+    tags: [sql, join, aggregation]
+    database: shop
+    prompt: |
+      Each row of `order_items` says how many of a product an order contained. Using product prices, compute each order's revenue: the sum of `quantity × price` over its items.
+
+      Columns: `order_id`, `revenue`. Only orders that have items.
+    starter: |
+      SELECT order_id, SUM(quantity) AS revenue
+      FROM order_items
+      GROUP BY order_id;
+    solution: |
+      SELECT oi.order_id, SUM(oi.quantity * p.price) AS revenue
+      FROM order_items oi
+      JOIN products p ON p.id = oi.product_id
+      GROUP BY oi.order_id;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Join each line item to its product to get the price, multiply, then sum per order. The multiplication happens per row before `SUM` adds them up.
+
+  - id: sql-products-never-sold
+    type: sql
+    title: Products nobody bought
+    difficulty: easy
+    tags: [sql, anti-join, not-exists]
+    database: shop
+    prompt: |
+      Return the `name` of each product that appears in **no** order.
+    starter: |
+      SELECT name
+      FROM products
+      WHERE id NOT IN (1, 2);
+    solution: |
+      SELECT p.name
+      FROM products p
+      WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.id);
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `NOT EXISTS` keeps products for which the subquery finds no line item. `LEFT JOIN ... WHERE oi.order_id IS NULL` works too. Be careful with `NOT IN (subquery)`: if the subquery returns a single NULL, `NOT IN` matches nothing at all.
+
+  - id: sql-join-filter-placement
+    type: mcq_single
+    title: Where does the filter go?
+    difficulty: medium
+    tags: [sql, left-join]
+    prompt: |
+      You want **every** customer, with the number of their *delivered* orders (0 for none). Which query is right?
+
+      ```sql
+      -- A
+      SELECT c.id, COUNT(o.id) FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id
+      WHERE o.status = 'delivered'
+      GROUP BY c.id;
+
+      -- B
+      SELECT c.id, COUNT(o.id) FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'delivered'
+      GROUP BY c.id;
+      ```
+    options:
+      - { id: a, text: "A" }
+      - { id: b, text: "B" }
+      - { id: c, text: "Both give the same result" }
+      - { id: d, text: "Neither: you need an inner join" }
+    answer: b
+    explanation: |
+      In A, customers with no delivered orders get NULL `status` after the join, and `WHERE o.status = 'delivered'` throws those rows away — they vanish instead of showing 0. In B the condition is part of the match, so unmatched customers survive with NULLs and `COUNT(o.id)` gives 0.

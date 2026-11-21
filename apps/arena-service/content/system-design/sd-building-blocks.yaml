@@ -1,0 +1,299 @@
+id: sd-building-blocks
+title: IDs, idempotency and estimation
+summary: Back-of-the-envelope numbers, short codes for a URL shortener, Snowflake IDs that stay unique and ordered, idempotency keys that make retries safe — and the classic URL-shortener design question.
+prerequisites: [sd-rate-limiting]
+lesson: |
+  ## Back-of-the-envelope
+
+  Start every design with rough numbers: they decide whether one database is enough.
+
+  - A day has ~86,400 s ≈ $10^5$ s, so **1M requests/day ≈ 12 per second**. Peak is often 2–3× the average.
+  - Storage = items per day × size × retention. Bandwidth = QPS × response size.
+  - Powers of ten: KB $10^3$, MB $10^6$, GB $10^9$, TB $10^{12}$ bytes.
+
+  ## Unique IDs without coordination
+
+  Auto-increment IDs need one database to hand them out. Alternatives:
+
+  - **UUIDv4**: random 128 bits — no coordination, but not ordered (bad for B-tree indexes) and long.
+  - **Snowflake** (Twitter): 64 bits = 41 bits of milliseconds since a custom epoch, 10 bits of worker id, 12 bits of sequence within the millisecond. Roughly time-ordered, unique across workers, 4,096 IDs per worker per millisecond. If the clock moves backwards, it must not reuse a timestamp.
+  - **Base62** (`0-9a-zA-Z`) turns a number into a short code: 7 characters cover $62^7 \approx 3.5 \times 10^{12}$ values.
+
+  ## Idempotency
+
+  Networks fail after the server did the work but before the client heard back, so clients retry. An **idempotency key** (sent by the client, e.g. in a header) lets the server recognise a retry and return the stored result instead of charging a card twice. Store key → request fingerprint and response for a limited time; a reused key with a **different** request is an error.
+items:
+  - id: sd-qps-estimate
+    type: numeric
+    title: Requests per second from daily users
+    difficulty: easy
+    tags: [system-design, estimation]
+    prompt: |
+      An app has **100 million** daily active users, each making about **20 requests** a day, spread evenly. What is the **average** number of requests per second? (Use 86,400 seconds per day.)
+    answer: 23148
+    tolerance: 500
+    answerFormat: "requests per second"
+    explanation: |
+      $10^8 \times 20 / 86{,}400 \approx 23{,}000$ requests/s on average — plan for 2–3× that at peak. The shortcut: $2 \times 10^9$ requests a day $/ 10^5$ s ≈ 20,000/s.
+
+  - id: sd-storage-estimate
+    type: numeric
+    title: Storage for a URL shortener
+    difficulty: easy
+    tags: [system-design, estimation]
+    prompt: |
+      A URL shortener creates **100 million** short links a month, each record about **500 bytes**, and keeps them for **5 years**. How much storage is that, in **terabytes** (10¹² bytes)?
+    answer: 3
+    tolerance: 0.1
+    answerFormat: "TB"
+    explanation: |
+      $10^8 \times 12 \times 5 = 6 \times 10^9$ links, $\times 500$ B $= 3 \times 10^{12}$ B = 3 TB — before replication and indexes. That fits a few database shards, and $6 \times 10^9$ links also tells you 7 base62 characters ($3.5 \times 10^{12}$ codes) are plenty.
+
+  - id: sd-base62
+    type: code
+    language: javascript
+    title: Base62 short codes
+    difficulty: easy
+    tags: [system-design, encoding]
+    prompt: |
+      Implement `encode62(n)` and `decode62(code)` with the alphabet `0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ` (digit values 0–61, most significant digit first). `encode62(0)` is `"0"`. Numbers are non-negative integers below $62^7$ (7-character codes).
+    expose: [encode62, decode62]
+    driver: |
+      function check(numbers) {
+        const codes = numbers.map((n) => encode62(n));
+        return { codes, roundTrips: codes.every((c, i) => decode62(c) === numbers[i]) };
+      }
+    function:
+      name: check
+      params:
+        - { name: numbers, type: list }
+      returns: "the codes, and whether decoding gives the numbers back"
+    starter: |
+      function encode62(n) {
+        return n.toString(36);
+      }
+
+      function decode62(code) {
+        return parseInt(code, 36);
+      }
+    solution: |
+      const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+      function encode62(n) {
+        if (n === 0) return "0";
+        let out = "";
+        while (n > 0) {
+          out = ALPHABET[n % 62] + out;
+          n = Math.floor(n / 62);
+        }
+        return out;
+      }
+
+      function decode62(code) {
+        let n = 0;
+        for (const ch of code) n = n * 62 + ALPHABET.indexOf(ch);
+        return n;
+      }
+    tests:
+      sample:
+        - args: [[0, 61, 62, 125, 3844]]
+      hidden:
+        - args: [[3521614606207, 56800235584, 1000000000, 238327]]
+    explanation: |
+      Repeated division by 62 yields digits from least to most significant, so prepend each one. `toString(36)` only covers digits and lower-case letters. In a real shortener, encoding a sequential ID makes codes guessable; many systems encode a random or scrambled number instead.
+
+  - id: sd-snowflake
+    type: code
+    language: javascript
+    title: Snowflake IDs
+    difficulty: hard
+    access: pro
+    tags: [system-design, ids, bigint]
+    prompt: |
+      Implement `class Snowflake` with `constructor(workerId, epochMs)` and `next(now)` returning a 64-bit ID **as a decimal string**:
+
+      $$\text{id} = ((ts - \text{epoch}) \ll 22) \;|\; (\text{workerId} \ll 12) \;|\; \text{sequence}$$
+
+      - `ts` is normally `now`; if `now` is **earlier** than the last timestamp used (the clock moved back), use the last timestamp instead;
+      - within the same `ts`, `sequence` counts 0, 1, 2, … ; a new `ts` resets it to 0;
+      - after sequence 4095, move to the **next millisecond** (`ts = last + 1`, sequence 0).
+
+      Use `BigInt` — the IDs don't fit in a JavaScript number.
+    expose: [Snowflake]
+    driver: |
+      function check(workerId, nows, burstAt, burstSize) {
+        const gen = new Snowflake(workerId, 1700000000000);
+        const ids = nows.map((t) => gen.next(t));
+        const burst = Array.from({ length: burstSize }, () => gen.next(burstAt));
+        const all = [...ids, ...burst].map((s) => BigInt(s));
+        return {
+          ids,
+          burstFirst: burst[0] ?? null,
+          burstLast: burst[burst.length - 1] ?? null,
+          strictlyIncreasing: all.every((v, i) => i === 0 || v > all[i - 1]),
+        };
+      }
+    function:
+      name: check
+      params:
+        - { name: workerId, type: int }
+        - { name: nows, type: list }
+        - { name: burstAt, type: int }
+        - { name: burstSize, type: int }
+      returns: "the ids, the first and last of a burst, and an ordering check"
+    starter: |
+      class Snowflake {
+        constructor(workerId, epochMs) {
+          this.workerId = workerId;
+          this.epoch = epochMs;
+          this.sequence = 0;
+        }
+
+        next(now) {
+          const id = (BigInt(now - this.epoch) << 22n) | (BigInt(this.workerId) << 12n) | BigInt(this.sequence);
+          this.sequence += 1;
+          return id.toString();
+        }
+      }
+    solution: |
+      class Snowflake {
+        constructor(workerId, epochMs) {
+          this.workerId = BigInt(workerId);
+          this.epoch = epochMs;
+          this.last = -1;
+          this.sequence = 0;
+        }
+
+        next(now) {
+          let ts = Math.max(now, this.last);
+          if (ts === this.last) {
+            this.sequence += 1;
+            if (this.sequence > 4095) {
+              ts = this.last + 1;
+              this.sequence = 0;
+            }
+          } else {
+            this.sequence = 0;
+          }
+          this.last = ts;
+          return ((BigInt(ts - this.epoch) << 22n) | (this.workerId << 12n) | BigInt(this.sequence)).toString();
+        }
+      }
+    tests:
+      sample:
+        - args: [5, [1700000000000, 1700000000000, 1700000000001], 1700000000002, 3]
+      hidden:
+        - args: [1, [1700000005000, 1700000004000, 1700000004000, 1700000006000], 1700000006000, 1]
+        - args: [1023, [1700000000100], 1700000000200, 4100]
+    explanation: |
+      The layout makes IDs sort by time first, then worker, then sequence, so they're unique across up to 1,024 workers without coordination and index-friendly. The two edge cases matter in production: a clock stepping backwards (NTP corrections) must not reuse old timestamps, and overflowing 4,096 IDs in a millisecond must borrow the next millisecond rather than spill into the worker bits — the starter does both wrong, producing duplicates and IDs that go backwards.
+
+  - id: sd-idempotency-keys
+    type: code
+    language: javascript
+    title: Idempotency keys
+    difficulty: medium
+    tags: [system-design, payments, idempotency]
+    prompt: |
+      Implement `class IdempotencyStore` with `constructor(ttlMs)` and `handle(key, request, now, execute)`:
+
+      - the first time a key is seen (or after its entry expired, `now - storedAt >= ttlMs`), call `execute()`, store its result with the request and `now`, and return the result;
+      - a retry with the same key and the **same request** (compare `JSON.stringify(request)`) within the TTL returns the stored result **without** calling `execute`;
+      - the same key with a **different** request within the TTL throws an `Error` (the client reused a key by mistake).
+    expose: [IdempotencyStore]
+    driver: |
+      function check(ttlMs, calls) {
+        const store = new IdempotencyStore(ttlMs);
+        let charges = 0;
+        const outcomes = calls.map(([t, key, request]) => {
+          try {
+            return [t, key, store.handle(key, request, t, () => "charge #" + ++charges)];
+          } catch (e) {
+            return [t, key, "rejected: " + (e instanceof Error ? "Error" : typeof e)];
+          }
+        });
+        return { outcomes, timesCharged: charges };
+      }
+    function:
+      name: check
+      params:
+        - { name: ttlMs, type: int }
+        - { name: calls, type: list }
+      returns: "what each call returned, and how many charges ran"
+    starter: |
+      class IdempotencyStore {
+        constructor(ttlMs) {
+          this.ttl = ttlMs;
+          this.results = new Map();
+        }
+
+        handle(key, request, now, execute) {
+          if (this.results.has(key)) return this.results.get(key);
+          const result = execute();
+          this.results.set(key, result);
+          return result;
+        }
+      }
+    solution: |
+      class IdempotencyStore {
+        constructor(ttlMs) {
+          this.ttl = ttlMs;
+          this.entries = new Map(); // key -> { fingerprint, result, at }
+        }
+
+        handle(key, request, now, execute) {
+          const fingerprint = JSON.stringify(request);
+          const entry = this.entries.get(key);
+          if (entry && now - entry.at < this.ttl) {
+            if (entry.fingerprint !== fingerprint) throw new Error("idempotency key reused with a different request");
+            return entry.result;
+          }
+          const result = execute();
+          this.entries.set(key, { fingerprint, result, at: now });
+          return result;
+        }
+      }
+    tests:
+      sample:
+        - args: [60000, [[0, "k1", { "amount": 500 }], [2000, "k1", { "amount": 500 }], [3000, "k2", { "amount": 500 }], [4000, "k1", { "amount": 900 }]]]
+      hidden:
+        - args: [1000, [[0, "k", { "amount": 1 }], [999, "k", { "amount": 1 }], [1000, "k", { "amount": 1 }], [1500, "k", { "amount": 2 }]]]
+    explanation: |
+      Storing the response (not just "seen") means the retry gets the same answer the first call produced — the client can't tell the difference, which is the goal. Fingerprinting the request catches a client bug where one key is reused for a different payment. The TTL bounds storage; Stripe keeps keys for 24 hours. In a real service the check-and-store must be atomic (a unique constraint or `SET NX`), or two concurrent retries both charge.
+
+  - id: sd-design-url-shortener
+    type: design
+    title: Design a URL shortener
+    difficulty: medium
+    tags: [system-design, design]
+    prompt: |
+      Design a URL shortener: users submit a long URL and get a short link like `lgx.ai/aZ3k9Qp`; visiting it redirects to the long URL. Assume 100M new links a month, reads 100× writes, links kept 5 years, optional custom aliases and expiry.
+
+      Cover the API, how codes are generated, storage, the redirect path and scaling. Then compare with the rubric.
+    rubric:
+      - { id: estimates, point: "Estimates traffic and storage", detail: "~40 writes/s, ~4,000 reads/s average; ~3 TB over 5 years" }
+      - { id: api, point: "Defines the API", detail: "POST /links {url, alias?, expiresAt?} -> code; GET /{code} -> redirect" }
+      - { id: code-gen, point: "Chooses a code generation scheme and its trade-offs", detail: "counter/ID + base62 (needs a distributed ID source, guessable) vs random codes with collision checks vs hashing the URL" }
+      - { id: code-length, point: "Sizes the code length", detail: "7 base62 chars = 3.5 trillion codes" }
+      - { id: storage, point: "Picks storage and a key design", detail: "key-value / sharded by code; unique constraint on code and alias" }
+      - { id: redirect, point: "Chooses 301 vs 302 deliberately", detail: "301 is cached by browsers (fewer hits, no analytics); 302 keeps every click visible" }
+      - { id: cache, point: "Caches hot links", detail: "read-heavy workload; CDN or Redis in front of the database" }
+      - { id: aliases-expiry, point: "Handles custom aliases and expiry", detail: "reserved words, conflicts, lazy deletion of expired links" }
+      - { id: abuse, point: "Considers abuse", detail: "rate-limit creation, scan URLs for malware/phishing" }
+      - { id: analytics, point: "Mentions analytics without slowing redirects", detail: "log clicks asynchronously to a queue" }
+    modelAnswer: |
+      **Numbers.** 100M links/month ≈ 40 writes/s; reads 100× ≈ 4,000/s average, ~10k/s peak. 6B links × 500 B ≈ 3 TB over five years.
+
+      **API.** `POST /links {url, alias?, expiresAt?}` → `{code, shortUrl}` (authenticated, rate-limited). `GET /{code}` → `302` to the long URL, or `404`/`410` if missing or expired.
+
+      **Codes.** Take a 64-bit unique ID (Snowflake-style, or ranges of a counter handed out to each app server in blocks) and base62-encode it: no collision checks, 7 characters for the first 3.5 trillion. To avoid guessable sequential codes, scramble the ID with a reversible permutation first. Custom aliases are inserted directly with a uniqueness check and a reserved-word list.
+
+      **Storage.** A key-value or wide-column store keyed by code (DynamoDB/Cassandra), or sharded Postgres with `code` as primary key: `code, long_url, owner, created_at, expires_at`. Reads are point lookups.
+
+      **Redirect path.** Cache hot codes in Redis (and let a CDN cache redirects); with a Zipf-like distribution a small cache absorbs most traffic. Use `302` so every click reaches us for analytics and expiry; `301` would be cached by browsers forever.
+
+      **Expiry.** Check `expires_at` on read; a background job deletes expired rows later.
+
+      **Abuse and analytics.** Rate-limit creation per user/IP and check URLs against a malware/phishing list. Click events go to a queue (Kafka) and are aggregated offline, so redirects stay fast.
+    explanation: |
+      The heart of the question is code generation: interviewers want the trade-off between counter-based codes (no collisions, needs a distributed counter, guessable) and random or hashed codes (collision handling). Strong answers also justify 301 vs 302 and recognise the read-heavy profile calls for caching.

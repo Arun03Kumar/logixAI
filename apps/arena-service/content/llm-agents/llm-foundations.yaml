@@ -1,0 +1,353 @@
+id: llm-foundations
+title: RAG and LLM foundations
+summary: The plumbing around a language model — chunking documents, retrieving by embedding similarity, measuring retrieval quality, BPE tokenisation, fitting context into a token budget, and estimating cost.
+prerequisites: [numpy-vectorisation]
+lesson: |
+  ## Retrieval-augmented generation (RAG)
+
+  A model only knows what it was trained on and what's in its prompt. RAG puts relevant documents into the prompt at question time:
+
+  1. **Chunk** documents into passages (a few hundred tokens, with some **overlap** so a sentence cut at a boundary still appears whole in one chunk).
+  2. **Embed** each chunk into a vector; store vectors in an index.
+  3. At question time, embed the question and **retrieve** the top-$k$ chunks by cosine similarity, $\cos(q, d) = \frac{q \cdot d}{\|q\|\,\|d\|}$.
+  4. **Assemble** a prompt within the model's context budget: instructions, the chunks (with ids, so the answer can cite them), the question.
+  5. **Generate**, and ideally check the answer is grounded in the cited chunks.
+
+  ## Measuring retrieval
+
+  Before tuning prompts, check the retriever finds the right passages. With a labelled set of questions and their relevant documents:
+
+  - **Recall@k**: the share of a question's relevant documents that appear in the top $k$, averaged over questions.
+  - **MRR** (mean reciprocal rank): $1/\text{rank}$ of the first relevant result (0 if none), averaged.
+
+  ## Tokens
+
+  Models read **tokens**, not words. Byte-pair encoding (BPE) builds a vocabulary by starting from characters and repeatedly **merging the most frequent adjacent pair** in the training corpus. Prices and context limits are in tokens; roughly 0.75 English words per token.
+
+  ## Cost
+
+  $$\text{cost} = \text{requests} \times (\text{input tokens} \times p_{in} + \text{output tokens} \times p_{out})$$
+
+  Output tokens usually cost several times more than input tokens, and long retrieved contexts dominate input.
+items:
+  - id: llm-chunk-text
+    type: code
+    title: Chunk with overlap
+    difficulty: easy
+    tags: [llm, rag, chunking]
+    prompt: |
+      Implement `chunk_text(text, size, overlap)`: split `text` into words (`text.split()`), then return chunks of `size` words joined by single spaces, where each chunk starts `size - overlap` words after the previous one. Stop once a chunk reaches the last word (the last chunk may be shorter). Empty text gives `[]`. Assume `0 <= overlap < size`.
+    function:
+      name: chunk_text
+      params:
+        - { name: text, type: str }
+        - { name: size, type: int }
+        - { name: overlap, type: int }
+      returns: "list of strings"
+    starter: |
+      def chunk_text(text, size, overlap):
+          words = text.split()
+          return [" ".join(words[i:i + size]) for i in range(0, len(words), size)]
+    solution: |
+      def chunk_text(text, size, overlap):
+          words = text.split()
+          step = size - overlap
+          chunks = []
+          for start in range(0, len(words), step):
+              chunks.append(" ".join(words[start:start + size]))
+              if start + size >= len(words):
+                  break
+          return chunks
+    tests:
+      sample:
+        - args: ["a b c d e f g h i j", 4, 1]
+      hidden:
+        - args: ["", 3, 1]
+        - args: ["one two", 5, 2]
+        - args: ["w1 w2 w3 w4 w5 w6 w7 w8", 4, 0]
+        - args: ["w1 w2 w3 w4 w5 w6 w7 w8 w9", 3, 2]
+    explanation: |
+      The window advances by `size - overlap`, so neighbouring chunks share `overlap` words, and a sentence split at one chunk's edge appears whole in the next. Stopping once a chunk reaches the end avoids a trailing chunk made only of words already covered. The starter has no overlap. Real systems chunk by tokens and respect sentence or heading boundaries, but the sliding window is the core idea.
+
+  - id: llm-top-k-retrieval
+    type: code
+    title: Top-k retrieval by cosine similarity
+    difficulty: medium
+    tags: [llm, rag, retrieval, numpy]
+    prompt: |
+      Implement `retrieve(query, docs, k)`: `query` is a `(d,)` embedding and `docs` an `(n, d)` matrix of document embeddings. Return the indices of the `k` documents with the highest **cosine similarity** to the query, best first (ties go to the lower index). A document with an all-zero vector has similarity 0.
+    function:
+      name: retrieve
+      params:
+        - { name: query, type: ndarray }
+        - { name: docs, type: ndarray }
+        - { name: k, type: int }
+      returns: "list of k indices"
+    starter: |
+      import numpy as np
+
+      def retrieve(query, docs, k):
+          scores = docs @ query
+          return np.argsort(-scores)[:k].tolist()
+    solution: |
+      import numpy as np
+
+      def retrieve(query, docs, k):
+          norms = np.linalg.norm(docs, axis=1) * np.linalg.norm(query)
+          scores = np.divide(docs @ query, norms, out=np.zeros(len(docs)), where=norms > 0)
+          return np.argsort(-scores, kind="stable")[:k].tolist()
+    tests:
+      sample:
+        - args: [[1, 0], [[10, 1], [1, 1], [0.9, 0], [0, 5]], 2]
+      hidden:
+        - args: [[0, 1], [[0, 0], [0, 2], [3, 3]], 3]
+      generate: |
+        def cases(rng):
+            out = []
+            for n, d in [(8, 4), (20, 6)]:
+                docs = rng.normal(size=(n, d)) * rng.uniform(0.1, 10, size=(n, 1))
+                out.append([rng.normal(size=d), docs, 3])
+            return out
+    explanation: |
+      Cosine similarity ignores vector length, so a long document with a big embedding norm doesn't win just for being big — the starter's raw dot product ranks `[10, 1]` first, then `[0.9, 0]` below `[1, 1]`. Many embedding models return unit vectors, in which case the dot product **is** the cosine; normalising once at indexing time makes retrieval a single matrix product.
+
+  - id: llm-retrieval-metrics
+    type: code
+    title: Recall@k and MRR
+    difficulty: medium
+    tags: [llm, rag, evaluation]
+    prompt: |
+      Implement `evaluate(results, relevant, k)`. For each question `i`, `results[i]` is the retriever's ranked list of document ids and `relevant[i]` the list of ids that are actually relevant. Return `{"recall_at_k": ..., "mrr": ...}` averaged over questions:
+
+      - recall@k: the share of `relevant[i]` found in the first `k` results;
+      - reciprocal rank: `1 / rank` of the first relevant result in the **whole** list (rank starts at 1), or 0 if none.
+    function:
+      name: evaluate
+      params:
+        - { name: results, type: list }
+        - { name: relevant, type: list }
+        - { name: k, type: int }
+      returns: "dict with recall_at_k and mrr"
+    starter: |
+      def evaluate(results, relevant, k):
+          precision = []
+          rr = []
+          for res, rel in zip(results, relevant):
+              hits = [d for d in res[:k] if d in rel]
+              precision.append(len(hits) / k)
+              rr.append(1 / (res.index(hits[0]) + 1) if hits else 0)
+          return {"recall_at_k": sum(precision) / len(precision), "mrr": sum(rr) / len(rr)}
+    solution: |
+      def evaluate(results, relevant, k):
+          recalls = []
+          rrs = []
+          for res, rel in zip(results, relevant):
+              rel = set(rel)
+              found = len(rel & set(res[:k]))
+              recalls.append(found / len(rel) if rel else 0.0)
+              rr = 0.0
+              for rank, doc in enumerate(res, start=1):
+                  if doc in rel:
+                      rr = 1 / rank
+                      break
+              rrs.append(rr)
+          n = len(results)
+          return {"recall_at_k": sum(recalls) / n, "mrr": sum(rrs) / n}
+    tests:
+      sample:
+        - args: [[["d1", "d2", "d3"], ["d4", "d5", "d6"]], [["d2", "d9"], ["d6"]], 2]
+      hidden:
+        - args: [[["a", "b", "c", "d"]], [["d"]], 3]
+        - args: [[["x", "y"], ["p", "q"], ["m"]], [["x", "y"], ["z"], ["m"]], 1]
+    explanation: |
+      Recall@k divides by the number of **relevant** documents (did we find them?), precision@k by $k$ (how much of what we returned is useful). For RAG, recall matters more: a missing passage can't be used, while an extra one only costs tokens. MRR looks past $k$ and rewards putting the first good result near the top. The starter computes precision and only looks for the first hit within the top $k$.
+
+  - id: llm-bpe-merge
+    type: code
+    title: One step of BPE
+    difficulty: medium
+    tags: [llm, tokenization]
+    prompt: |
+      Implement `bpe_step(corpus)`. `corpus` is a list of `[tokens, count]` pairs: a word split into tokens and how often it occurs, e.g. `[["l", "o", "w"], 5]`.
+
+      1. Count every adjacent token pair, weighted by the word's count.
+      2. Pick the most frequent pair; break ties by the smallest pair in lexicographic order (`("a", "b") < ("a", "c")`).
+      3. Merge every occurrence of that pair, scanning each word left to right (`a a a` with pair `(a, a)` becomes `aa a`).
+
+      Return `{"pair": [left, right], "corpus": merged}` (same order and counts), or `{"pair": None, "corpus": corpus}` if no word has two tokens.
+    function:
+      name: bpe_step
+      params:
+        - { name: corpus, type: list }
+      returns: "the merged pair and the new corpus"
+    starter: |
+      from collections import Counter
+
+      def bpe_step(corpus):
+          pairs = Counter()
+          for tokens, count in corpus:
+              for a, b in zip(tokens, tokens[1:]):
+                  pairs[(a, b)] += 1
+          if not pairs:
+              return {"pair": None, "corpus": corpus}
+          best = max(pairs, key=lambda p: (pairs[p], p))
+          merged = []
+          for tokens, count in corpus:
+              out, i = [], 0
+              while i < len(tokens):
+                  if i + 1 < len(tokens) and (tokens[i], tokens[i + 1]) == best:
+                      out.append(tokens[i] + tokens[i + 1])
+                      i += 2
+                  else:
+                      out.append(tokens[i])
+                      i += 1
+              merged.append([out, count])
+          return {"pair": list(best), "corpus": merged}
+    solution: |
+      from collections import Counter
+
+      def bpe_step(corpus):
+          pairs = Counter()
+          for tokens, count in corpus:
+              for a, b in zip(tokens, tokens[1:]):
+                  pairs[(a, b)] += count
+          if not pairs:
+              return {"pair": None, "corpus": corpus}
+          top = max(pairs.values())
+          best = min(p for p, c in pairs.items() if c == top)
+          merged = []
+          for tokens, count in corpus:
+              out, i = [], 0
+              while i < len(tokens):
+                  if i + 1 < len(tokens) and (tokens[i], tokens[i + 1]) == best:
+                      out.append(tokens[i] + tokens[i + 1])
+                      i += 2
+                  else:
+                      out.append(tokens[i])
+                      i += 1
+              merged.append([out, count])
+          return {"pair": list(best), "corpus": merged}
+    tests:
+      sample:
+        - args: [[[["l", "o", "w"], 5], [["l", "o", "w", "e", "r"], 2], [["n", "e", "w"], 6], [["w", "i", "d", "e"], 3]]]
+      hidden:
+        - args: [[[["a", "a", "a"], 1]]]
+        - args: [[[["x"], 4]]]
+        - args: [[[["b", "c"], 1], [["a", "b"], 1]]]
+    explanation: |
+      Pair counts are weighted by word frequency — "new" occurring 6 times contributes 6 to `("n", "e")` and `("e", "w")`; the starter counts each word once and also breaks ties toward the **largest** pair. Repeating this step thousands of times grows a vocabulary where common words are single tokens and rare words split into pieces, which is why "tokenisation" costs differ across languages and why models stumble on character-level tasks like counting letters.
+
+  - id: llm-context-budget
+    type: code
+    title: Fit context into a token budget
+    difficulty: medium
+    tags: [llm, rag, prompting]
+    prompt: |
+      Implement `build_context(chunks, budget)`. Each chunk is `{"id", "text", "score"}`; a chunk costs `len(text.split())` tokens. Consider chunks from the highest score down (ties keep their original order); include a chunk if it still fits in the remaining budget, otherwise **skip it and keep trying** the smaller ones.
+
+      Return `{"context": ..., "ids": [...], "used": tokens}` where `context` is the included chunks, in the order chosen, as lines `[id] text` joined with `\n`.
+    function:
+      name: build_context
+      params:
+        - { name: chunks, type: list }
+        - { name: budget, type: int }
+      returns: "dict with context, ids and used"
+    starter: |
+      def build_context(chunks, budget):
+          ordered = sorted(chunks, key=lambda c: -c["score"])
+          picked, used = [], 0
+          for c in ordered:
+              cost = len(c["text"].split())
+              if used + cost > budget:
+                  break
+              picked.append(c)
+              used += cost
+          return {"context": "\n".join(c["text"] for c in picked), "ids": [c["id"] for c in picked], "used": used}
+    solution: |
+      def build_context(chunks, budget):
+          ordered = sorted(chunks, key=lambda c: -c["score"])  # sorted() is stable
+          picked, used = [], 0
+          for c in ordered:
+              cost = len(c["text"].split())
+              if used + cost <= budget:
+                  picked.append(c)
+                  used += cost
+          return {
+              "context": "\n".join(f"[{c['id']}] {c['text']}" for c in picked),
+              "ids": [c["id"] for c in picked],
+              "used": used,
+          }
+    tests:
+      sample:
+        - args: [[{ "id": "a", "text": "refunds take five days", "score": 0.9 }, { "id": "b", "text": "our refund policy covers all orders placed in the last thirty days", "score": 0.8 }, { "id": "c", "text": "contact support", "score": 0.5 }], 8]
+      hidden:
+        - args: [[{ "id": "x", "text": "too long for the budget here", "score": 0.99 }], 3]
+        - args: [[{ "id": "p", "text": "one two", "score": 0.5 }, { "id": "q", "text": "three", "score": 0.5 }], 10]
+    explanation: |
+      Greedy by score with skip-and-continue keeps the best chunks while still using leftover budget for smaller relevant ones; stopping at the first chunk that doesn't fit (the starter) can leave most of the budget empty. Labelling each chunk with its id lets the prompt ask the model to cite sources, which makes answers checkable. Real systems count tokens with the model's tokenizer and reserve room for the question and the answer.
+
+  - id: llm-cost-estimate
+    type: numeric
+    title: What will it cost?
+    difficulty: easy
+    tags: [llm, estimation, cost]
+    prompt: |
+      A support assistant handles **1,000,000** requests a month. Each request sends **1,500** input tokens (instructions plus retrieved context) and gets **300** output tokens back. The model costs **\$3 per million input tokens** and **\$15 per million output tokens**. What is the monthly cost in dollars?
+    answer: 9000
+    tolerance: 1
+    answerFormat: "dollars"
+    explanation: |
+      Per request: $1500 \times 3/10^6 + 300 \times 15/10^6 = 0.0045 + 0.0045 = \$0.009$; times $10^6$ requests = **\$9,000**. Input and output cost the same here even though output is 5× pricier per token — long retrieved contexts are why trimming context, caching prompts and routing easy questions to a smaller model are the usual cost levers.
+
+  - id: llm-rag-or-finetune
+    type: mcq_single
+    title: RAG or fine-tuning?
+    difficulty: easy
+    tags: [llm, rag, fine-tuning]
+    prompt: |
+      A bank wants its assistant to answer questions about product terms that change every week, and to show which document each answer came from. What fits best?
+    options:
+      - { id: a, text: "Fine-tune the model on the documents every week" }
+      - { id: b, text: "Retrieval-augmented generation over the current documents, with citations" }
+      - { id: c, text: "A longer system prompt describing the products" }
+      - { id: d, text: "A bigger model, which will know the terms" }
+    answer: b
+    explanation: |
+      RAG keeps knowledge in a document index you can update instantly and lets answers cite their sources. Fine-tuning is better at teaching **behaviour or style** than at storing facts that change, gives no citations and needs retraining for every update. No model, however big, knows this week's internal terms.
+
+  - id: llm-design-rag-assistant
+    type: design
+    title: Design a RAG support assistant
+    difficulty: hard
+    access: pro
+    tags: [llm, rag, design]
+    prompt: |
+      Design a customer-support assistant over **50,000 help-centre articles** (updated daily) for a product with 2 million users. It must answer accurately with links to sources, hand off to humans when unsure, and cost under 2 cents per conversation.
+
+      Cover ingestion, retrieval, prompting, evaluation, safety and cost. Then compare with the rubric.
+    rubric:
+      - { id: ingestion, point: "Describes ingestion: chunking strategy, metadata, and incremental re-indexing on updates" }
+      - { id: retrieval, point: "Chooses retrieval: embeddings, maybe hybrid with keyword/BM25, top-k, filters by product/locale" }
+      - { id: rerank, point: "Considers a reranker or query rewriting to improve precision" }
+      - { id: prompting, point: "Builds the prompt with instructions, cited chunks and a budget; asks for citations" }
+      - { id: grounding, point: "Handles unanswerable questions: refuse or hand off when retrieval is weak or the answer isn't grounded" }
+      - { id: evaluation, point: "Plans evaluation: labelled question set, retrieval metrics (recall@k), answer quality (human or LLM judge), regression tests" }
+      - { id: online, point: "Tracks online metrics: resolution rate, escalations, thumbs up/down" }
+      - { id: safety, point: "Addresses safety: prompt injection in content, PII, no actions without confirmation" }
+      - { id: cost-latency, point: "Estimates cost and latency and names levers: smaller model for easy questions, caching, shorter context, streaming" }
+    modelAnswer: |
+      **Ingestion.** A pipeline watches the help centre; changed articles are split by headings into ~300-token chunks with 50-token overlap, tagged with article id, title, product and locale, embedded and upserted into a vector index. Deleted articles are removed. Nightly full re-index as a safety net.
+
+      **Retrieval.** Hybrid search: vector similarity plus BM25 keyword search (exact product names and error codes matter), filtered by the user's product and language, top 20 → a cross-encoder reranker → top 5. For follow-up questions, the model first rewrites the question into a standalone query.
+
+      **Prompting.** System instructions (answer only from the sources, cite `[id]`, say when unsure), the 5 chunks with ids and titles, recent conversation, the question. Budget ~2,500 input tokens.
+
+      **Grounding and hand-off.** If the best reranker score is below a threshold, or the answer cites nothing, the assistant says it isn't sure and offers a human agent with the conversation attached.
+
+      **Evaluation.** A labelled set of 500 real questions with their correct articles: recall@5 for retrieval, answer correctness and citation accuracy graded by humans weekly and an LLM judge on every change; it runs in CI before prompt or model changes ship. Online: resolution without escalation, thumbs up/down, repeat contacts.
+
+      **Safety.** Article text is treated as data, never as instructions; the assistant has no tools that change accounts; PII is redacted from logs.
+
+      **Cost and latency.** ~2,500 input + 300 output tokens on a mid-size model ≈ 1 cent per turn; a small model classifies and answers FAQs, the large model only handles hard ones; identical questions hit a response cache; responses stream for perceived latency.
+    explanation: |
+      Interviewers look for a real retrieval pipeline (not just "put it in a vector DB"), an evaluation plan before launch, and an explicit answer for "what if the documents don't contain the answer?". Cost and safety awareness distinguish production experience.

@@ -1,0 +1,746 @@
+id: langgraph-labs
+title: LangGraph labs
+summary: Small, real LangGraph tasks — state and nodes, conditional routing, reducers for parallel branches, review loops, a tool-calling agent, conversation memory with checkpoints, and pausing for human approval.
+prerequisites: [llm-agents-from-scratch]
+lesson: |
+  ## The model: a graph over shared state
+
+  LangGraph apps are **state machines**. You declare the state's shape, add **nodes** (functions that read the state and return an **update**), connect them with **edges**, compile, and run:
+
+  ```python
+  from typing import TypedDict
+  from langgraph.graph import StateGraph, START, END
+
+  class State(TypedDict):
+      question: str
+      answer: str
+
+  def respond(state: State) -> dict:
+      return {"answer": state["question"].upper()}   # a partial update
+
+  g = StateGraph(State)
+  g.add_node("respond", respond)
+  g.add_edge(START, "respond")
+  g.add_edge("respond", END)
+  app = g.compile()
+  app.invoke({"question": "hi"})   # {"question": "hi", "answer": "HI"}
+  ```
+
+  ## Routing and loops
+
+  `g.add_conditional_edges("node", route_fn, {"a": "node_a", "b": END})` calls `route_fn(state)` after `node` and follows the edge named by its return value. An edge back to an earlier node makes a **loop** — the basis of agents and review cycles. Always give loops an exit condition.
+
+  ## Reducers
+
+  By default an update **replaces** a key. `Annotated[list, operator.add]` makes updates **append**, which you need when several nodes write the same key — especially nodes running **in parallel** in the same step, where two plain writes are an error. Chat history uses the `add_messages` reducer (`MessagesState` is a ready-made state with `messages`).
+
+  ## Tools, memory and humans
+
+  - `langgraph.prebuilt.ToolNode(tools)` runs the tool calls in the last AI message; `tools_condition` routes to `"tools"` when there are tool calls and to `END` otherwise.
+  - `compile(checkpointer=MemorySaver())` saves state after every step, keyed by `config={"configurable": {"thread_id": ...}}` — that's conversation memory, and it makes graphs resumable.
+  - `compile(..., interrupt_before=["send"])` pauses before a node; inspect with `app.get_state(config)`, optionally `app.update_state(config, {...})`, and resume with `app.invoke(None, config)`.
+
+  Models here are scripted fakes with an `invoke(messages)` method returning `AIMessage`s, so every run gives the same result offline. The judge uses LangGraph 0.2.
+items:
+  - id: lg-first-graph
+    type: code
+    title: Your first graph
+    difficulty: easy
+    tags: [langgraph, llm, agents]
+    prompt: |
+      Write `build_graph()` returning a **compiled** LangGraph graph over this state:
+
+      ```python
+      class State(TypedDict):
+          text: str
+          words: int
+      ```
+
+      with two nodes run in order, `START → clean → count → END`:
+
+      - `clean`: lower-cases `text` and collapses runs of whitespace to single spaces (strip the ends);
+      - `count`: sets `words` to the number of words in the cleaned text.
+    driver: |
+      def check(text):
+          out = build_graph().invoke({"text": text})
+          return {"text": out["text"], "words": out.get("words")}
+    function:
+      name: check
+      params:
+        - { name: text, type: str }
+      returns: "the final state"
+    starter: |
+      from typing import TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          text: str
+          words: int
+
+
+      def clean(state: State) -> dict:
+          return {"text": " ".join(state["text"].lower().split())}
+
+
+      def count(state: State) -> dict:
+          return {"words": len(state["text"].split())}
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("clean", clean)
+          g.add_node("count", count)
+          g.add_edge(START, "clean")
+          g.add_edge("clean", END)
+          return g.compile()
+    solution: |
+      from typing import TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          text: str
+          words: int
+
+
+      def clean(state: State) -> dict:
+          return {"text": " ".join(state["text"].lower().split())}
+
+
+      def count(state: State) -> dict:
+          return {"words": len(state["text"].split())}
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("clean", clean)
+          g.add_node("count", count)
+          g.add_edge(START, "clean")
+          g.add_edge("clean", "count")
+          g.add_edge("count", END)
+          return g.compile()
+    tests:
+      sample:
+        - args: ["  Hello   LangGraph  World "]
+      hidden:
+        - args: ["one"]
+        - args: ["A\tB\nC"]
+    explanation: |
+      Nodes return only the keys they change, and LangGraph merges those updates into the state. Edges decide what runs next: the starter defines `count` but never connects it, so the graph stops after `clean` and `words` is never set. Debug a graph by printing `app.get_graph().draw_mermaid()` to see its shape.
+
+  - id: lg-router
+    type: code
+    title: Route with conditional edges
+    difficulty: medium
+    tags: [langgraph, routing]
+    prompt: |
+      Build a support-ticket router. State:
+
+      ```python
+      class State(TypedDict):
+          message: str
+          route: str
+          reply: str
+          visited: Annotated[list, operator.add]
+      ```
+
+      - node `classify` sets `route`: `"billing"` if the lower-cased message contains `refund`, `invoice` or `charge`; else `"tech"` if it contains `error`, `crash` or `bug`; else `"general"`. It adds `"classify"` to `visited`;
+      - nodes `billing`, `tech` and `general` each set `reply` to `"[NAME] " + message` (e.g. `"[tech] App crash"`), add their name to `visited`, and go to `END`;
+      - after `classify`, a **conditional edge** sends the ticket to the node named by `route`.
+
+      `build_graph()` returns the compiled graph.
+    driver: |
+      def check(messages):
+          app = build_graph()
+          out = []
+          for m in messages:
+              s = app.invoke({"message": m, "visited": []})
+              out.append([s["route"], s["reply"], s["visited"]])
+          return out
+    function:
+      name: check
+      params:
+        - { name: messages, type: list }
+      returns: "[route, reply, visited] per message"
+    starter: |
+      import operator
+      from typing import Annotated, TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          message: str
+          route: str
+          reply: str
+          visited: Annotated[list, operator.add]
+
+
+      def classify(state: State) -> dict:
+          text = state["message"].lower()
+          if any(w in text for w in ("refund", "invoice", "charge")):
+              route = "billing"
+          elif any(w in text for w in ("error", "crash", "bug")):
+              route = "tech"
+          else:
+              route = "general"
+          return {"route": route, "visited": ["classify"]}
+
+
+      def handler(name):
+          def node(state: State) -> dict:
+              return {"reply": f"[{name}] {state['message']}", "visited": [name]}
+          return node
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("classify", classify)
+          for name in ("billing", "tech", "general"):
+              g.add_node(name, handler(name))
+              g.add_edge(name, END)
+          g.add_edge(START, "classify")
+          g.add_edge("classify", "billing")  # TODO: route by state["route"]
+          return g.compile()
+    solution: |
+      import operator
+      from typing import Annotated, TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          message: str
+          route: str
+          reply: str
+          visited: Annotated[list, operator.add]
+
+
+      def classify(state: State) -> dict:
+          text = state["message"].lower()
+          if any(w in text for w in ("refund", "invoice", "charge")):
+              route = "billing"
+          elif any(w in text for w in ("error", "crash", "bug")):
+              route = "tech"
+          else:
+              route = "general"
+          return {"route": route, "visited": ["classify"]}
+
+
+      def handler(name):
+          def node(state: State) -> dict:
+              return {"reply": f"[{name}] {state['message']}", "visited": [name]}
+          return node
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("classify", classify)
+          for name in ("billing", "tech", "general"):
+              g.add_node(name, handler(name))
+              g.add_edge(name, END)
+          g.add_edge(START, "classify")
+          g.add_conditional_edges(
+              "classify",
+              lambda state: state["route"],
+              {"billing": "billing", "tech": "tech", "general": "general"},
+          )
+          return g.compile()
+    tests:
+      sample:
+        - args: [["I want a refund", "App crash on login", "What are your hours?"]]
+      hidden:
+        - args: [["Invoice shows an ERROR", "bug report", "hello"]]
+    explanation: |
+      A conditional edge calls your routing function with the state after `classify` and follows the edge it names; the mapping lists every possible target, which also lets LangGraph draw the graph. In LLM apps the classifier is often a small, cheap model, and routing keeps the expensive one for the cases that need it. `visited` uses `operator.add`, so each node's entry is appended rather than replacing the list.
+
+  - id: lg-parallel-reducer
+    type: debug
+    title: Two branches, one key
+    difficulty: medium
+    tags: [langgraph, reducers, parallel]
+    prompt: |
+      This graph searches two sources **in parallel** (`START` fans out to `search_docs` and `search_web`), then `join` summarises the results. Running it fails with an error about receiving more than one value for `results` in one step. Fix it so both branches' results are kept.
+    driver: |
+      def check(query):
+          out = build_graph().invoke({"query": query, "results": []})
+          return {"results": sorted(out["results"]), "summary": out["summary"]}
+    function:
+      name: check
+      params:
+        - { name: query, type: str }
+      returns: "both results and the summary"
+    starter: |
+      from typing import TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          query: str
+          results: list
+          summary: str
+
+
+      def search_docs(state: State) -> dict:
+          return {"results": [f"docs:{state['query']}"]}
+
+
+      def search_web(state: State) -> dict:
+          return {"results": [f"web:{state['query']}"]}
+
+
+      def join(state: State) -> dict:
+          return {"summary": " + ".join(sorted(state["results"]))}
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("search_docs", search_docs)
+          g.add_node("search_web", search_web)
+          g.add_node("join", join)
+          g.add_edge(START, "search_docs")
+          g.add_edge(START, "search_web")
+          g.add_edge("search_docs", "join")
+          g.add_edge("search_web", "join")
+          g.add_edge("join", END)
+          return g.compile()
+    solution: |
+      import operator
+      from typing import Annotated, TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          query: str
+          results: Annotated[list, operator.add]
+          summary: str
+
+
+      def search_docs(state: State) -> dict:
+          return {"results": [f"docs:{state['query']}"]}
+
+
+      def search_web(state: State) -> dict:
+          return {"results": [f"web:{state['query']}"]}
+
+
+      def join(state: State) -> dict:
+          return {"summary": " + ".join(sorted(state["results"]))}
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("search_docs", search_docs)
+          g.add_node("search_web", search_web)
+          g.add_node("join", join)
+          g.add_edge(START, "search_docs")
+          g.add_edge(START, "search_web")
+          g.add_edge("search_docs", "join")
+          g.add_edge("search_web", "join")
+          g.add_edge("join", END)
+          return g.compile()
+    tests:
+      sample:
+        - args: ["refund policy"]
+      hidden:
+        - args: ["x"]
+    hints:
+      - "How should LangGraph combine two updates to `results` that arrive in the same step?"
+    explanation: |
+      Both search nodes run in the same step and both write `results`. Without a reducer LangGraph can't know whether to keep one or combine them, so it raises `InvalidUpdateError`. `Annotated[list, operator.add]` tells it to concatenate. The order of parallel results isn't something to rely on, which is why `join` sorts them.
+
+  - id: lg-reflection-loop
+    type: code
+    title: A review loop with an exit
+    difficulty: medium
+    access: pro
+    tags: [langgraph, loops, reflection]
+    prompt: |
+      Build a write → review → revise loop. `build_graph(reviewer)` gets a function `reviewer(draft) -> int` (a score from 0 to 10). State:
+
+      ```python
+      class State(TypedDict):
+          topic: str
+          draft: str
+          score: int
+          revisions: int
+          visited: Annotated[list, operator.add]
+      ```
+
+      - `write`: `draft = "Draft about " + topic`, `revisions = 0`;
+      - `review`: `score = reviewer(draft)`;
+      - `revise`: appends `" (revised)"` to the draft and adds 1 to `revisions`;
+      - every node adds its own name to `visited`;
+      - edges: `START → write → review`; after `review`, go to `END` if `score >= 8` **or** `revisions >= 3`, otherwise to `revise`; `revise → review`.
+    driver: |
+      def check(topic, scores):
+          calls = []
+
+          def reviewer(draft):
+              calls.append(draft)
+              return scores[min(len(calls), len(scores)) - 1]
+
+          out = build_graph(reviewer).invoke({"topic": topic, "visited": []})
+          return {"draft": out["draft"], "score": out["score"], "revisions": out["revisions"], "visited": out["visited"]}
+    function:
+      name: check
+      params:
+        - { name: topic, type: str }
+        - { name: scores, type: list }
+      returns: "the final draft, score, revisions and path"
+    starter: |
+      import operator
+      from typing import Annotated, TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          topic: str
+          draft: str
+          score: int
+          revisions: int
+          visited: Annotated[list, operator.add]
+
+
+      def build_graph(reviewer):
+          def write(state: State) -> dict:
+              return {"draft": "Draft about " + state["topic"], "revisions": 0, "visited": ["write"]}
+
+          def review(state: State) -> dict:
+              return {"score": reviewer(state["draft"]), "visited": ["review"]}
+
+          def revise(state: State) -> dict:
+              return {"draft": state["draft"] + " (revised)", "revisions": state["revisions"] + 1, "visited": ["revise"]}
+
+          g = StateGraph(State)
+          g.add_node("write", write)
+          g.add_node("review", review)
+          g.add_node("revise", revise)
+          g.add_edge(START, "write")
+          g.add_edge("write", "review")
+          g.add_edge("review", END)
+          return g.compile()
+    solution: |
+      import operator
+      from typing import Annotated, TypedDict
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          topic: str
+          draft: str
+          score: int
+          revisions: int
+          visited: Annotated[list, operator.add]
+
+
+      def build_graph(reviewer):
+          def write(state: State) -> dict:
+              return {"draft": "Draft about " + state["topic"], "revisions": 0, "visited": ["write"]}
+
+          def review(state: State) -> dict:
+              return {"score": reviewer(state["draft"]), "visited": ["review"]}
+
+          def revise(state: State) -> dict:
+              return {"draft": state["draft"] + " (revised)", "revisions": state["revisions"] + 1, "visited": ["revise"]}
+
+          def after_review(state: State) -> str:
+              if state["score"] >= 8 or state["revisions"] >= 3:
+                  return "done"
+              return "revise"
+
+          g = StateGraph(State)
+          g.add_node("write", write)
+          g.add_node("review", review)
+          g.add_node("revise", revise)
+          g.add_edge(START, "write")
+          g.add_edge("write", "review")
+          g.add_conditional_edges("review", after_review, {"done": END, "revise": "revise"})
+          g.add_edge("revise", "review")
+          return g.compile()
+    tests:
+      sample:
+        - args: ["caching", [5, 7, 9]]
+      hidden:
+        - args: ["queues", [9]]
+        - args: ["sharding", [1, 2, 3, 4, 5]]
+    explanation: |
+      The conditional edge after `review` is the loop: back to `revise` while the score is low, out to `END` when it's good enough **or** the revision budget is spent. Without the budget, a reviewer that never gives 8 would loop until LangGraph's recursion limit (25 steps by default) raises an error. This generate–critique–revise pattern ("reflection") is a common way to improve LLM output, and the cap keeps its cost bounded.
+
+  - id: lg-tool-agent
+    type: code
+    title: A tool-calling agent graph
+    difficulty: hard
+    access: pro
+    tags: [langgraph, agents, tool-calling]
+    prompt: |
+      Write `build_agent(model, tools)` returning a compiled graph over `MessagesState` (from `langgraph.graph`):
+
+      - node `agent`: calls `model.invoke(state["messages"])` and appends the returned `AIMessage` (`{"messages": [reply]}`);
+      - node `tools`: `ToolNode(tools)` from `langgraph.prebuilt`;
+      - `START → agent`; after `agent`, use `tools_condition` (go to `tools` if the reply has tool calls, else `END`); `tools → agent`.
+
+      The model is already bound to the tools — just call `invoke`. The test's scripted model asks for tool calls, then answers.
+    driver: |
+      from langchain_core.messages import AIMessage, HumanMessage
+      from langchain_core.tools import tool
+
+      @tool
+      def add(a: int, b: int) -> int:
+          """Add two integers."""
+          return a + b
+
+      @tool
+      def multiply(a: int, b: int) -> int:
+          """Multiply two integers."""
+          return a * b
+
+      class ScriptedModel:
+          def __init__(self, script):
+              self.script = script
+              self.calls = 0
+
+          def invoke(self, messages):
+              step = self.script[min(self.calls, len(self.script) - 1)]
+              self.calls += 1
+              if isinstance(step, str):
+                  return AIMessage(content=step)
+              calls = [{"name": c[0], "args": c[1], "id": f"call_{self.calls}_{i}"} for i, c in enumerate(step)]
+              return AIMessage(content="", tool_calls=calls)
+
+      def check(question, script):
+          model = ScriptedModel(script)
+          out = build_agent(model, [add, multiply]).invoke({"messages": [HumanMessage(content=question)]})
+          transcript = []
+          for m in out["messages"]:
+              if getattr(m, "tool_calls", None):
+                  transcript.append(["ai", "calls " + ", ".join(c["name"] for c in m.tool_calls)])
+              else:
+                  transcript.append([m.type, m.content])
+          return {"transcript": transcript, "modelCalls": model.calls}
+    function:
+      name: check
+      params:
+        - { name: question, type: str }
+        - { name: script, type: list }
+      returns: "the conversation and how often the model was called"
+    starter: |
+      from langgraph.graph import StateGraph, MessagesState, START, END
+      from langgraph.prebuilt import ToolNode, tools_condition
+
+
+      def build_agent(model, tools):
+          def agent(state: MessagesState) -> dict:
+              return {"messages": [model.invoke(state["messages"])]}
+
+          g = StateGraph(MessagesState)
+          g.add_node("agent", agent)
+          g.add_node("tools", ToolNode(tools))
+          g.add_edge(START, "agent")
+          g.add_conditional_edges("agent", tools_condition)
+          return g.compile()
+    solution: |
+      from langgraph.graph import StateGraph, MessagesState, START, END
+      from langgraph.prebuilt import ToolNode, tools_condition
+
+
+      def build_agent(model, tools):
+          def agent(state: MessagesState) -> dict:
+              return {"messages": [model.invoke(state["messages"])]}
+
+          g = StateGraph(MessagesState)
+          g.add_node("agent", agent)
+          g.add_node("tools", ToolNode(tools))
+          g.add_edge(START, "agent")
+          g.add_conditional_edges("agent", tools_condition)
+          g.add_edge("tools", "agent")
+          return g.compile()
+    tests:
+      sample:
+        - args: ["What is (3 + 4) * 5?", [[["add", { "a": 3, "b": 4 }]], [["multiply", { "a": 7, "b": 5 }]], "It is 35."]]
+      hidden:
+        - args: ["Hi!", ["Hello! How can I help?"]]
+        - args: ["2*3 and 4+5?", [[["multiply", { "a": 2, "b": 3 }], ["add", { "a": 4, "b": 5 }]], "6 and 9."]]
+    explanation: |
+      This is the agent loop from the previous topic as a graph: `agent` decides, `tools` acts, and the edge back to `agent` lets the model see the results and decide again. Without it (the starter), the run stops right after the first tool call and the user never gets an answer. `ToolNode` runs several tool calls from one message (the last hidden test) and turns errors into tool messages. `langgraph.prebuilt.create_react_agent` builds this same graph in one line.
+
+  - id: lg-memory
+    type: code
+    title: Conversation memory with a checkpointer
+    difficulty: medium
+    tags: [langgraph, memory, checkpoints]
+    prompt: |
+      Write `build_chat(model)`: a graph over `MessagesState` with one node `chat` (`START → chat → END`) that appends `model.invoke(state["messages"])`. Compile it with a `MemorySaver` checkpointer so each `thread_id` keeps its own conversation across calls.
+
+      The test's model replies with how many messages it can see.
+    driver: |
+      from langchain_core.messages import AIMessage, HumanMessage
+
+      class CountingModel:
+          def invoke(self, messages):
+              return AIMessage(content=f"I can see {len(messages)} messages")
+
+      def check(turns):
+          app = build_chat(CountingModel())
+          replies = []
+          for thread, text in turns:
+              out = app.invoke({"messages": [HumanMessage(content=text)]}, {"configurable": {"thread_id": thread}})
+              replies.append([thread, out["messages"][-1].content])
+          return replies
+    function:
+      name: check
+      params:
+        - { name: turns, type: list }
+      returns: "[thread, reply] per turn"
+    starter: |
+      from langgraph.graph import StateGraph, MessagesState, START, END
+
+
+      def build_chat(model):
+          def chat(state: MessagesState) -> dict:
+              return {"messages": [model.invoke(state["messages"])]}
+
+          g = StateGraph(MessagesState)
+          g.add_node("chat", chat)
+          g.add_edge(START, "chat")
+          g.add_edge("chat", END)
+          return g.compile()
+    solution: |
+      from langgraph.checkpoint.memory import MemorySaver
+      from langgraph.graph import StateGraph, MessagesState, START, END
+
+
+      def build_chat(model):
+          def chat(state: MessagesState) -> dict:
+              return {"messages": [model.invoke(state["messages"])]}
+
+          g = StateGraph(MessagesState)
+          g.add_node("chat", chat)
+          g.add_edge(START, "chat")
+          g.add_edge("chat", END)
+          return g.compile(checkpointer=MemorySaver())
+    tests:
+      sample:
+        - args: [[["asha", "Hi"], ["asha", "What did I say?"], ["ravi", "Hello"]]]
+      hidden:
+        - args: [[["t", "1"], ["t", "2"], ["t", "3"]]]
+    explanation: |
+      The checkpointer saves the state after every step under the thread id, and the next `invoke` on that thread starts from it — so `add_messages` appends the new message to the stored history (1, then 3 messages for Asha, while Ravi starts fresh). Without it, every call starts from scratch. `MemorySaver` lives in process memory; production apps use the SQLite or Postgres checkpointers, and trim or summarise long histories to stay within the context window.
+
+  - id: lg-human-approval
+    type: code
+    title: Pause for human approval
+    difficulty: medium
+    access: pro
+    tags: [langgraph, human-in-the-loop, checkpoints]
+    prompt: |
+      An assistant drafts an email and sends it, but a human must approve (and may edit) it first. State:
+
+      ```python
+      class State(TypedDict):
+          request: str
+          email: str
+          sent: bool
+      ```
+
+      - node `draft`: `email = "Hello, " + request`;
+      - node `send`: sets `sent = True`;
+      - `START → draft → send → END`.
+
+      `build_graph()` must compile with a `MemorySaver` and **interrupt before `send`**, so the run pauses after drafting. The test inspects the paused state, optionally edits the email with `update_state`, then resumes.
+    driver: |
+      def check(request, edited):
+          app = build_graph()
+          cfg = {"configurable": {"thread_id": "approval"}}
+          app.invoke({"request": request, "sent": False}, cfg)
+          paused = app.get_state(cfg)
+          report = {"pausedBefore": list(paused.next), "sentBeforeApproval": paused.values.get("sent")}
+          if edited:
+              app.update_state(cfg, {"email": edited})
+          final = app.invoke(None, cfg) if paused.next else paused.values
+          report.update({"finalEmail": final["email"], "sent": final["sent"]})
+          return report
+    function:
+      name: check
+      params:
+        - { name: request, type: str }
+        - { name: edited, type: str }
+      returns: "where it paused and what was finally sent"
+    starter: |
+      from typing import TypedDict
+      from langgraph.checkpoint.memory import MemorySaver
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          request: str
+          email: str
+          sent: bool
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("draft", lambda s: {"email": "Hello, " + s["request"]})
+          g.add_node("send", lambda s: {"sent": True})
+          g.add_edge(START, "draft")
+          g.add_edge("draft", "send")
+          g.add_edge("send", END)
+          return g.compile(checkpointer=MemorySaver())
+    solution: |
+      from typing import TypedDict
+      from langgraph.checkpoint.memory import MemorySaver
+      from langgraph.graph import StateGraph, START, END
+
+
+      class State(TypedDict):
+          request: str
+          email: str
+          sent: bool
+
+
+      def build_graph():
+          g = StateGraph(State)
+          g.add_node("draft", lambda s: {"email": "Hello, " + s["request"]})
+          g.add_node("send", lambda s: {"sent": True})
+          g.add_edge(START, "draft")
+          g.add_edge("draft", "send")
+          g.add_edge("send", END)
+          return g.compile(checkpointer=MemorySaver(), interrupt_before=["send"])
+    tests:
+      sample:
+        - args: ["please find the invoice attached.", ""]
+      hidden:
+        - args: ["the meeting moved to 3 pm.", "Hi team, the meeting moved to 4 pm."]
+    explanation: |
+      `interrupt_before` stops the run with its state checkpointed; the application can show the draft to a person, apply their edits with `update_state`, and resume with `invoke(None, config)`, which continues from the saved point. That's how agents with real side effects (sending email, paying, deleting) stay safe — the same principle as the prompt-injection defences. Newer LangGraph versions also offer an `interrupt()` call inside a node for the same purpose.
+
+  - id: lg-reducer-quiz
+    type: mcq_single
+    title: What a reducer does
+    difficulty: easy
+    tags: [langgraph, reducers]
+    prompt: |
+      A state key is declared as `log: Annotated[list, operator.add]`. A node returns `{"log": ["b"]}` when the state's log is `["a"]`. What is the log afterwards?
+    options:
+      - { id: a, text: '["b"]' }
+      - { id: b, text: '["a", "b"]' }
+      - { id: c, text: '["b", "a"]' }
+      - { id: d, text: "An error: nodes must return the whole state" }
+    answer: b
+    explanation: |
+      The reducer combines the current value with the update — `operator.add(["a"], ["b"])` — instead of replacing it. Without a reducer the result would be `["b"]`. Nodes return partial updates, never the whole state.
+
+  - id: lg-thread-quiz
+    type: mcq_single
+    title: Why threads?
+    difficulty: easy
+    tags: [langgraph, memory]
+    prompt: |
+      A graph is compiled with a checkpointer. Two users chat with it at the same time. What keeps their conversations apart?
+    options:
+      - { id: a, text: "Nothing — they share one conversation" }
+      - { id: b, text: "A different thread_id in each call's config; the checkpointer stores state per thread" }
+      - { id: c, text: "Compiling a separate graph per user" }
+      - { id: d, text: "The model remembers each user automatically" }
+    answer: b
+    explanation: |
+      Checkpoints are keyed by `thread_id`, so one compiled graph serves every user — pass the user's (or conversation's) id in `{"configurable": {"thread_id": ...}}`. The model itself is stateless: it only knows the messages sent in each call.

@@ -1,0 +1,289 @@
+id: pandas-time-series
+title: Time series
+summary: Parsing dates, resampling, rolling windows, period-over-period change, gaps between events and filling missing days.
+prerequisites: [pandas-joins-reshape]
+lesson: |
+  ## Dates first
+
+  Dates often arrive as text. Convert once with `pd.to_datetime(df["date"])`, and use the `.dt` accessor: `.dt.day_name()`, `.dt.to_period("M")`, `.dt.strftime("%Y-%m-%d")`.
+
+  ## Resampling
+
+  With a datetime index, `resample` regroups by calendar periods:
+
+  ```python
+  s = df.set_index(pd.to_datetime(df["date"]))["revenue"]
+  s.resample("W").sum()   # weeks ending on Sunday; empty weeks give 0
+  s.resample("MS").sum()  # month starts
+  ```
+
+  ## Rolling windows
+
+  `s.rolling(3, min_periods=1).mean()` averages each row with the two **rows** before it. That's three *days* only if every day has a row — otherwise use a time window, `s.rolling("3D").mean()`, or fill the missing days first.
+
+  ## Change over time
+
+  - `pct_change()` — relative change from the previous row (the first is NaN);
+  - `diff()` — absolute change; on dates it gives a `Timedelta` (`.dt.days` for a number).
+
+  Per user or per store, sort by date and use `groupby(...).diff()`.
+
+  ## Missing days
+
+  To get a row for every day, reindex on a full range: `s.reindex(pd.date_range(s.index.min(), s.index.max()), fill_value=0)`.
+items:
+  - id: pd-weekly-revenue
+    type: code
+    title: Weekly revenue
+    difficulty: medium
+    tags: [pandas, resample, time-series]
+    prompt: |
+      Implement `weekly_revenue(sales, store)`: the store's total revenue per week, with weeks running Monday to Sunday and labelled by their **Sunday** as text (`"2024-01-07"`). Include weeks with no sales between the first and last week (total 0). Return `{week: total}`.
+    function:
+      name: weekly_revenue
+      params:
+        - { name: sales, type: dataframe }
+        - { name: store, type: str }
+      returns: "dict {week_ending: total}"
+    starter: |
+      import pandas as pd
+
+      def weekly_revenue(sales, store):
+          df = sales[sales["store"] == store]
+          return dict(zip(df["date"], df["revenue"]))
+    solution: |
+      import pandas as pd
+
+      def weekly_revenue(sales, store):
+          df = sales[sales["store"] == store]
+          s = df.set_index(pd.to_datetime(df["date"]))["revenue"].resample("W").sum()
+          return {d.strftime("%Y-%m-%d"): v for d, v in s.items()}
+    tests:
+      sample:
+        - args: [{ $frame: sales_a }, A]
+      hidden:
+        - args: [{ $frame: sales_b }, X]
+        - args: [{ $frame: sales_b }, Y]
+    explanation: |
+      Pandas' `"W"` frequency means weeks ending on Sunday (`"W-SUN"`), labelled by that Sunday. Resampling fills weeks without rows with a sum of 0.
+
+  - id: pd-rolling-average
+    type: code
+    title: Three-row rolling average per store
+    difficulty: medium
+    tags: [pandas, rolling, groupby]
+    prompt: |
+      Implement `rolling_avg(sales)`: for each store, in date order, the mean revenue of the current row and up to two previous rows of **that store**. Return a DataFrame with columns `store`, `date`, `avg3` (dates as given), sorted by `store` then `date`.
+    function:
+      name: rolling_avg
+      params:
+        - { name: sales, type: dataframe }
+      returns: "DataFrame [store, date, avg3]"
+    starter: |
+      import pandas as pd
+
+      def rolling_avg(sales):
+          df = sales.sort_values(["store", "date"]).copy()
+          df["avg3"] = df["revenue"].rolling(3, min_periods=1).mean()
+          return df[["store", "date", "avg3"]]
+    solution: |
+      import pandas as pd
+
+      def rolling_avg(sales):
+          df = sales.sort_values(["store", "date"]).copy()
+          df["avg3"] = df.groupby("store")["revenue"].transform(lambda s: s.rolling(3, min_periods=1).mean())
+          return df[["store", "date", "avg3"]]
+    tests:
+      sample:
+        - args: [{ $frame: sales_a }]
+      hidden:
+        - args: [{ $frame: sales_b }]
+    hints:
+      - The starter's window runs across the boundary between stores.
+    explanation: |
+      Rolling inside `groupby(...).transform` restarts the window for each store. ISO date strings sort correctly as text, so sorting by them is safe here.
+
+  - id: pd-monthly-growth
+    type: code
+    title: Month-over-month growth
+    difficulty: medium
+    access: pro
+    tags: [pandas, pct-change, resample]
+    prompt: |
+      Implement `monthly_growth(sales)`: total revenue per calendar month (all stores), and each month's relative change from the previous month (`0.25` = +25%). Return `{month: change}` with months as `"2024-02"`; the first month's change is missing (NaN).
+    function:
+      name: monthly_growth
+      params:
+        - { name: sales, type: dataframe }
+      returns: "dict {month: change}"
+    starter: |
+      import pandas as pd
+
+      def monthly_growth(sales):
+          months = pd.to_datetime(sales["date"]).dt.strftime("%Y-%m")
+          return sales.groupby(months)["revenue"].sum().to_dict()
+    solution: |
+      import pandas as pd
+
+      def monthly_growth(sales):
+          months = pd.to_datetime(sales["date"]).dt.strftime("%Y-%m")
+          totals = sales.groupby(months)["revenue"].sum().sort_index()
+          return totals.pct_change().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: sales_a }]
+      hidden:
+        - args: [{ $frame: sales_b }]
+    explanation: |
+      Total per month first, sort by month, then `pct_change()` compares each month with the one before. `(this − previous) / previous` is what interviewers mean by "growth".
+
+  - id: pd-average-gap-days
+    type: code
+    title: Average days between visits
+    difficulty: medium
+    tags: [pandas, diff, groupby, dates]
+    prompt: |
+      Implement `avg_gap(events)`: for each user, the average number of days between their consecutive **distinct** event dates. Users with only one distinct date are left out. Return `{user_id: days}`.
+    function:
+      name: avg_gap
+      params:
+        - { name: events, type: dataframe }
+      returns: "dict {user_id: average gap in days}"
+    starter: |
+      import pandas as pd
+
+      def avg_gap(events):
+          df = events.sort_values(["user_id", "date"]).copy()
+          df["d"] = pd.to_datetime(df["date"])
+          gaps = df.groupby("user_id")["d"].diff().dt.days
+          return gaps.groupby(df["user_id"]).mean().dropna().to_dict()
+    solution: |
+      import pandas as pd
+
+      def avg_gap(events):
+          df = events[["user_id", "date"]].drop_duplicates().copy()
+          df["d"] = pd.to_datetime(df["date"])
+          df = df.sort_values(["user_id", "d"])
+          gaps = df.groupby("user_id")["d"].diff().dt.days
+          return gaps.groupby(df["user_id"]).mean().dropna().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: events_a }]
+      hidden:
+        - args: [{ $frame: events_b }]
+    hints:
+      - Two events on the same day create a gap of 0 days. Should they?
+    explanation: |
+      Remove duplicate (user, date) pairs first, then `diff()` within each user gives the gaps between visits; their mean is the answer. A user's first date has no gap (NaN), and users with one date only have NaN, which `dropna` removes.
+
+  - id: pd-first-last-dates
+    type: code
+    title: First and last activity
+    difficulty: easy
+    tags: [pandas, groupby, dates]
+    prompt: |
+      Implement `activity_span(events)`: a DataFrame with columns `user_id`, `first`, `last` — each user's earliest and latest event date as text (`"2024-01-07"`), sorted by `user_id`.
+    function:
+      name: activity_span
+      params:
+        - { name: events, type: dataframe }
+      returns: "DataFrame [user_id, first, last]"
+    starter: |
+      import pandas as pd
+
+      def activity_span(events):
+          return events.groupby("user_id", as_index=False).agg(first=("date", "first"), last=("date", "last"))
+    solution: |
+      import pandas as pd
+
+      def activity_span(events):
+          df = events.assign(d=pd.to_datetime(events["date"]))
+          out = df.groupby("user_id", as_index=False).agg(first=("d", "min"), last=("d", "max"))
+          out["first"] = out["first"].dt.strftime("%Y-%m-%d")
+          out["last"] = out["last"].dt.strftime("%Y-%m-%d")
+          return out.sort_values("user_id")
+    tests:
+      sample:
+        - args: [{ $frame: events_a }]
+      hidden:
+        - args: [{ $frame: events_b }]
+        - args:
+            - columns: [user_id, date, event]
+              data:
+                - [4, "2024-03-09", login]
+                - [4, "2024-03-01", signup]
+                - [5, "2024-02-20", purchase]
+                - [4, "2024-03-15", purchase]
+                - [5, "2024-02-02", signup]
+                - [4, "2024-03-02", login]
+    explanation: |
+      `"first"` and `"last"` take the first and last **rows**, which are only the earliest and latest dates if the data is sorted. `min` and `max` on real dates don't depend on row order.
+
+  - id: pd-fill-missing-days
+    type: code
+    title: Fill in days without sales
+    difficulty: medium
+    access: pro
+    tags: [pandas, reindex, date-range]
+    prompt: |
+      Implement `daily_series(sales, store)`: one row per day from the store's first to its last sales date, with that day's revenue (0 when there were no sales). Columns `date` (text, `"2024-01-04"`) and `revenue`, oldest first.
+    function:
+      name: daily_series
+      params:
+        - { name: sales, type: dataframe }
+        - { name: store, type: str }
+      returns: "DataFrame [date, revenue]"
+    starter: |
+      import pandas as pd
+
+      def daily_series(sales, store):
+          df = sales[sales["store"] == store]
+          return df[["date", "revenue"]].sort_values("date")
+    solution: |
+      import pandas as pd
+
+      def daily_series(sales, store):
+          df = sales[sales["store"] == store]
+          s = df.groupby(pd.to_datetime(df["date"]))["revenue"].sum()
+          full = s.reindex(pd.date_range(s.index.min(), s.index.max(), freq="D"), fill_value=0.0)
+          return pd.DataFrame({"date": full.index.strftime("%Y-%m-%d"), "revenue": full.to_numpy()})
+    tests:
+      sample:
+        - args: [{ $frame: sales_a }, A]
+      hidden:
+        - args: [{ $frame: sales_a }, B]
+        - args: [{ $frame: sales_b }, X]
+    explanation: |
+      Sum per day (in case a day appears twice), then `reindex` on the complete `date_range`, filling the new days with 0. Charts and rolling averages over this series now treat a quiet day as a day.
+
+  - id: pd-weekday-average
+    type: code
+    title: Average revenue by weekday
+    difficulty: easy
+    tags: [pandas, dates, groupby]
+    prompt: |
+      Implement `weekday_avg(sales)`: the average revenue of rows falling on each weekday (all stores), keyed by the weekday's English name (`"Monday"`). Only weekdays that appear.
+    function:
+      name: weekday_avg
+      params:
+        - { name: sales, type: dataframe }
+      returns: "dict {weekday: mean revenue}"
+    starter: |
+      import pandas as pd
+
+      def weekday_avg(sales):
+          days = pd.to_datetime(sales["date"]).dt.dayofweek
+          return sales.groupby(days)["revenue"].mean().to_dict()
+    solution: |
+      import pandas as pd
+
+      def weekday_avg(sales):
+          days = pd.to_datetime(sales["date"]).dt.day_name()
+          return sales.groupby(days)["revenue"].mean().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: sales_a }]
+      hidden:
+        - args: [{ $frame: sales_b }]
+    explanation: |
+      `.dt.day_name()` gives "Monday", "Tuesday", ...; grouping by it averages each weekday. `dayofweek` gives numbers (Monday = 0), which answer the same question with less readable keys.

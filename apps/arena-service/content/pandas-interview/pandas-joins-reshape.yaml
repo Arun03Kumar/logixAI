@@ -1,0 +1,261 @@
+id: pandas-joins-reshape
+title: Joins and reshaping
+summary: merge, anti-joins, pivot tables, melt, combining updates and exploding lists.
+prerequisites: [pandas-groupby-interview]
+lesson: |
+  ## merge
+
+  `left.merge(right, on="customer", how="left")` is SQL's `LEFT JOIN`. Useful extras:
+
+  - `indicator=True` adds a `_merge` column saying `both`, `left_only` or `right_only` — the easy way to do an **anti-join** ("customers without orders").
+  - `validate="many_to_one"` raises an error if the right side has duplicate keys, instead of silently duplicating rows.
+
+  ## Long and wide
+
+  | Shape | Looks like | Get there with |
+  | --- | --- | --- |
+  | Long | one row per (student, subject) | `melt(id_vars=..., var_name=..., value_name=...)` |
+  | Wide | one row per student, a column per subject | `pivot_table(index=..., columns=..., values=..., aggfunc=...)` |
+
+  `pivot_table(..., aggfunc="size", fill_value=0)` counts combinations; `pd.crosstab(a, b, normalize="index")` gives shares per row.
+
+  ## Combining tables
+
+  `pd.concat([old, new])` stacks rows. To let newer rows replace older ones with the same key: concat, then `drop_duplicates(subset=key, keep="last")`.
+
+  ## Lists in cells
+
+  `df.explode("tags")` gives one row per list element (an empty list becomes one row with NaN), after which `value_counts()` counts tags.
+items:
+  - id: pd-order-segments
+    type: code
+    title: Segment of each order
+    difficulty: easy
+    tags: [pandas, merge, missing-values]
+    prompt: |
+      Implement `order_segments(orders, customers)`: each order's customer `segment`, as `{order_id: segment}`. Orders from customers not in `customers` get `"unknown"`.
+    function:
+      name: order_segments
+      params:
+        - { name: orders, type: dataframe }
+        - { name: customers, type: dataframe }
+      returns: "dict {order_id: segment}"
+    starter: |
+      import pandas as pd
+
+      def order_segments(orders, customers):
+          df = orders.merge(customers, on="customer")
+          return dict(zip(df["order_id"], df["segment"]))
+    solution: |
+      import pandas as pd
+
+      def order_segments(orders, customers):
+          df = orders.merge(customers[["customer", "segment"]], on="customer", how="left")
+          return dict(zip(df["order_id"], df["segment"].fillna("unknown")))
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }, { $frame: customers_a }]
+      hidden:
+        - args: [{ $frame: orders_b }, { $frame: customers_b }]
+    explanation: |
+      `merge` defaults to an inner join, which drops orders from unknown customers. `how="left"` keeps every order, with NaN segments to fill.
+
+  - id: pd-customers-without-orders
+    type: code
+    title: Customers who never ordered
+    difficulty: easy
+    tags: [pandas, merge, anti-join]
+    prompt: |
+      Implement `no_orders(customers, orders)`: the customers (from `customers`) with no orders at all, as a sorted list of names.
+    function:
+      name: no_orders
+      params:
+        - { name: customers, type: dataframe }
+        - { name: orders, type: dataframe }
+      returns: "list of names, sorted"
+    starter: |
+      import pandas as pd
+
+      def no_orders(customers, orders):
+          return sorted(customers["customer"].tolist())
+    solution: |
+      import pandas as pd
+
+      def no_orders(customers, orders):
+          df = customers.merge(orders[["customer"]].drop_duplicates(), on="customer", how="left", indicator=True)
+          return sorted(df.loc[df["_merge"] == "left_only", "customer"].tolist())
+    tests:
+      sample:
+        - args: [{ $frame: customers_a }, { $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: customers_b }, { $frame: orders_b }]
+    explanation: |
+      A left merge with `indicator=True` labels customers that found no order as `left_only`. The one-liner `customers[~customers["customer"].isin(orders["customer"])]` does the same.
+
+  - id: pd-city-status-pivot
+    type: code
+    title: Orders by city and status
+    difficulty: medium
+    tags: [pandas, pivot-table]
+    prompt: |
+      Implement `status_table(orders)`: a DataFrame with a `city` column followed by **one column per status** (alphabetical), holding the number of orders, 0 where there are none. One row per city, sorted by city.
+    function:
+      name: status_table
+      params:
+        - { name: orders, type: dataframe }
+      returns: "DataFrame [city, <status columns...>]"
+    starter: |
+      import pandas as pd
+
+      def status_table(orders):
+          return orders.groupby(["city", "status"], as_index=False).size()
+    solution: |
+      import pandas as pd
+
+      def status_table(orders):
+          table = orders.pivot_table(index="city", columns="status", values="order_id", aggfunc="size", fill_value=0)
+          table = table.reindex(sorted(table.columns), axis=1).sort_index()
+          table.columns.name = None
+          return table.reset_index()
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: orders_b }]
+    explanation: |
+      `pivot_table` turns status values into columns and counts with `aggfunc="size"`; `fill_value=0` replaces missing combinations. `reset_index()` turns the city index back into a column. `pd.crosstab(orders["city"], orders["status"])` is a shortcut.
+
+  - id: pd-melt-scores
+    type: code
+    title: Wide scores to long
+    difficulty: easy
+    tags: [pandas, melt, reshape]
+    prompt: |
+      `scores` has a `student` column and one column per subject. Implement `long_scores(scores)`: a DataFrame with columns `student`, `subject`, `score`, one row per student and subject, **leaving out missing scores**, sorted by `student` then `subject`.
+    function:
+      name: long_scores
+      params:
+        - { name: scores, type: dataframe }
+      returns: "DataFrame [student, subject, score]"
+    starter: |
+      import pandas as pd
+
+      def long_scores(scores):
+          return scores.melt(id_vars="student")
+    solution: |
+      import pandas as pd
+
+      def long_scores(scores):
+          long = scores.melt(id_vars="student", var_name="subject", value_name="score")
+          return long.dropna(subset=["score"]).sort_values(["student", "subject"])
+    tests:
+      sample:
+        - args: [{ $frame: scores_a }]
+      hidden:
+        - args: [{ $frame: scores_b }]
+    explanation: |
+      `melt` turns every non-id column into (variable, value) rows; naming them gives the requested columns. Drop the NaNs that came from blank cells, then sort.
+
+  - id: pd-apply-updates
+    type: code
+    title: Apply corrected orders
+    difficulty: medium
+    access: pro
+    tags: [pandas, concat, duplicates]
+    prompt: |
+      Implement `apply_updates(old, new)`: all orders from both tables, where an order in `new` **replaces** the order with the same `order_id` in `old`. Same columns, sorted by `order_id`.
+    function:
+      name: apply_updates
+      params:
+        - { name: old, type: dataframe }
+        - { name: new, type: dataframe }
+      returns: "DataFrame (orders columns), sorted by order_id"
+    starter: |
+      import pandas as pd
+
+      def apply_updates(old, new):
+          return pd.concat([old, new]).sort_values("order_id")
+    solution: |
+      import pandas as pd
+
+      def apply_updates(old, new):
+          both = pd.concat([old, new], ignore_index=True)
+          return both.drop_duplicates(subset=["order_id"], keep="last").sort_values("order_id")
+    tests:
+      sample:
+        - args:
+            - { $frame: orders_a }
+            - columns: [order_id, customer, city, order_date, amount, status]
+              data:
+                - [3, Asha, Mumbai, "2024-01-20", 3000.0, delivered]
+                - [9, Tara, Pune, "2024-03-12", 640.0, delivered]
+      hidden:
+        - args:
+            - { $frame: orders_b }
+            - columns: [order_id, customer, city, order_date, amount, status]
+              data:
+                - [12, Arjun, Delhi, "2024-01-15", 4500.0, returned]
+                - [20, Rohit, Mumbai, "2024-04-01", 1750.0, delivered]
+                - [23, Dev, Pune, "2024-05-02", 90.0, delivered]
+    explanation: |
+      Stack old then new, so for a repeated id the newer row comes later, and keep the last occurrence. `old.set_index("order_id").combine_first(...)` or `update` also work but are fussier about columns.
+
+  - id: pd-delivered-rate-by-city
+    type: code
+    title: Delivery rate per city
+    difficulty: easy
+    tags: [pandas, groupby, crosstab]
+    prompt: |
+      Implement `delivered_rate(orders)`: for each city, the share of its orders whose status is `"delivered"`, as `{city: share}`.
+    function:
+      name: delivered_rate
+      params:
+        - { name: orders, type: dataframe }
+      returns: "dict {city: share}"
+    starter: |
+      import pandas as pd
+
+      def delivered_rate(orders):
+          return orders[orders["status"] == "delivered"].groupby("city").size().to_dict()
+    solution: |
+      import pandas as pd
+
+      def delivered_rate(orders):
+          return (orders["status"] == "delivered").groupby(orders["city"]).mean().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: orders_b }]
+    explanation: |
+      The mean of a boolean column is the share of Trues; grouping that boolean Series by city gives the rate per city, including cities where it's 0.
+
+  - id: pd-tag-counts
+    type: code
+    title: Count tags
+    difficulty: easy
+    tags: [pandas, explode]
+    prompt: |
+      Each post has a list of `tags`. Implement `tag_counts(posts)`: how many posts use each tag, as `{tag: count}`. Posts with no tags add nothing.
+    function:
+      name: tag_counts
+      params:
+        - { name: posts, type: dataframe }
+      returns: "dict {tag: count}"
+    starter: |
+      import pandas as pd
+
+      def tag_counts(posts):
+          return {"python": len(posts)}
+    solution: |
+      import pandas as pd
+
+      def tag_counts(posts):
+          return posts["tags"].explode().dropna().value_counts().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: posts_a }]
+      hidden:
+        - args: [{ $frame: posts_b }]
+    explanation: |
+      `explode` gives one row per tag; an empty list becomes a single NaN, which `dropna` removes before counting.

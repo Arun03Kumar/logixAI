@@ -1,0 +1,18 @@
+# The weekly contest: generated automatically every `everyDays` days from
+# `firstStart`, with questions drawn (deterministically per contest number)
+# from these pools of free, auto-graded items.
+weekly:
+  idPrefix: weekly
+  title: Weekly Arena
+  firstStart: "2026-11-01T10:00:00+05:30"
+  everyDays: 7
+  durationMin: 90
+  rules: |
+    - Four questions, 90 minutes. Join any time while the contest is live; the clock is the contest's, not yours.
+    - Points by difficulty: easy 3, medium 4, hard 5, expert 6. A question counts once it passes **Submit**.
+    - Ties are broken by penalty: minutes from the contest start to each solve, plus 5 minutes for every failed submit before it.
+    - Solutions stay hidden until the contest ends. Joining after it ends is a virtual contest: same questions and clock length, not ranked.
+  slots:
+    - { label: Warm-up, tracks: [sql-interview, pandas-interview, numpy-interview, frontend-interview], types: [code, sql], difficulty: [easy], count: 1 }
+    - { label: Medium, tracks: [sql-interview, pandas-interview, numpy-interview, pytorch-interview, frontend-interview, system-design, llm-agents], types: [code, debug, sql], difficulty: [medium], count: 2 }
+    - { label: Hard, tracks: [sql-interview, numpy-interview, pytorch-interview, frontend-interview, system-design], types: [code, sql], difficulty: [hard, expert], count: 1 }

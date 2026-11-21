@@ -1,0 +1,179 @@
+id: sql-interview-mixed
+title: Interview problems
+summary: Harder multi-step questions in the style of real interview rounds — medians, funnels, best-per-group with ties, recursion and month-over-month behaviour.
+prerequisites: [sql-dates-events]
+lesson: |
+  ## How to approach a hard SQL question
+
+  1. **Restate the grain.** "One row per city, with its best month" — say what a result row means before writing anything.
+  2. **Build in steps.** One CTE per step: daily totals → ranked → filtered. Check each step's output.
+  3. **Name the edge cases** out loud: ties, NULLs, customers with no rows, dates on month boundaries.
+  4. **Then optimise** if asked: indexes on join keys, filtering early, avoiding `SELECT DISTINCT` as a band-aid for a bad join.
+
+  ## Patterns you'll reuse
+
+  | Question | Pattern |
+  | --- | --- |
+  | Best X per group (with ties) | `RANK() OVER (PARTITION BY group ORDER BY metric DESC)` then `= 1` |
+  | Funnel step counts | `COUNT(DISTINCT CASE WHEN event = ... THEN user_id END)` per step |
+  | Month over month | aggregate per month, then `LAG` |
+  | Hierarchies (reports, categories) | `WITH RECURSIVE` |
+  | Median | `MEDIAN(x)` or `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x)` |
+
+  ## Recursive CTEs
+
+  A recursive CTE starts from some rows and repeatedly adds the rows connected to the last ones:
+
+  ```sql
+  WITH RECURSIVE chain AS (
+    SELECT id, manager_id FROM employees WHERE manager_id IS NOT NULL   -- start: each direct link
+    UNION ALL
+    SELECT c.id, e.manager_id                                            -- step: go one level up
+    FROM chain c JOIN employees e ON e.id = c.manager_id
+    WHERE e.manager_id IS NOT NULL
+  )
+  SELECT * FROM chain;   -- every (employee, someone above them) pair
+  ```
+items:
+  - id: sql-median-delivered
+    type: sql
+    title: Median delivered order
+    difficulty: medium
+    tags: [sql, median]
+    database: shop
+    prompt: |
+      Return the **median** amount of delivered orders as a single row with column `median_amount`. With an even number of orders, the median is the average of the two middle values.
+    starter: |
+      SELECT AVG(amount) AS median_amount
+      FROM orders
+      WHERE status = 'delivered';
+    solution: |
+      SELECT MEDIAN(amount) AS median_amount
+      FROM orders
+      WHERE status = 'delivered';
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      DuckDB has `MEDIAN`; in PostgreSQL write `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount)`. Without either, rank the rows with `ROW_NUMBER` and `COUNT(*) OVER ()` and average the middle one or two. The mean is pulled up by a few large orders; the median isn't.
+
+  - id: sql-signup-funnel
+    type: sql
+    title: Signup → login → purchase funnel
+    difficulty: medium
+    access: pro
+    tags: [sql, funnel, product-analytics]
+    database: app
+    prompt: |
+      Return one row with the number of distinct users who **signed up**, who **logged in** at least once, and who **purchased** at least once.
+
+      Columns: `signed_up`, `logged_in`, `purchased`.
+    starter: |
+      SELECT COUNT(*) AS signed_up, COUNT(*) AS logged_in, COUNT(*) AS purchased
+      FROM events;
+    solution: |
+      SELECT COUNT(DISTINCT CASE WHEN event = 'signup' THEN user_id END) AS signed_up,
+             COUNT(DISTINCT CASE WHEN event = 'login' THEN user_id END) AS logged_in,
+             COUNT(DISTINCT CASE WHEN event = 'purchase' THEN user_id END) AS purchased
+      FROM events;
+    tests: { sample: [small], hidden: [full] }
+    explanation: |
+      One pass over the events, with a conditional distinct count per step. Dividing consecutive steps gives conversion rates. (A strict funnel would also require the steps to happen in order; ask the interviewer which one they mean.)
+
+  - id: sql-best-month-per-city
+    type: sql
+    title: Best month for each city
+    difficulty: hard
+    access: pro
+    tags: [sql, window, rank, ties, dates]
+    database: shop
+    prompt: |
+      For each city (ignore customers without one), find the calendar month with the highest **delivered** revenue. If months tie, keep the earliest.
+
+      Columns: `city`, `month` (text like `2024-03`), `revenue`.
+    starter: |
+      SELECT c.city, MAX(strftime(o.order_date, '%Y-%m')) AS month, MAX(o.amount) AS revenue
+      FROM orders o
+      JOIN customers c ON c.id = o.customer_id
+      WHERE o.status = 'delivered' AND c.city IS NOT NULL
+      GROUP BY c.city;
+    solution: |
+      WITH monthly AS (
+        SELECT c.city, strftime(o.order_date, '%Y-%m') AS month, SUM(o.amount) AS revenue
+        FROM orders o
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.status = 'delivered' AND c.city IS NOT NULL
+        GROUP BY c.city, month
+      ),
+      ranked AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY city ORDER BY revenue DESC, month) AS rn
+        FROM monthly
+      )
+      SELECT city, month, revenue
+      FROM ranked
+      WHERE rn = 1;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Step 1 totals revenue per city and month. Step 2 ranks months within each city by revenue, earliest month first on ties. Step 3 keeps the top one. The starter mixes the latest month with the largest single order — values from different rows.
+
+  - id: sql-total-reports
+    type: sql
+    title: Everyone under each manager
+    difficulty: hard
+    access: pro
+    tags: [sql, recursive-cte, hierarchy]
+    database: hr
+    prompt: |
+      For each employee who manages anyone, count **all** the people below them — direct reports, their reports, and so on.
+
+      Columns: `name`, `reports`.
+    starter: |
+      SELECT m.name, COUNT(*) AS reports
+      FROM employees e
+      JOIN employees m ON m.id = e.manager_id
+      GROUP BY m.id, m.name;
+    solution: |
+      WITH RECURSIVE chain AS (
+        SELECT id AS employee_id, manager_id AS boss_id
+        FROM employees
+        WHERE manager_id IS NOT NULL
+        UNION ALL
+        SELECT c.employee_id, e.manager_id
+        FROM chain c
+        JOIN employees e ON e.id = c.boss_id
+        WHERE e.manager_id IS NOT NULL
+      )
+      SELECT m.name, COUNT(DISTINCT c.employee_id) AS reports
+      FROM chain c
+      JOIN employees m ON m.id = c.boss_id
+      GROUP BY m.id, m.name;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      The recursive CTE starts with every (employee, direct manager) pair and keeps climbing one level, producing (employee, anyone above them) pairs. Counting distinct employees per boss gives the whole tree under each manager. The starter counts direct reports only.
+
+  - id: sql-consecutive-month-buyers
+    type: sql
+    title: Bought in back-to-back months
+    difficulty: hard
+    tags: [sql, dates, self-join]
+    database: shop
+    prompt: |
+      Return the `id` and `name` of customers who placed orders (any status) in **two consecutive calendar months**, like February and March 2024. Each customer once.
+    starter: |
+      SELECT c.id, c.name
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.id, c.name
+      HAVING COUNT(*) >= 2;
+    solution: |
+      WITH months AS (
+        SELECT DISTINCT customer_id, date_trunc('month', order_date) AS m
+        FROM orders
+      )
+      SELECT DISTINCT c.id, c.name
+      FROM months a
+      JOIN months b ON b.customer_id = a.customer_id AND b.m = a.m + INTERVAL 1 MONTH
+      JOIN customers c ON c.id = a.customer_id;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - Two orders a month apart could be January 31st and February 1st — or January and March.
+    explanation: |
+      Reduce orders to distinct (customer, month start) pairs, then self-join each month to the next one. Comparing month starts handles year boundaries too. Two orders 30 days apart aren't enough: they can be in the same month, or skip one.

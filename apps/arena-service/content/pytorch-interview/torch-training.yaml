@@ -1,0 +1,451 @@
+id: torch-training
+title: Training loops and their bugs
+summary: The five-line training step, loss functions' expected inputs, gradient clipping, optimizers and learning-rate schedules from scratch, and the bugs that make loss refuse to fall.
+prerequisites: [torch-modules]
+lesson: |
+  ## The training step
+
+  ```python
+  model.train()
+  for X, y in loader:
+      optimizer.zero_grad()          # 1. clear last step's gradients
+      logits = model(X)              # 2. forward
+      loss = criterion(logits, y)    # 3. loss
+      loss.backward()                # 4. gradients
+      optimizer.step()               # 5. update
+  ```
+
+  And evaluation:
+
+  ```python
+  model.eval()
+  with torch.no_grad():
+      preds = model(X_val).argmax(dim=1)
+  ```
+
+  ## Loss functions take specific inputs
+
+  | Loss | Input | Target |
+  | --- | --- | --- |
+  | `nn.CrossEntropyLoss` | raw **logits** `(n, C)` (it applies log-softmax itself) | class indices `(n,)`, `long` |
+  | `nn.BCEWithLogitsLoss` | raw logits `(n,)` | 0/1 floats `(n,)` |
+  | `nn.MSELoss` | predictions | same shape as predictions |
+
+  Passing softmax outputs to `CrossEntropyLoss` applies softmax twice; it still runs, but gradients shrink and training slows. An `(n, 1)` prediction against an `(n,)` target in `MSELoss` broadcasts to `(n, n)` — a silent bug (PyTorch only warns).
+
+  ## When loss won't go down
+
+  1. **Overfit one small batch first.** If a model can't drive the loss to ~0 on 8 examples, the bug is in the code, not the data or the hyperparameters.
+  2. Check the step order: `zero_grad` → forward → `backward` → `step`.
+  3. Check the optimizer got `model.parameters()` (and that the layers are registered).
+  4. Check shapes and dtypes going into the loss.
+  5. Then tune the learning rate.
+
+  ## The optimizers, from scratch
+
+  - **SGD with momentum** (PyTorch's convention): $v \leftarrow \mu v + g$, $w \leftarrow w - \eta v$.
+  - **Adam**: $m \leftarrow \beta_1 m + (1-\beta_1) g$, $v \leftarrow \beta_2 v + (1-\beta_2) g^2$, then bias-correct $\hat m = m / (1-\beta_1^t)$, $\hat v = v/(1-\beta_2^t)$ and step $w \leftarrow w - \eta\, \hat m / (\sqrt{\hat v} + \epsilon)$.
+  - **Gradient clipping by global norm**: if $\|g\| = \sqrt{\sum_i \|g_i\|^2}$ over **all** parameters exceeds a maximum, scale every gradient by the same factor. That keeps the update's direction.
+items:
+  - id: train-ce-inputs
+    type: mcq_single
+    title: What CrossEntropyLoss expects
+    difficulty: easy
+    tags: [pytorch, loss, classification]
+    prompt: |
+      A classifier outputs `out` of shape `(32, 10)`. Which call is correct?
+    options:
+      - { id: a, text: "nn.CrossEntropyLoss()(out, y) with out = raw logits and y = class indices of shape (32,), dtype long" }
+      - { id: b, text: "nn.CrossEntropyLoss()(torch.softmax(out, dim=1), y)" }
+      - { id: c, text: "nn.CrossEntropyLoss()(out, y) with y one-hot of shape (32, 10), dtype long" }
+      - { id: d, text: "nn.CrossEntropyLoss()(out.argmax(dim=1).float(), y.float())" }
+    answer: a
+    explanation: |
+      `CrossEntropyLoss` combines log-softmax and negative log-likelihood, so it wants raw logits; applying softmax first squashes the gradients. Targets are class indices (`long`). It also accepts class **probabilities** as float targets of shape `(32, 10)`, but not a long one-hot. `argmax` has no gradient, so option d can't train at all.
+
+  - id: train-overfit-one-batch
+    type: mcq_single
+    title: Loss stuck — what first?
+    difficulty: easy
+    tags: [pytorch, debugging, training]
+    prompt: |
+      Your new model's training loss stays flat. What's the most useful first step?
+    options:
+      - { id: a, text: "Run a learning-rate sweep over 1e-5 to 1" }
+      - { id: b, text: "Try to overfit a single small batch: if the loss can't get near 0, the bug is in the code" }
+      - { id: c, text: "Add more data" }
+      - { id: d, text: "Switch to a bigger model" }
+    answer: b
+    explanation: |
+      Any working model and training loop can memorise 8 examples. Failing that points to a code bug — a missing `zero_grad` or `step`, unregistered parameters, wrong loss inputs, labels misaligned with inputs. Hyperparameter sweeps on a broken loop waste hours.
+
+  - id: train-fit-linear
+    type: code
+    title: Write the training loop
+    difficulty: easy
+    tags: [pytorch, training-loop, regression]
+    prompt: |
+      Implement `fit(X, y)`: create an `nn.Linear(X.shape[1], 1)`, train it with `MSELoss` and an optimizer of your choice until it fits, and return the trained model. `X` is `(n, d)`, `y` is `(n,)`. The test checks the mean squared error of `model(X)` against `y` is below 0.01 (the data is close to linear). Keep it to about 1,000 steps or fewer: each test has a few seconds.
+    driver: |
+      import torch
+
+      def check(X, y):
+          torch.manual_seed(0)
+          model = fit(X, y)
+          with torch.no_grad():
+              mse = torch.mean((model(X).reshape(-1) - y) ** 2).item()
+          return {"returns_a_module": isinstance(model, torch.nn.Module), "mse_below_0_01": mse < 0.01}
+    function:
+      name: check
+      params:
+        - { name: X, type: tensor }
+        - { name: y, type: tensor }
+      returns: "two checks, both true"
+    starter: |
+      import torch
+      from torch import nn
+
+      def fit(X, y):
+          model = nn.Linear(X.shape[1], 1)
+          optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+          criterion = nn.MSELoss()
+          # TODO: the training loop
+          return model
+    solution: |
+      import torch
+      from torch import nn
+
+      def fit(X, y):
+          model = nn.Linear(X.shape[1], 1)
+          optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
+          criterion = nn.MSELoss()
+          target = y.reshape(-1, 1)
+          for _ in range(1000):
+              optimizer.zero_grad()
+              loss = criterion(model(X), target)
+              loss.backward()
+              optimizer.step()
+          return model
+    tests:
+      sample:
+        - args:
+            - [[0.0, 1.0], [1.0, 0.0], [1.0, 1.0], [2.0, 1.0], [0.5, -1.0], [-1.0, 2.0], [3.0, 0.5], [-2.0, -1.0]]
+            - [-2.0, 3.0, 0.0, 2.0, 5.0, -7.0, 5.5, 0.0]
+      generate: |
+        def cases(rng):
+            X = rng.normal(size=(64, 3))
+            y = X @ np.array([1.5, -2.0, 0.5]) + 0.3 + rng.normal(size=64) * 0.05
+            return [[X, y]]
+    hints:
+      - "`MSELoss` on an `(n, 1)` prediction and an `(n,)` target broadcasts to `(n, n)`. Reshape the target to `(n, 1)`."
+    explanation: |
+      Zero the gradients, forward, loss, backward, step — repeated. Two traps: the target must have the prediction's shape (otherwise `MSELoss` broadcasts `(n, 1)` against `(n,)` into an `(n, n)` matrix and fits the mean instead), and too high a learning rate with SGD diverges on unscaled data; Adam is more forgiving.
+
+  - id: train-missing-zero-grad
+    type: debug
+    title: The loss that won't settle
+    difficulty: medium
+    tags: [pytorch, training-loop, debugging]
+    prompt: |
+      This training loop runs without errors, but the model ends up badly fitted. Find and fix the bug. The test checks the final mean squared error is below 0.01.
+    driver: |
+      import torch
+
+      def check(X, y):
+          torch.manual_seed(0)
+          model = fit(X, y)
+          with torch.no_grad():
+              mse = torch.mean((model(X).reshape(-1) - y) ** 2).item()
+          return {"mse_below_0_01": mse < 0.01}
+    function:
+      name: check
+      params:
+        - { name: X, type: tensor }
+        - { name: y, type: tensor }
+      returns: "true once fixed"
+    starter: |
+      import torch
+      from torch import nn
+
+      def fit(X, y):
+          model = nn.Linear(X.shape[1], 1)
+          optimizer = torch.optim.SGD(model.parameters(), lr=0.05)
+          criterion = nn.MSELoss()
+          target = y.reshape(-1, 1)
+          for step in range(300):
+              loss = criterion(model(X), target)
+              loss.backward()
+              optimizer.step()
+          return model
+    solution: |
+      import torch
+      from torch import nn
+
+      def fit(X, y):
+          model = nn.Linear(X.shape[1], 1)
+          optimizer = torch.optim.SGD(model.parameters(), lr=0.05)
+          criterion = nn.MSELoss()
+          target = y.reshape(-1, 1)
+          for step in range(300):
+              optimizer.zero_grad()
+              loss = criterion(model(X), target)
+              loss.backward()
+              optimizer.step()
+          return model
+    tests:
+      sample:
+        - args:
+            - [[0.0, 1.0], [1.0, 0.0], [1.0, 1.0], [2.0, 1.0], [0.5, -1.0], [-1.0, 2.0], [3.0, 0.5], [-2.0, -1.0]]
+            - [-2.0, 3.0, 0.0, 2.0, 5.0, -7.0, 5.5, 0.0]
+      generate: |
+        def cases(rng):
+            X = rng.normal(size=(64, 3))
+            y = X @ np.array([1.5, -2.0, 0.5]) + 0.3 + rng.normal(size=64) * 0.05
+            return [[X, y]]
+    hints:
+      - "What happens to `.grad` between one `backward()` and the next?"
+    explanation: |
+      Without `optimizer.zero_grad()`, each `backward()` adds to the previous gradients, so step $t$ uses the **sum** of all gradients so far. The weights overshoot and oscillate instead of settling. Call `zero_grad()` at the start of every step.
+
+  - id: train-predict-eval
+    type: debug
+    title: Predictions that change every call
+    difficulty: medium
+    access: pro
+    tags: [pytorch, train-eval, no-grad, debugging]
+    prompt: |
+      `predict(model, X)` should return the model's class predictions for `X`. Called twice on the same input it gives different answers, and it runs the model with gradient tracking on. Fix it so predictions are deterministic, computed without tracking gradients, and the model is left in **training** mode afterwards (the caller is mid-training).
+    driver: |
+      import torch
+      from torch import nn
+
+      def check(X, seed):
+          torch.manual_seed(seed)
+          model = nn.Sequential(nn.Linear(X.shape[1], 16), nn.ReLU(), nn.Dropout(0.5), nn.Linear(16, 3))
+          grad_tracking = []
+          model[-1].register_forward_hook(lambda module, inputs, output: grad_tracking.append(torch.is_grad_enabled()))
+          model.train()
+          first = predict(model, X)
+          second = predict(model, X)
+          return {
+              "predictions": first,
+              "same_every_call": bool(torch.equal(first, second)),
+              "ran_without_gradient_tracking": not any(grad_tracking),
+              "back_in_training_mode": model.training,
+          }
+    function:
+      name: check
+      params:
+        - { name: X, type: tensor }
+        - { name: seed, type: int }
+      returns: "the predictions and three checks"
+    starter: |
+      import torch
+
+      def predict(model, X):
+          logits = model(X)
+          return logits.argmax(dim=1)
+    solution: |
+      import torch
+
+      def predict(model, X):
+          was_training = model.training
+          model.eval()
+          with torch.no_grad():
+              logits = model(X)
+          model.train(was_training)
+          return logits.argmax(dim=1)
+    tests:
+      sample:
+        - args: [[[1.0, 0.0, -1.0], [0.5, 2.0, 0.0], [-1.0, -1.0, 1.0], [2.0, 1.0, 0.5]], 0]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(10, 3)), 7]]
+    explanation: |
+      In training mode Dropout zeroes random activations, so each call gives different predictions; `model.eval()` turns it off. `torch.no_grad()` stops recording the graph, saving memory and time (argmax's output has no gradient anyway, but the logits did). Restoring the previous mode matters when evaluation happens in the middle of training — forgetting `model.train()` afterwards silently trains the rest of the epoch without dropout.
+
+  - id: train-clip-global-norm
+    type: code
+    title: Gradient clipping by global norm
+    difficulty: medium
+    tags: [pytorch, optimization, gradients]
+    prompt: |
+      Implement `clip_by_global_norm(g1, g2, max_norm)` for a model with two parameter tensors whose gradients are `g1` and `g2` (any shapes). Compute the **global** norm $\sqrt{\|g_1\|^2 + \|g_2\|^2}$. If it's larger than `max_norm`, scale **both** gradients by `max_norm / (norm + 1e-6)`; otherwise return them unchanged. Return `[g1, g2]`.
+    function:
+      name: clip_by_global_norm
+      params:
+        - { name: g1, type: tensor }
+        - { name: g2, type: tensor }
+        - { name: max_norm, type: float }
+      returns: "[tensor, tensor]"
+    starter: |
+      import torch
+
+      def clip_by_global_norm(g1, g2, max_norm):
+          out = []
+          for g in (g1, g2):
+              norm = g.norm()
+              out.append(g * (max_norm / (norm + 1e-6)) if norm > max_norm else g)
+          return out
+    solution: |
+      import torch
+
+      def clip_by_global_norm(g1, g2, max_norm):
+          total = torch.sqrt(g1.pow(2).sum() + g2.pow(2).sum())
+          if total > max_norm:
+              scale = max_norm / (total + 1e-6)
+              return [g1 * scale, g2 * scale]
+          return [g1, g2]
+    tests:
+      sample:
+        - args: [[3.0, 4.0], [[0.0, 12.0]], 6.5]
+      hidden:
+        - args: [[0.1, 0.1], [[0.1]], 5.0]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(3, 4)) * 2, rng.normal(size=5), 3.0], [rng.normal(size=6), rng.normal(size=(2, 2)) * 5, 4.0]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      Clipping each tensor on its own changes the direction of the overall update, because tensors get scaled by different factors. The global norm treats all gradients as one long vector and scales them together, keeping the direction and only shortening the step. That's `torch.nn.utils.clip_grad_norm_`, standard in transformer and RNN training.
+
+  - id: train-sgd-momentum
+    type: code
+    title: SGD with momentum, one step
+    difficulty: easy
+    tags: [pytorch, optimization, optimizers]
+    prompt: |
+      Implement one step of SGD with momentum in **PyTorch's convention**: $v \leftarrow \mu v + g$, then $w \leftarrow w - \eta v$. Return `[w_new, v_new]`.
+    function:
+      name: sgd_momentum_step
+      params:
+        - { name: w, type: tensor }
+        - { name: g, type: tensor }
+        - { name: v, type: tensor }
+        - { name: lr, type: float }
+        - { name: mu, type: float }
+      returns: "[w_new, v_new]"
+    starter: |
+      import torch
+
+      def sgd_momentum_step(w, g, v, lr, mu):
+          v = mu * v + lr * g
+          w = w - v
+          return [w, v]
+    solution: |
+      import torch
+
+      def sgd_momentum_step(w, g, v, lr, mu):
+          v = mu * v + g
+          w = w - lr * v
+          return [w, v]
+    tests:
+      sample:
+        - args: [[1.0, 2.0], [0.5, -1.0], [0.2, 0.0], 0.1, 0.9]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=5), rng.normal(size=5), rng.normal(size=5), 0.05, 0.9]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      Two conventions exist. Sutskever's folds the learning rate into the velocity ($v \leftarrow \mu v + \eta g$, $w \leftarrow w - v$); PyTorch keeps it out ($v \leftarrow \mu v + g$, $w \leftarrow w - \eta v$). With a constant learning rate they produce the same weights, but the stored velocity differs by a factor of $\eta$, and they diverge once a scheduler changes $\eta$.
+
+  - id: train-adam-step
+    type: code
+    title: Adam, one step
+    difficulty: hard
+    access: pro
+    tags: [pytorch, optimization, optimizers, adam]
+    prompt: |
+      Implement one Adam update. `t` is the step number, starting at 1. Return `[w_new, m_new, v_new]`:
+
+      $$m \leftarrow \beta_1 m + (1-\beta_1) g, \qquad v \leftarrow \beta_2 v + (1-\beta_2) g^2$$
+      $$\hat m = \frac{m}{1-\beta_1^t}, \quad \hat v = \frac{v}{1-\beta_2^t}, \qquad w \leftarrow w - \eta \frac{\hat m}{\sqrt{\hat v} + \epsilon}$$
+    function:
+      name: adam_step
+      params:
+        - { name: w, type: tensor }
+        - { name: g, type: tensor }
+        - { name: m, type: tensor }
+        - { name: v, type: tensor }
+        - { name: t, type: int }
+        - { name: lr, type: float }
+        - { name: beta1, type: float }
+        - { name: beta2, type: float }
+        - { name: eps, type: float }
+      returns: "[w_new, m_new, v_new]"
+    starter: |
+      import torch
+
+      def adam_step(w, g, m, v, t, lr, beta1, beta2, eps):
+          m = beta1 * m + (1 - beta1) * g
+          v = beta2 * v + (1 - beta2) * g * g
+          w = w - lr * m / (torch.sqrt(v) + eps)
+          return [w, m, v]
+    solution: |
+      import torch
+
+      def adam_step(w, g, m, v, t, lr, beta1, beta2, eps):
+          m = beta1 * m + (1 - beta1) * g
+          v = beta2 * v + (1 - beta2) * g * g
+          m_hat = m / (1 - beta1 ** t)
+          v_hat = v / (1 - beta2 ** t)
+          w = w - lr * m_hat / (torch.sqrt(v_hat) + eps)
+          return [w, m, v]
+    tests:
+      sample:
+        - args: [[1.0, -1.0], [0.5, 0.2], [0.0, 0.0], [0.0, 0.0], 1, 0.1, 0.9, 0.999, 1.0e-8]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=4), rng.normal(size=4), rng.normal(size=4) * 0.1, rng.uniform(0, 0.1, size=4), 5, 0.01, 0.9, 0.999, 1.0e-8]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "At step 1, $m$ and $v$ start at 0, so they're tiny. What corrects for that?"
+    explanation: |
+      $m$ and $v$ start at zero, so early on they underestimate the true averages — at step 1, $m = 0.1 g$. Dividing by $1 - \beta^t$ removes that bias, so the first step has size about $\eta$ in every coordinate. Without it, early steps are badly scaled (the first update is $0.1 g / \sqrt{0.001 g^2} \approx 3.2$ times too large). The returned $m$ and $v$ are the uncorrected running averages.
+
+  - id: train-warmup-cosine
+    type: code
+    title: Warmup plus cosine schedule
+    difficulty: medium
+    tags: [optimization, learning-rate, transformers]
+    prompt: |
+      Implement `lr_schedule(steps, base_lr, warmup, total)`: for each step number in `steps` (0-based), return the learning rate:
+
+      - during warmup (`step < warmup`): rises linearly, $\text{base} \cdot \frac{\text{step} + 1}{\text{warmup}}$;
+      - after warmup: cosine decay from `base_lr` to 0 at step `total`: $\text{base} \cdot \tfrac12\left(1 + \cos\left(\pi \frac{\text{step} - \text{warmup}}{\text{total} - \text{warmup}}\right)\right)$;
+      - at or beyond `total`: 0.
+
+      Return a list of floats.
+    function:
+      name: lr_schedule
+      params:
+        - { name: steps, type: list }
+        - { name: base_lr, type: float }
+        - { name: warmup, type: int }
+        - { name: total, type: int }
+      returns: "list of floats"
+    starter: |
+      import math
+
+      def lr_schedule(steps, base_lr, warmup, total):
+          return [base_lr * 0.5 * (1 + math.cos(math.pi * s / total)) for s in steps]
+    solution: |
+      import math
+
+      def lr_schedule(steps, base_lr, warmup, total):
+          out = []
+          for s in steps:
+              if s < warmup:
+                  out.append(base_lr * (s + 1) / warmup)
+              elif s >= total:
+                  out.append(0.0)
+              else:
+                  progress = (s - warmup) / (total - warmup)
+                  out.append(base_lr * 0.5 * (1 + math.cos(math.pi * progress)))
+          return out
+    tests:
+      sample:
+        - args: [[0, 1, 4, 5, 10, 15, 20], 0.001, 5, 20]
+      hidden:
+        - args: [[0, 99, 100, 550, 1000, 1200], 0.0003, 100, 1000]
+    explanation: |
+      Warmup avoids huge, badly-directed updates while Adam's statistics are still noisy and the weights are random — transformers often diverge without it. Cosine decay then lowers the rate smoothly, spending more time at small rates near the end, which helps the final loss.

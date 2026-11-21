@@ -1,0 +1,226 @@
+id: sql-aggregation
+title: Aggregation and GROUP BY
+summary: COUNT, SUM, AVG, GROUP BY and HAVING — turning rows into answers like "revenue per city".
+prerequisites: [sql-joins]
+lesson: |
+  ## One row per group
+
+  `GROUP BY` collapses rows that share a value into one row per group; aggregate functions summarise each group:
+
+  ```sql
+  SELECT customer_id, COUNT(*) AS orders, SUM(amount) AS total
+  FROM orders
+  GROUP BY customer_id;
+  ```
+
+  Every column in `SELECT` must either be in `GROUP BY` or inside an aggregate — otherwise the database wouldn't know which row's value to show.
+
+  ## COUNT variations
+
+  | Expression | Counts |
+  | --- | --- |
+  | `COUNT(*)` | rows |
+  | `COUNT(col)` | rows where `col` is not NULL |
+  | `COUNT(DISTINCT col)` | different non-NULL values |
+
+  `SUM`, `AVG`, `MIN` and `MAX` also skip NULLs. `AVG` of 10, NULL and 20 is 15, not 10.
+
+  ## WHERE vs HAVING
+
+  `WHERE` filters **rows before** grouping; `HAVING` filters **groups after** aggregating. "Customers with at least 2 delivered orders" needs both: `WHERE status = 'delivered'` then `HAVING COUNT(*) >= 2`.
+
+  ## Conditional aggregation
+
+  `SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END)` counts matching rows inside each group without filtering the others away — the trick behind rates and pivots. `AVG(CASE ... THEN 1.0 ELSE 0 END)` gives the share directly.
+items:
+  - id: sql-orders-per-customer
+    type: sql
+    title: Orders and spend per customer
+    difficulty: easy
+    tags: [sql, group-by, count, sum]
+    database: shop
+    prompt: |
+      For each customer who has placed orders, return `customer_id`, the number of orders as `orders` and the total `amount` as `total` (all statuses count).
+    starter: |
+      SELECT customer_id, COUNT(*) AS orders, amount AS total
+      FROM orders;
+    solution: |
+      SELECT customer_id, COUNT(*) AS orders, SUM(amount) AS total
+      FROM orders
+      GROUP BY customer_id;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `GROUP BY customer_id` makes one row per customer; `COUNT(*)` counts their orders and `SUM(amount)` adds them up.
+
+  - id: sql-revenue-by-city
+    type: sql
+    title: Delivered revenue by city
+    difficulty: medium
+    tags: [sql, group-by, join]
+    database: shop
+    prompt: |
+      Total the `amount` of **delivered** orders per customer city. Return `city` and `revenue`; leave out cities with no delivered orders. A customer with no city counts under city NULL.
+    starter: |
+      SELECT c.city, SUM(o.amount) AS revenue
+      FROM orders o
+      JOIN customers c ON c.id = o.customer_id
+      GROUP BY c.city;
+    solution: |
+      SELECT c.city, SUM(o.amount) AS revenue
+      FROM orders o
+      JOIN customers c ON c.id = o.customer_id
+      WHERE o.status = 'delivered'
+      GROUP BY c.city;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Filter rows first (`WHERE status = 'delivered'`), then group by city. Joining from `orders` means cities without delivered orders never appear. `GROUP BY` puts all NULL cities in one group.
+
+  - id: sql-repeat-buyers
+    type: sql
+    title: Customers with two or more deliveries
+    difficulty: medium
+    tags: [sql, having]
+    database: shop
+    prompt: |
+      Return the `id` and `name` of customers with **at least two delivered** orders.
+    starter: |
+      SELECT c.id, c.name
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      WHERE o.status = 'delivered';
+    solution: |
+      SELECT c.id, c.name
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      WHERE o.status = 'delivered'
+      GROUP BY c.id, c.name
+      HAVING COUNT(*) >= 2;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - "`WHERE` can't use `COUNT`; that's what `HAVING` is for."
+    explanation: |
+      `WHERE` keeps only delivered orders, `GROUP BY` makes one row per customer, and `HAVING COUNT(*) >= 2` keeps the groups with two or more rows. Group by the id too: the edge data has two different customers named Ravi.
+
+  - id: sql-avg-salary-by-dept
+    type: sql
+    title: Average salary per department
+    difficulty: medium
+    tags: [sql, group-by, avg, round]
+    database: hr
+    prompt: |
+      Return each department's `name` and the average salary of its employees as `avg_salary`, **rounded to 2 decimals**. Only departments with employees.
+    starter: |
+      SELECT d.name, AVG(e.salary) AS avg_salary
+      FROM departments d
+      JOIN employees e ON e.dept_id = d.id;
+    solution: |
+      SELECT d.name, ROUND(AVG(e.salary), 2) AS avg_salary
+      FROM departments d
+      JOIN employees e ON e.dept_id = d.id
+      GROUP BY d.id, d.name;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Join to get each employee's department, group, then `ROUND(AVG(salary), 2)`. Employees without a department (the edge data has one) drop out of the inner join.
+
+  - id: sql-units-per-category
+    type: sql
+    title: Units sold per category
+    difficulty: easy
+    tags: [sql, group-by, join]
+    database: shop
+    prompt: |
+      Total the `quantity` sold per product `category` across all orders. Columns: `category`, `units`. Only categories that sold something.
+    starter: |
+      SELECT category, COUNT(*) AS units
+      FROM products
+      GROUP BY category;
+    solution: |
+      SELECT p.category, SUM(oi.quantity) AS units
+      FROM order_items oi
+      JOIN products p ON p.id = oi.product_id
+      GROUP BY p.category;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      The quantities live in `order_items` and the category in `products`, so join them and `SUM(quantity)` per category. `COUNT(*)` would count line items, not units.
+
+  - id: sql-cancel-rate
+    type: sql
+    title: Cancellation rate per customer
+    difficulty: medium
+    tags: [sql, conditional-aggregation, case]
+    database: shop
+    prompt: |
+      For each customer with orders, return `customer_id` and the share of their orders that were **cancelled** as `cancel_rate` — a number between 0 and 1, rounded to 2 decimals.
+    starter: |
+      SELECT customer_id, COUNT(*) AS cancel_rate
+      FROM orders
+      WHERE status = 'cancelled'
+      GROUP BY customer_id;
+    solution: |
+      SELECT customer_id,
+             ROUND(AVG(CASE WHEN status = 'cancelled' THEN 1.0 ELSE 0 END), 2) AS cancel_rate
+      FROM orders
+      GROUP BY customer_id;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - Filtering to cancelled orders loses the denominator. Can you count cancellations without filtering?
+    explanation: |
+      Averaging a 1/0 flag gives the share of rows where the flag is 1. Filtering with `WHERE status = 'cancelled'` would drop customers with no cancellations (who should get 0) and lose the total number of orders.
+
+  - id: sql-largest-order-each
+    type: sql
+    title: Each customer's largest order
+    difficulty: easy
+    tags: [sql, max, join]
+    database: shop
+    prompt: |
+      Return each customer's `name` and the amount of their largest order as `largest`, for customers with orders.
+    starter: |
+      SELECT c.name, MAX(o.amount) AS largest
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.name;
+    solution: |
+      SELECT c.name, MAX(o.amount) AS largest
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.id, c.name;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `MAX(amount)` per customer. Grouping by name alone merges different customers who share a name — the hidden data has two Ashas (and two Ravis) — so group by the id as well.
+
+  - id: sql-count-null-mcq
+    type: mcq_single
+    title: COUNT and NULLs
+    difficulty: easy
+    tags: [sql, count, nulls]
+    prompt: |
+      A table has 5 rows; its `bonus` column holds `100, NULL, 100, NULL, 300`. What does this return?
+
+      ```sql
+      SELECT COUNT(*), COUNT(bonus), COUNT(DISTINCT bonus), AVG(bonus) FROM t;
+      ```
+    options:
+      - { id: a, text: "5, 3, 2, 166.67" }
+      - { id: b, text: "5, 5, 3, 100" }
+      - { id: c, text: "5, 3, 3, 100" }
+      - { id: d, text: "3, 3, 2, 166.67" }
+    answer: a
+    explanation: |
+      `COUNT(*)` counts all 5 rows, `COUNT(bonus)` the 3 non-NULL ones, `COUNT(DISTINCT bonus)` the 2 different values (100 and 300). `AVG` skips NULLs: (100 + 100 + 300) / 3 = 166.67.
+
+  - id: sql-where-having-mcq
+    type: mcq_multi
+    title: WHERE or HAVING?
+    difficulty: easy
+    tags: [sql, having]
+    prompt: |
+      Which of these conditions must go in `HAVING` (not `WHERE`) in a query that groups orders by customer? Pick all that apply.
+    options:
+      - { id: a, text: "status = 'delivered'" }
+      - { id: b, text: "COUNT(*) > 3" }
+      - { id: c, text: "SUM(amount) >= 10000" }
+      - { id: d, text: "order_date >= '2024-01-01'" }
+    answer: [b, c]
+    explanation: |
+      Conditions on aggregates (`COUNT`, `SUM`) can only be checked after grouping, so they go in `HAVING`. Conditions on individual rows (status, date) belong in `WHERE`, which is also faster: fewer rows reach the grouping step.

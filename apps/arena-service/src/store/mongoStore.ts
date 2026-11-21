@@ -1,6 +1,7 @@
 import mongoose, { Schema, Types } from "mongoose";
 import { AUDIT_ACTIONS, type AuditEvent } from "@logixai/contracts";
 import { decodeCursor, toPage } from "@logixai/service-kit";
+import { createPracticeMongoStore } from "./practiceMongo.js";
 import type { AssignmentRecord, ProgressRecord, StatsRecord, Store, SubmissionRecord } from "./types.js";
 
 const progressSchema = new Schema(
@@ -119,6 +120,7 @@ const isId = (v: unknown): v is string => typeof v === "string" && Types.ObjectI
 
 export function createMongoStore(): Store {
   return {
+    ...createPracticeMongoStore(),
     progress: {
       get: async (userId, itemId) => strip(await Progress.findOne({ userId, itemId }).lean<Lean<ProgressRecord>>()),
       listForUser: async (userId) =>

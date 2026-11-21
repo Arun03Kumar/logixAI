@@ -7,6 +7,8 @@ export const ITEM_TYPE = {
   output: "Predict the output",
   code: "Code",
   debug: "Debug",
+  sql: "SQL",
+  design: "Design",
 };
 
 export const TRACK_LEVEL = {
@@ -15,7 +17,7 @@ export const TRACK_LEVEL = {
   interview: { label: "Interview", tone: "warning" },
 };
 
-export const isCodeItem = (type) => type === "code" || type === "debug";
+export const isCodeItem = (type) => type === "code" || type === "debug" || type === "sql";
 
 export const pct = (fraction) => `${Math.round((fraction ?? 0) * 100)}%`;
 

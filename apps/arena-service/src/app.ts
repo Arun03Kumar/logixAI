@@ -1,9 +1,19 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import { AnswerInputSchema, AssignTrackSchema, CodeRunInputSchema, PageQuerySchema, hasPro } from "@logixai/contracts";
+import {
+  AnswerInputSchema,
+  AssignTrackSchema,
+  CodeRunInputSchema,
+  ProfileInputSchema,
+  StartMockSchema,
+  PageQuerySchema,
+  ProblemQuerySchema,
+  hasPro,
+} from "@logixai/contracts";
 import {
   BadRequestError,
+  ConflictError,
   UnauthorizedError,
   errorResponse,
   successResponse,
@@ -14,6 +24,7 @@ import type { Catalog } from "./content/catalog.js";
 import type { IdentityClient } from "./lib/identity.js";
 import { ArenaService, type JudgeGateway } from "./services/arenaService.js";
 import { InstitutionArenaService, type Caller } from "./services/institutionService.js";
+import { PracticeService, type Viewer } from "./services/practiceService.js";
 import type { Store } from "./store/types.js";
 
 export interface AppOptions {
@@ -33,6 +44,8 @@ declare module "fastify" {
     userId: string | null;
     /** Pro right now, from the access token. */
     pro: boolean;
+    /** Display name from the access token. */
+    userName: string;
   }
 }
 
@@ -44,11 +57,17 @@ function parse<S extends z.ZodType>(schema: S, body: unknown, name: string): z.i
 
 export async function buildApp(options: AppOptions): Promise<{ app: FastifyInstance; arena: ArenaService }> {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 256 * 1024, trustProxy: true });
+  const practice = new PracticeService({
+    catalog: options.catalog,
+    store: options.store,
+    ...(options.now ? { now: options.now } : {}),
+  });
   const arena = new ArenaService({
     catalog: options.catalog,
     store: options.store,
     judge: options.judge,
     ...(options.now ? { now: options.now } : {}),
+    onOutcome: (userId, itemId, event, at) => practice.onOutcome(userId, itemId, event, at),
   });
   const institutions = new InstitutionArenaService({
     catalog: options.catalog,
@@ -74,16 +93,22 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   // Browsing works signed out; a token, when sent, must be valid.
   app.decorateRequest("userId", null);
   app.decorateRequest("pro", false);
+  app.decorateRequest("userName", "");
   app.addHook("onRequest", async (request) => {
     if (!request.headers.authorization) return;
     const claims = await options.verifier.verifyHeader(request.headers.authorization);
     request.userId = claims.sub;
     request.pro = hasPro(claims, (options.now?.() ?? new Date()).getTime());
+    request.userName = typeof claims.name === "string" ? claims.name : "";
   });
   const user = (request: FastifyRequest) => {
     if (!request.userId) throw new UnauthorizedError();
     return request.userId;
   };
+  const viewer = (request: FastifyRequest): Viewer => ({ userId: user(request), name: request.userName, pro: request.pro });
+  /** Pro, or an open contest entry that includes this item (contests are free for everyone). */
+  const access = async (request: FastifyRequest, itemId: string) =>
+    request.pro || (request.userId ? await practice.unlocks(request.userId, itemId) : false);
   /** Signed-in caller plus their token, forwarded to identity-service. */
   const caller = (request: FastifyRequest): Caller => ({
     userId: user(request),
@@ -105,16 +130,24 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     ok(await arena.getTopic(req.userId, req.params.topicId)),
   );
   app.get<P<{ itemId: string }>>(`${base}/items/:itemId`, async (req) =>
-    ok(await arena.getItem(req.userId, req.params.itemId, req.pro)),
+    ok(await arena.getItem(req.userId, req.params.itemId, await access(req, req.params.itemId))),
   );
+  // ?q=&type=&difficulty=&status=&track=&tag=&list=&access=
+  app.get(`${base}/problems`, async (req) =>
+    ok(await arena.problems(req.userId, parse(ProblemQuerySchema, req.query, "query"))),
+  );
+  app.get(`${base}/lists`, async (req) => ok(await arena.lists(req.userId)));
 
   /* ── Practice (signed in) ── */
   app.post<P<{ itemId: string }>>(`${base}/items/:itemId/answer`, async (req) =>
-    ok(await arena.answer(user(req), req.params.itemId, parse(AnswerInputSchema, req.body, "answer"), req.pro)),
+    ok(await arena.answer(user(req), req.params.itemId, parse(AnswerInputSchema, req.body, "answer"), await access(req, req.params.itemId))),
   );
-  app.post<P<{ itemId: string }>>(`${base}/items/:itemId/reveal`, async (req) =>
-    ok(await arena.reveal(user(req), req.params.itemId, req.pro)),
-  );
+  app.post<P<{ itemId: string }>>(`${base}/items/:itemId/reveal`, async (req) => {
+    if (await practice.inOpenSession(user(req), req.params.itemId)) {
+      throw new ConflictError("Solutions stay hidden during a mock interview or contest. End it to see them.");
+    }
+    return ok(await arena.reveal(user(req), req.params.itemId, await access(req, req.params.itemId)));
+  });
   app.post<P<{ itemId: string }>>(
     `${base}/items/:itemId/code`,
     {
@@ -129,7 +162,7 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
     async (req, reply) =>
       reply
         .status(202)
-        .send(ok(await arena.runCode(user(req), req.params.itemId, parse(CodeRunInputSchema, req.body, "code"), req.pro))),
+        .send(ok(await arena.runCode(user(req), req.params.itemId, parse(CodeRunInputSchema, req.body, "code"), await access(req, req.params.itemId)))),
   );
   app.get(`${base}/submissions`, async (req) =>
     ok(
@@ -147,6 +180,21 @@ export async function buildApp(options: AppOptions): Promise<{ app: FastifyInsta
   app.get(`${base}/me/assignments`, async (req) => ok(await institutions.mine(caller(req))));
   // Signed out: the map with no progress.
   app.get(`${base}/skill-map`, async (req) => ok(await arena.skillMap(req.userId)));
+
+  /* ── Mock interviews, contests, profiles ── */
+  app.get(`${base}/mocks`, async (req) => ok(await practice.mockHub(viewer(req))));
+  app.post(`${base}/mocks`, async (req, reply) =>
+    reply.status(201).send(ok(await practice.startMock(viewer(req), parse(StartMockSchema, req.body, "mock").templateId))),
+  );
+  app.get<P<{ id: string }>>(`${base}/sessions/:id`, async (req) => ok(await practice.getSession(user(req), req.params.id)));
+  app.post<P<{ id: string }>>(`${base}/sessions/:id/finish`, async (req) => ok(await practice.finishSession(user(req), req.params.id)));
+  app.get(`${base}/contests`, async () => ok(await practice.listContests()));
+  app.get<P<{ id: string }>>(`${base}/contests/:id`, async (req) => ok(await practice.getContest(req.userId, req.params.id)));
+  app.post<P<{ id: string }>>(`${base}/contests/:id/join`, async (req) => ok(await practice.joinContest(viewer(req), req.params.id)));
+  app.get(`${base}/me/profile`, async (req) => ok(await practice.myProfile(viewer(req))));
+  app.post(`${base}/me/profile`, async (req) => ok(await practice.saveProfile(viewer(req), parse(ProfileInputSchema, req.body, "profile"))));
+  // Public: no sign-in needed; private profiles 404.
+  app.get<P<{ handle: string }>>(`${base}/profiles/:handle`, async (req) => ok(await practice.publicProfile(req.params.handle)));
 
   /* ── Institutions ── */
   type Inst = { institutionId: string };

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { decodeCursor, encodeCursor } from "@logixai/service-kit";
 import type { AuditEvent } from "@logixai/contracts";
+import { createPracticeMemoryStore } from "./practiceMemory.js";
 import type { AssignmentRecord, ProgressRecord, StatsRecord, Store, SubmissionRecord } from "./types.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -15,6 +16,7 @@ export function createMemoryStore(): Store {
   const key = (u: string, i: string) => `${u}|${i}`;
 
   return {
+    ...createPracticeMemoryStore(),
     progress: {
       get: async (u, i) => (progress.has(key(u, i)) ? clone(progress.get(key(u, i))!) : null),
       listForUser: async (u) => [...progress.values()].filter((p) => p.userId === u).map(clone),

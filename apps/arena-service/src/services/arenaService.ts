@@ -18,14 +18,20 @@ import {
   type ItemStatus,
   type ItemSummary,
   type ItemView,
+  type ProblemList,
+  type ProblemListSummary,
+  type ProblemQuery,
+  type ProblemRow,
+  type TablePreview,
   type TopicDetail,
   type TopicSummary,
   type TrackDetail,
   type TrackSummary,
 } from "@logixai/contracts";
 import { BadRequestError, ConflictError, ForbiddenError, InternalServerError, NotFoundError } from "@logixai/service-kit";
-import type { Catalog, CatalogItem, CatalogTopic, CatalogTrack } from "../content/catalog.js";
-import { buildJudgeProgram, formatCall } from "../content/harness.js";
+import { jsHarnessFor, type Catalog, type CatalogItem, type CatalogTopic, type CatalogTrack } from "../content/catalog.js";
+import { buildJudgeProgram, buildSqlJudgeProgram, formatCall } from "../content/harness.js";
+import { buildJsJudgeProgram, formatJsCall } from "../content/harnessJs.js";
 import { addDays, dayOf, streaks } from "../lib/days.js";
 import type { Page, ProgressRecord, Store, SubmissionRecord } from "../store/types.js";
 import {
@@ -42,6 +48,8 @@ export interface JudgeRequest {
   submissionId: string;
   userId: string;
   program: string;
+  /** Judge runtime: PYTHON_ML, or NODE_WEB for JavaScript / React items. */
+  language: "PYTHON_ML" | "NODE_WEB";
   tests: { input: string; output: string }[];
   /** json with the item's tolerance, or metric for dataset challenges. */
   checker: Checker;
@@ -56,10 +64,14 @@ export interface Deps {
   store: Store;
   judge: JudgeGateway;
   now?: () => Date;
+  /** Told about every graded answer and submit (mock interviews and contests record them). */
+  onOutcome?: (userId: string, itemId: string, event: "correct" | "wrong", at: Date) => Promise<void>;
 }
 
 /** A learner may have one run waiting for the judge at a time (stale after this). */
 const PENDING_WINDOW_MS = 60_000;
+/** design items: the shortest write-up that counts as an attempt. */
+const DESIGN_MIN_CHARS = 200;
 const ACTIVITY_DAYS = 84;
 
 type ProgressMap = Map<string, ProgressRecord>;
@@ -100,6 +112,80 @@ export class ArenaService {
   }
 
   /* ── Catalog views ── */
+
+  /** What one test of a judged item looks like to the learner. */
+  private sampleCall(item: CatalogItem, args: unknown[], index: number): string {
+    if (item.type === "sql") return `Sample data ${index + 1}`;
+    if (!("function" in item)) return "";
+    return item.language === "javascript" ? formatJsCall(item.function.name, args) : formatCall(item.function.name, args);
+  }
+
+  /** The tables in one test: SQL tables, or a function's DataFrame arguments. */
+  private sampleTables(item: CatalogItem, args: unknown[]): TablePreview[] | undefined {
+    if (item.type === "sql") {
+      const data = (args[0] ?? {}) as Record<string, unknown[][]>;
+      return item.tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => c[0]), rows: data[t.name] ?? [] }));
+    }
+    if (!("function" in item)) return undefined;
+    const tables = item.function.params.flatMap((p, i): TablePreview[] => {
+      const v = args[i] as { columns?: unknown; data?: unknown } | undefined;
+      if (p.type !== "dataframe" || !v || !Array.isArray(v.columns) || !Array.isArray(v.data)) return [];
+      return [{ name: p.name, columns: v.columns.map(String), rows: v.data as unknown[][] }];
+    });
+    return tables.length ? tables : undefined;
+  }
+
+  /* ── Problem list and curated lists ── */
+
+  async problems(userId: string | null, query: ProblemQuery): Promise<ProblemList> {
+    const progress = await this.progressMap(userId);
+    const list = query.list ? this.catalog.list(query.list) : undefined;
+    if (query.list && !list) throw new NotFoundError("List", query.list);
+    const needle = query.q?.toLowerCase();
+    let items = list ? list.items.map((id) => this.catalog.item(id)!) : this.catalog.items;
+    items = items.filter((i) => {
+      const status = progress.get(i.id)?.status ?? null;
+      if (query.type && i.type !== query.type) return false;
+      if (query.difficulty && i.difficulty !== query.difficulty) return false;
+      if (query.access && i.access !== query.access) return false;
+      if (query.track && i.trackId !== query.track) return false;
+      if (query.tag && !i.tags.includes(query.tag)) return false;
+      if (query.status === "solved" && status !== "solved") return false;
+      if (query.status === "attempted" && status !== "attempted") return false;
+      if (query.status === "todo" && status === "solved") return false;
+      if (needle && !i.title.toLowerCase().includes(needle) && !i.tags.some((t) => t.includes(needle))) return false;
+      return true;
+    });
+    const tagCounts = new Map<string, number>();
+    for (const i of items) for (const t of i.tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+    const rows = items.map((i): ProblemRow => {
+      const topic = this.catalog.topic(i.topicId)!;
+      const track = this.catalog.track(i.trackId)!;
+      return {
+        ...this.itemSummary(i, progress),
+        tags: i.tags,
+        topic: { id: topic.id, title: topic.title },
+        track: { id: track.id, title: track.title },
+      };
+    });
+    return {
+      items: rows,
+      total: rows.length,
+      solved: rows.filter((r) => r.status === "solved").length,
+      tags: [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
+    };
+  }
+
+  async lists(userId: string | null): Promise<ProblemListSummary[]> {
+    const progress = await this.progressMap(userId);
+    return this.catalog.lists.map((l) => ({
+      id: l.id,
+      title: l.title,
+      summary: l.summary,
+      itemCount: l.items.length,
+      solvedCount: l.items.filter((id) => progress.get(id)?.status === "solved").length,
+    }));
+  }
 
   private itemSummary(item: CatalogItem, progress: ProgressMap): ItemSummary {
     return {
@@ -192,6 +278,11 @@ export class ArenaService {
       ...(row?.lastAnswer != null ? { lastAnswer: row.lastAnswer } : {}),
     };
     switch (item.type) {
+      case "design":
+        view.passShare = item.passShare;
+        // The rubric comes after the learner's own attempt, so it can't be copied up front.
+        if (row) Object.assign(view, this.designDetails(item));
+        break;
       case "mcq_single":
       case "mcq_multi":
         view.options = item.options;
@@ -203,16 +294,37 @@ export class ArenaService {
         break;
       case "output":
         view.snippet = item.snippet;
+        view.language = item.language;
         if (open) view.answer = item.answer;
+        break;
+      case "sql":
+        view.starterCode = item.starter;
+        view.sqlTables = item.tables.map((t) => ({ name: t.name, columns: t.columns }));
+        view.ordered = item.ordered;
+        view.samples = (item.judge?.sample ?? []).map((t, i) => ({
+          call: this.sampleCall(item, t.args, i),
+          expected: t.expected,
+          tables: this.sampleTables(item, t.args)!,
+        }));
+        view.hiddenTestCount = item.judge?.hidden.length ?? 0;
+        if (open) view.solution = item.solution;
         break;
       case "code":
       case "debug":
         view.starterCode = item.starter;
         view.signature = { name: item.function.name, params: item.function.params, returns: item.function.returns };
-        view.samples = (item.judge?.sample ?? []).map((t) => ({
-          call: formatCall(item.function.name, t.args),
-          expected: this.expectedText(item, t.expected),
-        }));
+        if (item.driver) view.driver = item.driver;
+        view.language = item.language;
+        if (item.preview) view.preview = item.preview;
+        if (item.visual) view.visual = item.visual;
+        view.samples = (item.judge?.sample ?? []).map((t, i) => {
+          const tables = item.dataset ? undefined : this.sampleTables(item, t.args);
+          return {
+            call: this.sampleCall(item, t.args, i),
+            expected: this.expectedText(item, t.expected),
+            ...(tables ? { tables } : {}),
+          };
+        });
         view.hiddenTestCount = item.judge?.hidden.length ?? 0;
         if (item.scoring) view.scoring = item.scoring;
         if (item.dataset && item.datasetPreview) view.dataset = { target: item.dataset.target, ...item.datasetPreview };
@@ -295,6 +407,15 @@ export class ArenaService {
       case "output":
         if (!("text" in input)) throw new BadRequestError("answer", { reason: "Type the output." });
         return normalizeLines(input.text) === normalizeLines(item.answer);
+      case "design": {
+        if (!("text" in input) || input.text.trim().length < DESIGN_MIN_CHARS) {
+          throw new BadRequestError("answer", { reason: `Write your design first (at least ${DESIGN_MIN_CHARS} characters).` });
+        }
+        if (!input.checked) return false; // first submission: show the rubric
+        const ids = new Set(item.rubric.map((r) => r.id));
+        const covered = new Set(input.checked.filter((id) => ids.has(id)));
+        return covered.size >= Math.ceil(item.passShare * item.rubric.length);
+      }
       default:
         throw new BadRequestError("answer", { reason: "Run or submit your code for this item." });
     }
@@ -323,15 +444,34 @@ export class ArenaService {
     this.requireAccess(item, pro);
     const correct = this.grade(item, input);
     const row = await this.deps.store.progress.recordAttempt(userId, itemId, input, this.now());
+    const design = item.type === "design" ? this.designDetails(item) : {};
+    // A design draft (no self-check yet) isn't a wrong answer or a failed review.
+    const draft = item.type === "design" && "text" in input && !input.checked;
+    if (!draft) await this.deps.onOutcome?.(userId, itemId, correct ? "correct" : "wrong", this.now());
     if (!correct) {
       await this.deps.store.stats.record(userId, dayOf(this.now()), { xp: 0, solved: 0 });
-      const reviewed = await this.review(row, false);
+      const reviewed = draft ? false : await this.review(row, false);
       const open = row.status === "solved" || row.status === "revealed";
-      return { correct: false, status: row.status, xpGained: 0, ...(reviewed ? { reviewed } : {}), ...(open ? this.answerDetails(item) : {}) };
+      return {
+        correct: false,
+        status: row.status,
+        xpGained: 0,
+        ...(reviewed ? { reviewed } : {}),
+        ...(open ? this.answerDetails(item) : {}),
+        ...design,
+      };
     }
     const reviewed = await this.review(row, true);
     const xpGained = await this.solve(userId, item, row.status);
-    return { correct: true, status: "solved", xpGained, ...(reviewed ? { reviewed } : {}), ...this.answerDetails(item) };
+    return { correct: true, status: "solved", xpGained, ...(reviewed ? { reviewed } : {}), ...this.answerDetails(item), ...design };
+  }
+
+  private designDetails(item: Extract<CatalogItem, { type: "design" }>): Pick<AnswerResult, "rubric" | "modelAnswer" | "explanation"> {
+    return {
+      rubric: item.rubric.map((r) => ({ id: r.id, point: r.point, ...(r.detail ? { detail: r.detail } : {}) })),
+      modelAnswer: item.modelAnswer,
+      explanation: item.explanation,
+    };
   }
 
   private answerDetails(item: CatalogItem): Pick<AnswerResult, "explanation" | "answer"> {
@@ -344,7 +484,7 @@ export class ArenaService {
   async runCode(userId: string, itemId: string, input: CodeRunInput, pro = false): Promise<ArenaSubmissionView> {
     const item = this.mustItem(itemId);
     this.requireAccess(item, pro);
-    if (!isCodeItem(item.type) || !("function" in item)) {
+    if (!isCodeItem(item.type) || !(item.type === "sql" || "function" in item)) {
       throw new BadRequestError("item", { reason: "This item takes an answer, not code." });
     }
     if (!item.judge) throw new InternalServerError({ reason: `Tests for ${item.id} haven't been built` });
@@ -381,11 +521,18 @@ export class ArenaService {
       await this.deps.judge.submit({
         submissionId: submission.id,
         userId,
-        program: buildJudgeProgram(item.function, input.code),
+        language: item.type !== "sql" && item.language === "javascript" ? "NODE_WEB" : "PYTHON_ML",
+        program:
+          item.type === "sql"
+            ? buildSqlJudgeProgram({ tables: item.tables, ordered: item.ordered }, input.code)
+            : item.language === "javascript"
+              ? buildJsJudgeProgram(jsHarnessFor(item), input.code)
+              : buildJudgeProgram(item.function, input.code, item.driver),
         tests: tests.map((t) => ({ input: JSON.stringify({ args: t.args }), output: t.expected })),
-        checker: item.scoring
-          ? { kind: "metric", metric: item.scoring.metric, threshold: item.scoring.threshold }
-          : { kind: "json", absTol: item.tolerance.abs, relTol: item.tolerance.rel },
+        checker:
+          item.type !== "sql" && item.scoring
+            ? { kind: "metric", metric: item.scoring.metric, threshold: item.scoring.threshold }
+            : { kind: "json", absTol: item.tolerance.abs, relTol: item.tolerance.rel },
       });
     } catch (err) {
       await this.deps.store.submissions.complete(submission.id, {
@@ -406,7 +553,6 @@ export class ArenaService {
     if (!submission || submission.status !== "pending") return;
     const item = this.catalog.item(submission.itemId);
     const sample = item?.judge?.sample ?? [];
-    const fnName = item && "function" in item ? item.function.name : "f";
     const responses = payload.response;
 
     let tests: ArenaTestResult[];
@@ -428,7 +574,7 @@ export class ArenaService {
         const t = sample[index]!;
         return {
           ...base,
-          call: formatCall(fnName, t.args),
+          call: this.sampleCall(item!, t.args, index),
           expected: this.expectedText(item!, t.expected),
           ...(ran ? { output: r.output } : { message: r.output }),
         };
@@ -448,6 +594,8 @@ export class ArenaService {
       judgedAt: this.now(),
     });
     if (!done || !item || done.mode !== "submit") return;
+    // Judge errors (our side) don't count against the learner.
+    if (status !== "error") await this.deps.onOutcome?.(done.userId, item.id, status === "passed" ? "correct" : "wrong", this.now());
     const row = await this.deps.store.progress.get(done.userId, item.id);
     // A submit on a solved, due item is its review; judge errors don't count.
     if (status !== "error") await this.review(row, status === "passed");

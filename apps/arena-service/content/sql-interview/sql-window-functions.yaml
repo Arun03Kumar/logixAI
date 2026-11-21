@@ -1,0 +1,267 @@
+id: sql-window-functions
+title: Window functions
+summary: RANK, ROW_NUMBER, running totals, LAG and shares of a total — the topic that separates good SQL answers from great ones.
+prerequisites: [sql-subqueries-ctes]
+lesson: |
+  ## Aggregates that keep every row
+
+  `GROUP BY` collapses rows. A **window function** computes over a group of rows but keeps each row:
+
+  ```sql
+  SELECT name, salary,
+         AVG(salary) OVER (PARTITION BY dept_id) AS dept_avg
+  FROM employees;
+  ```
+
+  - `PARTITION BY` splits rows into groups (like `GROUP BY`, without collapsing),
+  - `ORDER BY` inside `OVER` orders rows within each group — needed for ranks, running totals and `LAG`.
+
+  ## Ranking
+
+  For salaries 100, 100, 90:
+
+  | Function | Gives |
+  | --- | --- |
+  | `ROW_NUMBER()` | 1, 2, 3 (ties broken arbitrarily unless you add a tie-breaker) |
+  | `RANK()` | 1, 1, 3 (gaps after ties) |
+  | `DENSE_RANK()` | 1, 1, 2 (no gaps) |
+
+  "Top 2 per department" = `ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC, name)` in a CTE, then `WHERE rn <= 2` — window results can't be filtered in the same query's `WHERE`.
+
+  ## Running totals and neighbours
+
+  - `SUM(amount) OVER (PARTITION BY customer_id ORDER BY order_date, id)` — a running total.
+  - `LAG(order_date) OVER (...)` — the previous row's value (NULL for the first); `LEAD` is the next.
+
+  **Careful:** with `ORDER BY` in `OVER`, the default frame includes all rows *tied* with the current one. If two orders share a date and you order only by date, both get the same running total. Make the order unique (`order_date, id`) or say `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`.
+
+  ## Share of a total
+
+  `SUM(units) OVER ()` — an empty window — is the grand total on every row, so `100.0 * units / SUM(units) OVER ()` is each row's percentage.
+items:
+  - id: sql-salary-dense-rank
+    type: sql
+    title: Rank salaries
+    difficulty: easy
+    tags: [sql, window, dense-rank]
+    database: hr
+    prompt: |
+      Rank every employee by salary, highest first. Equal salaries share a rank and the next rank follows without a gap (100, 100, 90 → 1, 1, 2).
+
+      Columns: `name`, `salary`, `salary_rank`. Sort by `salary_rank`, then `name`.
+    ordered: true
+    starter: |
+      SELECT name, salary, ROW_NUMBER() OVER (ORDER BY salary DESC) AS salary_rank
+      FROM employees
+      ORDER BY salary_rank, name;
+    solution: |
+      SELECT name, salary, DENSE_RANK() OVER (ORDER BY salary DESC) AS salary_rank
+      FROM employees
+      ORDER BY salary_rank, name;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `DENSE_RANK` gives tied rows the same rank without gaps. `ROW_NUMBER` numbers every row differently, and `RANK` leaves gaps (1, 1, 3).
+
+  - id: sql-running-total
+    type: sql
+    title: Running total per customer
+    difficulty: medium
+    tags: [sql, window, running-total]
+    database: shop
+    prompt: |
+      For every order, show the customer's running total of `amount` up to and including that order, taking orders by date and, on the same date, by id.
+
+      Columns: `customer_id`, `id`, `order_date`, `running_total`. Sort by `customer_id`, `order_date`, `id`.
+    ordered: true
+    starter: |
+      SELECT customer_id, id, order_date,
+             SUM(amount) OVER (PARTITION BY customer_id ORDER BY order_date) AS running_total
+      FROM orders
+      ORDER BY customer_id, order_date, id;
+    solution: |
+      SELECT customer_id, id, order_date,
+             SUM(amount) OVER (PARTITION BY customer_id ORDER BY order_date, id) AS running_total
+      FROM orders
+      ORDER BY customer_id, order_date, id;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - The starter is right on the sample. What happens to two orders of one customer on the same day?
+    explanation: |
+      With `ORDER BY order_date` alone, orders on the same day are peers: the default frame (`RANGE ... CURRENT ROW`) includes both, so both show the combined total. Ordering by `order_date, id` makes every row distinct, giving a true running total.
+
+  - id: sql-top-two-per-department
+    type: sql
+    title: Top two earners per department
+    difficulty: hard
+    access: pro
+    tags: [sql, window, row-number, top-n]
+    database: hr
+    prompt: |
+      For each department, return its **two** highest-paid employees. If salaries tie, the alphabetically earlier name wins. Departments with one employee return just that one; ignore employees without a department.
+
+      Columns: `department`, `name`, `salary`.
+    starter: |
+      SELECT d.name AS department, e.name, e.salary
+      FROM employees e
+      JOIN departments d ON d.id = e.dept_id
+      ORDER BY e.salary DESC
+      LIMIT 2;
+    solution: |
+      WITH ranked AS (
+        SELECT e.name, e.salary, e.dept_id,
+               ROW_NUMBER() OVER (PARTITION BY e.dept_id ORDER BY e.salary DESC, e.name) AS rn
+        FROM employees e
+        WHERE e.dept_id IS NOT NULL
+      )
+      SELECT d.name AS department, r.name, r.salary
+      FROM ranked r
+      JOIN departments d ON d.id = r.dept_id
+      WHERE r.rn <= 2;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `ROW_NUMBER` restarts at 1 in each department (`PARTITION BY`), and the name tie-breaker makes it deterministic. Window results can't be filtered in the same `WHERE`, hence the CTE. `LIMIT 2` limits the whole result, not each group.
+
+  - id: sql-days-since-previous-order
+    type: sql
+    title: Days since the previous order
+    difficulty: medium
+    tags: [sql, window, lag, dates]
+    database: shop
+    prompt: |
+      For every order, show how many days passed since the **same customer's previous** order (by date, then id). A customer's first order gets NULL.
+
+      Columns: `customer_id`, `id`, `days_since_prev`.
+    starter: |
+      SELECT customer_id, id, NULL AS days_since_prev
+      FROM orders;
+    solution: |
+      SELECT customer_id, id,
+             date_diff('day', LAG(order_date) OVER (PARTITION BY customer_id ORDER BY order_date, id), order_date) AS days_since_prev
+      FROM orders;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `LAG(order_date)` looks one row back within the customer's orders; on the first row there is none, so it's NULL, and so is the difference. `order_date - LAG(...)` also gives days for DATE columns in DuckDB and PostgreSQL.
+
+  - id: sql-category-share
+    type: sql
+    title: Each category's share of units
+    difficulty: medium
+    tags: [sql, window, percentage]
+    database: shop
+    prompt: |
+      For each category that sold something, return the units sold and its percentage of all units sold, rounded to 1 decimal.
+
+      Columns: `category`, `units`, `share_pct` (e.g. `37.5`).
+    starter: |
+      SELECT p.category, SUM(oi.quantity) AS units, 100 AS share_pct
+      FROM order_items oi
+      JOIN products p ON p.id = oi.product_id
+      GROUP BY p.category;
+    solution: |
+      SELECT p.category,
+             SUM(oi.quantity) AS units,
+             ROUND(100.0 * SUM(oi.quantity) / SUM(SUM(oi.quantity)) OVER (), 1) AS share_pct
+      FROM order_items oi
+      JOIN products p ON p.id = oi.product_id
+      GROUP BY p.category;
+    tests: { sample: [small], hidden: [full, edge] }
+    hints:
+      - A window over the grouped result can total the per-category sums.
+    explanation: |
+      After grouping, `SUM(SUM(quantity)) OVER ()` adds up every category's units: the inner `SUM` is the aggregate, the outer one a window over the grouped rows. Multiply by `100.0` (not `100`) so integer division doesn't round the share away.
+
+  - id: sql-second-order
+    type: sql
+    title: Each customer's second order
+    difficulty: medium
+    tags: [sql, window, row-number]
+    database: shop
+    prompt: |
+      Return each customer's **second** order (by date, then id): `customer_id`, `id`, `amount`. Customers with fewer than two orders are left out.
+    starter: |
+      SELECT customer_id, MAX(id) AS id, MAX(amount) AS amount
+      FROM orders
+      GROUP BY customer_id;
+    solution: |
+      WITH numbered AS (
+        SELECT customer_id, id, amount,
+               ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY order_date, id) AS n
+        FROM orders
+      )
+      SELECT customer_id, id, amount
+      FROM numbered
+      WHERE n = 2;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Number each customer's orders in time order and keep number 2. The same pattern answers "nth purchase" and "first order after signup" questions.
+
+  - id: sql-salary-vs-department
+    type: sql
+    title: Salary against the department average
+    difficulty: medium
+    tags: [sql, window, avg]
+    database: hr
+    prompt: |
+      For every employee **in a department**, show their salary, their department's average salary (rounded to 2 decimals) and how far above (+) or below (−) it they are, also rounded to 2 decimals.
+
+      Columns: `name`, `salary`, `dept_avg`, `diff`.
+    starter: |
+      SELECT name, salary, AVG(salary) AS dept_avg, 0 AS diff
+      FROM employees
+      GROUP BY name, salary;
+    solution: |
+      SELECT name, salary,
+             ROUND(AVG(salary) OVER (PARTITION BY dept_id), 2) AS dept_avg,
+             ROUND(salary - AVG(salary) OVER (PARTITION BY dept_id), 2) AS diff
+      FROM employees
+      WHERE dept_id IS NOT NULL;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      `AVG(...) OVER (PARTITION BY dept_id)` puts the department average on every row without collapsing them, so each salary can be compared with it directly — no self join or subquery needed.
+
+  - id: sql-dau-moving-average
+    type: sql
+    title: Daily actives and a 3-day average
+    difficulty: hard
+    access: pro
+    tags: [sql, window, moving-average, product-analytics]
+    database: app
+    prompt: |
+      For each date with any event, return the number of distinct active users (`dau`) and the average of `dau` over that date and the **two previous dates in the result** (fewer at the start), rounded to 2 decimals.
+
+      Columns: `event_date`, `dau`, `dau_avg3`. Sort by `event_date`.
+    ordered: true
+    starter: |
+      SELECT event_date, COUNT(*) AS dau, COUNT(*) AS dau_avg3
+      FROM events
+      GROUP BY event_date
+      ORDER BY event_date;
+    solution: |
+      WITH daily AS (
+        SELECT event_date, COUNT(DISTINCT user_id) AS dau
+        FROM events
+        GROUP BY event_date
+      )
+      SELECT event_date, dau,
+             ROUND(AVG(dau) OVER (ORDER BY event_date ROWS BETWEEN 2 PRECEDING AND CURRENT ROW), 2) AS dau_avg3
+      FROM daily
+      ORDER BY event_date;
+    tests: { sample: [small], hidden: [full] }
+    explanation: |
+      First count distinct users per day (a user with three events is still one active user), then average over a `ROWS` frame of the current and two preceding rows. `ROWS` counts rows; `RANGE BETWEEN INTERVAL 2 DAY PRECEDING ...` would count calendar days instead, which differs when a day has no events.
+
+  - id: sql-rank-functions-mcq
+    type: mcq_single
+    title: RANK, DENSE_RANK or ROW_NUMBER?
+    difficulty: easy
+    tags: [sql, window]
+    prompt: |
+      Scores are 90, 85, 85, 70 (highest first). Which function gives the ranks **1, 2, 2, 4**?
+    options:
+      - { id: a, text: "ROW_NUMBER()" }
+      - { id: b, text: "RANK()" }
+      - { id: c, text: "DENSE_RANK()" }
+      - { id: d, text: "NTILE(4)" }
+    answer: b
+    explanation: |
+      `RANK` gives ties the same rank and skips the next ranks (1, 2, 2, 4). `DENSE_RANK` wouldn't skip (1, 2, 2, 3), and `ROW_NUMBER` never ties (1, 2, 3, 4).

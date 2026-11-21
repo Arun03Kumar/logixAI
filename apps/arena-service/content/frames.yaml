@@ -1,0 +1,178 @@
+# DataFrames shared by code items: a test argument {"$frame": "orders_a"}
+# becomes a pandas DataFrame with these columns and rows. null = missing.
+# The "_a" versions are what learners see in examples; "_b" versions have more
+# rows, ties and missing values for hidden tests.
+
+orders_a:
+  columns: [order_id, customer, city, order_date, amount, status]
+  data:
+    - [1, Asha, Mumbai, "2024-01-03", 1200.0, delivered]
+    - [2, Ravi, Delhi, "2024-01-05", 450.0, delivered]
+    - [3, Asha, Mumbai, "2024-01-20", 3000.0, cancelled]
+    - [4, Meera, Mumbai, "2024-02-02", 800.0, delivered]
+    - [5, Ravi, Delhi, "2024-02-14", 1500.0, delivered]
+    - [6, Kiran, Pune, "2024-02-20", 250.0, returned]
+    - [7, Asha, Mumbai, "2024-03-01", 700.0, delivered]
+    - [8, Neha, Pune, "2024-03-09", 2200.0, delivered]
+
+orders_b:
+  columns: [order_id, customer, city, order_date, amount, status]
+  data:
+    - [11, Zoya, Chennai, "2024-01-01", 999.0, delivered]
+    - [12, Arjun, Delhi, "2024-01-15", 4500.0, delivered]
+    - [13, Zoya, Chennai, "2024-01-31", 300.0, cancelled]
+    - [14, Lata, Delhi, "2024-02-01", 4500.0, delivered]
+    - [15, Arjun, Delhi, "2024-02-11", 150.0, delivered]
+    - [16, Vikram, Bengaluru, "2024-02-29", 2200.0, delivered]
+    - [17, Vikram, Bengaluru, "2024-03-02", 2200.0, returned]
+    - [18, Sara, Chennai, "2024-03-15", 120.0, delivered]
+    - [19, Zoya, Chennai, "2024-03-28", 3000.0, delivered]
+    - [20, Rohit, Mumbai, "2024-04-01", 1800.0, cancelled]
+    - [21, Arjun, Delhi, "2024-04-12", 980.0, delivered]
+    - [22, Lata, Delhi, "2024-04-30", 500.0, delivered]
+
+customers_a:
+  columns: [customer, segment, joined]
+  data:
+    - [Asha, premium, "2023-11-01"]
+    - [Ravi, regular, "2023-12-15"]
+    - [Meera, regular, "2024-01-10"]
+    - [Kiran, premium, "2024-01-25"]
+    - [Tara, regular, "2024-02-05"]
+
+customers_b:
+  columns: [customer, segment, joined]
+  data:
+    - [Zoya, premium, "2023-10-01"]
+    - [Arjun, regular, "2023-12-01"]
+    - [Lata, premium, "2024-01-01"]
+    - [Sara, regular, "2024-02-20"]
+    - [Dev, regular, "2024-03-01"]
+    - [Isha, premium, "2024-03-05"]
+
+messy_a:
+  columns: [id, name, email, city, age]
+  data:
+    - [1, "  asha rao ", "Asha@Mail.com", Mumbai, 29]
+    - [2, "RAVI kumar", "ravi@mail.com ", Delhi, null]
+    - [3, "meera  ", " MEERA@mail.com", Mumbai, 35]
+    - [4, "kiran", "kiran@mail.com", Pune, 41]
+    - [2, "Ravi Kumar", "ravi.k@mail.com", Delhi, 31]
+    - [5, "neha s", null, Pune, null]
+
+messy_b:
+  columns: [id, name, email, city, age]
+  data:
+    - [10, "zoya KHAN", "ZOYA@mail.com", Chennai, 24]
+    - [11, " arjun ", "arjun@mail.com", Delhi, 38]
+    - [12, "lata", null, Delhi, null]
+    - [10, "Zoya Khan", "zoya.k@mail.com", Chennai, 25]
+    - [13, "vikram  rao", "Vikram@Mail.com", Bengaluru, null]
+    - [14, "SARA", "sara@mail.com", Chennai, 30]
+    - [15, "dev", " dev@mail.com ", Delhi, 52]
+    - [11, "Arjun Mehta", "arjun.m@mail.com", Delhi, 39]
+
+employees_a:
+  columns: [name, dept, salary]
+  data:
+    - [Anita, Engineering, 150000]
+    - [Bala, Engineering, 90000]
+    - [Chitra, Engineering, 90000]
+    - [Dev, Sales, 120000]
+    - [Esha, Sales, 70000]
+    - [Farhan, Marketing, 80000]
+
+employees_b:
+  columns: [name, dept, salary]
+  data:
+    - [Gita, Marketing, 115000]
+    - [Hari, Engineering, 99000]
+    - [Isha, Engineering, 140000]
+    - [Jay, Sales, 85000]
+    - [Kavya, Legal, 125000]
+    - [Leo, Sales, 60000]
+    - [Mina, Engineering, 140000]
+    - [Nikhil, Sales, 85000]
+    - [Omar, Marketing, 95000]
+
+sales_a:
+  columns: [date, store, revenue]
+  data:
+    - ["2024-01-01", A, 100.0]
+    - ["2024-01-02", A, 120.0]
+    - ["2024-01-03", A, 90.0]
+    - ["2024-01-05", A, 200.0]
+    - ["2024-01-01", B, 50.0]
+    - ["2024-01-03", B, 70.0]
+    - ["2024-01-04", B, 65.0]
+    - ["2024-01-08", A, 150.0]
+
+sales_b:
+  columns: [date, store, revenue]
+  data:
+    - ["2024-01-29", X, 300.0]
+    - ["2024-01-30", X, 280.0]
+    - ["2024-02-01", X, 310.0]
+    - ["2024-02-02", X, 290.0]
+    - ["2024-02-05", X, 400.0]
+    - ["2024-02-12", X, 120.0]
+    - ["2024-02-28", Y, 80.0]
+    - ["2024-03-01", Y, 95.0]
+    - ["2024-03-04", Y, 60.0]
+    - ["2024-01-31", Y, 75.0]
+    - ["2024-03-02", X, 500.0]
+
+events_a:
+  columns: [user_id, date, event]
+  data:
+    - [1, "2024-01-01", signup]
+    - [1, "2024-01-03", login]
+    - [1, "2024-01-07", purchase]
+    - [2, "2024-01-02", signup]
+    - [2, "2024-01-02", login]
+    - [3, "2024-01-04", signup]
+
+events_b:
+  columns: [user_id, date, event]
+  data:
+    - [7, "2024-02-10", signup]
+    - [7, "2024-02-11", login]
+    - [7, "2024-02-11", login]
+    - [7, "2024-02-20", purchase]
+    - [8, "2024-02-01", signup]
+    - [9, "2024-01-30", signup]
+    - [9, "2024-02-02", login]
+    - [9, "2024-02-09", login]
+    - [9, "2024-02-28", purchase]
+
+scores_a:
+  columns: [student, math, physics, chemistry]
+  data:
+    - [Asha, 91, 78, 85]
+    - [Ravi, 67, 88, 72]
+    - [Meera, 80, null, 90]
+
+scores_b:
+  columns: [student, math, physics, chemistry]
+  data:
+    - [Zoya, 55, 61, 70]
+    - [Arjun, 99, 93, null]
+    - [Lata, 72, 70, 68]
+    - [Dev, 80, 85, 90]
+
+posts_a:
+  columns: [post_id, tags]
+  data:
+    - [1, [python, pandas]]
+    - [2, [sql]]
+    - [3, [python, numpy, ml]]
+    - [4, []]
+
+posts_b:
+  columns: [post_id, tags]
+  data:
+    - [10, [ml, llm]]
+    - [11, [ml]]
+    - [12, [sql, pandas, ml]]
+    - [13, [llm, rag]]
+    - [14, [pandas]]

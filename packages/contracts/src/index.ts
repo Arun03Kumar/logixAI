@@ -21,3 +21,4 @@ export * from "./arena";
 export * from "./checker";
 export * from "./billing";
 export * from "./institution";
+export * from "./practice";

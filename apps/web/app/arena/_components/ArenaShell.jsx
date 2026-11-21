@@ -6,6 +6,7 @@ import AppHeader from "@/app/components/layout/AppHeader";
 
 const SECTIONS = [
   { label: "Learn", href: "/arena", match: (p) => p === "/arena" || /^\/arena\/(tracks|topics|items)/.test(p) },
+  { label: "Problems", href: "/arena/problems", match: (p) => p.startsWith("/arena/problems") },
   { label: "Review", href: "/arena/review", match: (p) => p.startsWith("/arena/review") },
   { label: "Skill map", href: "/arena/skills", match: (p) => p.startsWith("/arena/skills") },
   { label: "My progress", href: "/arena/progress", match: (p) => p.startsWith("/arena/progress") },

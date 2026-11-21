@@ -1,0 +1,190 @@
+id: sql-dates-events
+title: Dates and product analytics
+summary: Months and days, active users, time-to-purchase, retention and streaks — the event-table questions from product and growth interviews.
+prerequisites: [sql-window-functions]
+lesson: |
+  ## Working with dates
+
+  | Need | DuckDB / PostgreSQL |
+  | --- | --- |
+  | Month as text | `strftime(order_date, '%Y-%m')` (PostgreSQL: `to_char(order_date, 'YYYY-MM')`) |
+  | Start of month | `date_trunc('month', order_date)` |
+  | Days between | `date_diff('day', a, b)` or `b - a` |
+  | Day after | `d + 1` or `d + INTERVAL 1 DAY` |
+
+  ## Event tables
+
+  Product analytics data is usually one row per event: `(user_id, event_date, event)`. The classic questions:
+
+  - **Active users** on a day: `COUNT(DISTINCT user_id)` — a user with five events is still one user.
+  - **Time to X**: per user, the first date of event X minus their signup date.
+  - **Retention**: of the users who signed up, what share came back on day 1 (or in week 1)? Join users to their events on `event_date = created_at + 1`, and count users, not rows.
+
+  ## Streaks: gaps and islands
+
+  "Logged in 3 days in a row": number each user's distinct login dates with `ROW_NUMBER()` and subtract that number (in days) from the date. Consecutive dates give the **same** result, so grouping by it finds each streak:
+
+  | date | rn | date − rn |
+  | --- | --- | --- |
+  | Jan 2 | 1 | Jan 1 |
+  | Jan 3 | 2 | Jan 1 |
+  | Jan 5 | 3 | Jan 2 |
+
+  Remove duplicate dates first, or a user who logged in twice on a day breaks the trick.
+items:
+  - id: sql-daily-active-users
+    type: sql
+    title: Daily active users
+    difficulty: easy
+    tags: [sql, count-distinct, product-analytics]
+    database: app
+    prompt: |
+      For each date with any event, return the number of **distinct** users who did anything that day.
+
+      Columns: `event_date`, `dau`.
+    starter: |
+      SELECT event_date, COUNT(*) AS dau
+      FROM events
+      GROUP BY event_date;
+    solution: |
+      SELECT event_date, COUNT(DISTINCT user_id) AS dau
+      FROM events
+      GROUP BY event_date;
+    tests: { sample: [small], hidden: [full] }
+    explanation: |
+      `COUNT(*)` counts events; a user who logged in and purchased on the same day would count twice. `COUNT(DISTINCT user_id)` counts people.
+
+  - id: sql-orders-per-month
+    type: sql
+    title: Orders per month
+    difficulty: easy
+    tags: [sql, dates, group-by]
+    database: shop
+    prompt: |
+      Count orders (any status) per calendar month. Return the month as text like `2024-03` in a column `month`, and the count as `orders`, oldest month first.
+    ordered: true
+    starter: |
+      SELECT order_date AS month, COUNT(*) AS orders
+      FROM orders
+      GROUP BY order_date
+      ORDER BY month;
+    solution: |
+      SELECT strftime(order_date, '%Y-%m') AS month, COUNT(*) AS orders
+      FROM orders
+      GROUP BY month
+      ORDER BY month;
+    tests: { sample: [small], hidden: [full, edge] }
+    explanation: |
+      Format each date as year-month and group by that. Text like `2024-03` sorts correctly because the year comes first and the month has two digits.
+
+  - id: sql-days-to-first-purchase
+    type: sql
+    title: Days to first purchase
+    difficulty: medium
+    tags: [sql, dates, product-analytics]
+    database: app
+    prompt: |
+      For each user who has made a purchase, return how many days passed between their account's `created_at` and their **first** purchase event.
+
+      Columns: `user_id`, `days_to_purchase`.
+    starter: |
+      SELECT e.user_id, date_diff('day', u.created_at, e.event_date) AS days_to_purchase
+      FROM events e
+      JOIN users u ON u.id = e.user_id
+      WHERE e.event = 'purchase';
+    solution: |
+      SELECT e.user_id, date_diff('day', u.created_at, MIN(e.event_date)) AS days_to_purchase
+      FROM events e
+      JOIN users u ON u.id = e.user_id
+      WHERE e.event = 'purchase'
+      GROUP BY e.user_id, u.created_at;
+    tests: { sample: [small], hidden: [full] }
+    explanation: |
+      Keep purchase events, take the earliest per user with `MIN`, then subtract the signup date. Without grouping, a user who bought twice gets two rows.
+
+  - id: sql-buyers-by-country
+    type: sql
+    title: Users and buyers per country
+    difficulty: medium
+    tags: [sql, conditional-aggregation, count-distinct]
+    database: app
+    prompt: |
+      For each country, return how many users it has (`users`) and how many of them made at least one purchase (`buyers`).
+    starter: |
+      SELECT u.country, COUNT(*) AS users, COUNT(*) AS buyers
+      FROM users u
+      JOIN events e ON e.user_id = u.id
+      WHERE e.event = 'purchase'
+      GROUP BY u.country;
+    solution: |
+      SELECT u.country,
+             COUNT(DISTINCT u.id) AS users,
+             COUNT(DISTINCT CASE WHEN e.event = 'purchase' THEN u.id END) AS buyers
+      FROM users u
+      LEFT JOIN events e ON e.user_id = u.id
+      GROUP BY u.country;
+    tests: { sample: [small], hidden: [full] }
+    hints:
+      - "`COUNT(DISTINCT CASE WHEN ... THEN user_id END)` counts users matching a condition: the CASE gives NULL for the others."
+    explanation: |
+      Joining users to events multiplies rows, so count **distinct** user ids. Filtering to purchases in `WHERE` would lose users (and countries) without purchases; putting the condition inside the count keeps them.
+
+  - id: sql-day1-retention
+    type: sql
+    title: Day-1 retention
+    difficulty: hard
+    access: pro
+    tags: [sql, retention, product-analytics]
+    database: app
+    prompt: |
+      Day-1 retention is the share of users who had **any event on the day after** their account was created. Return it as a single row with column `retention`, a number between 0 and 1 rounded to 2 decimals.
+    starter: |
+      SELECT ROUND(COUNT(*) / (SELECT COUNT(*) FROM users), 2) AS retention
+      FROM events
+      WHERE event = 'login';
+    solution: |
+      SELECT ROUND(
+               COUNT(DISTINCT CASE WHEN e.user_id IS NOT NULL THEN u.id END) * 1.0 / COUNT(DISTINCT u.id),
+               2) AS retention
+      FROM users u
+      LEFT JOIN events e ON e.user_id = u.id AND e.event_date = u.created_at + 1;
+    tests: { sample: [small], hidden: [full] }
+    explanation: |
+      Left-join each user to their events on the next day (the condition goes in `ON`, so users without one stay), then divide retained users by all users — both counted with `DISTINCT`, because a user can have several events that day. Multiply by `1.0` to avoid integer division.
+
+  - id: sql-three-day-streak
+    type: sql
+    title: Three logins in a row
+    difficulty: hard
+    access: pro
+    tags: [sql, gaps-and-islands, window]
+    database: app
+    prompt: |
+      Return the `user_id` of every user who logged in (event `login`) on **at least 3 consecutive days**.
+    starter: |
+      SELECT user_id
+      FROM events
+      WHERE event = 'login'
+      GROUP BY user_id
+      HAVING COUNT(*) >= 3;
+    solution: |
+      WITH days AS (
+        SELECT DISTINCT user_id, event_date
+        FROM events
+        WHERE event = 'login'
+      ),
+      islands AS (
+        SELECT user_id,
+               event_date - CAST(ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_date) AS INTEGER) AS grp
+        FROM days
+      )
+      SELECT DISTINCT user_id
+      FROM islands
+      GROUP BY user_id, grp
+      HAVING COUNT(*) >= 3;
+    tests: { sample: [small], hidden: [full] }
+    hints:
+      - Three logins aren't a streak if they're on days 1, 4 and 9.
+      - For consecutive dates, date minus row number stays the same.
+    explanation: |
+      After removing duplicate days, number each user's login dates. Subtracting the row number from the date gives the same value across a run of consecutive days, so each streak becomes a group, and `HAVING COUNT(*) >= 3` finds long ones. A self-join on `d + 1` and `d + 2` also works for a fixed length.

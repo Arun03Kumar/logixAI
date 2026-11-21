@@ -1,0 +1,10 @@
+id: system-design
+title: System design you can run
+summary: The building blocks of system design interviews, implemented and tested against simulated traffic — rate limiters, load balancers, consistent hashing, caches, circuit breakers and ID generators — plus open design questions you check against a rubric.
+level: interview
+order: 9
+topics:
+  - sd-rate-limiting
+  - sd-load-balancing
+  - sd-caching-resilience
+  - sd-building-blocks

@@ -1,0 +1,329 @@
+id: numpy-linear-algebra-interview
+title: Linear algebra for ML interviews
+summary: Similarity matrices, covariance, PCA, solving systems, projections and attention — the linear algebra behind embeddings and transformers.
+prerequisites: [numpy-ml-from-scratch, matrices]
+lesson: |
+  ## Similarity at scale
+
+  Embeddings are compared by cosine similarity. For two matrices of row vectors, normalise every row, then **one matrix product** gives every pair: `An @ Bn.T` is the `(n, m)` similarity matrix. This is the core of semantic search and recommendation.
+
+  ## Covariance and PCA
+
+  With centred data $X_c$ (each column minus its mean), the sample covariance is $X_c^\top X_c / (n - 1)$. PCA finds its eigenvectors: the directions of greatest variance. In practice use the SVD of $X_c$: the singular values $s$ give each component's variance $s^2 / (n-1)$, and
+
+  $$\text{explained variance ratio}_i = \frac{s_i^2}{\sum_j s_j^2}$$
+
+  Eigenvector *signs* are arbitrary — two correct PCA implementations can return opposite-signed components — so compare variances, not vectors.
+
+  ## Solving and projecting
+
+  - Solve $Ax = b$ with `np.linalg.solve`, never `inv(A) @ b`.
+  - The projection of $v$ onto $u$ is $\frac{v \cdot u}{u \cdot u} u$.
+  - $Q$ is orthogonal when $Q^\top Q = I$; check with `np.allclose`.
+
+  ## Attention
+
+  Scaled dot-product attention, the heart of a transformer:
+
+  $$\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^\top}{\sqrt{d}}\right) V$$
+
+  A **causal** mask sets the scores for future positions ($j > i$) to $-\infty$ before the softmax, so a token can only attend to itself and earlier tokens.
+items:
+  - id: np-cosine-matrix
+    type: code
+    title: Cosine similarity matrix
+    difficulty: easy
+    tags: [numpy, embeddings, similarity]
+    prompt: |
+      Implement `cosine_matrix(A, B)`: for row vectors `A: (n, d)` and `B: (m, d)` (no zero rows), the `(n, m)` matrix of cosine similarities between every row of `A` and every row of `B`.
+    function:
+      name: cosine_matrix
+      params:
+        - { name: A, type: ndarray }
+        - { name: B, type: ndarray }
+      returns: "ndarray (n, m)"
+    starter: |
+      import numpy as np
+
+      def cosine_matrix(A, B):
+          return A @ B.T
+    solution: |
+      import numpy as np
+
+      def cosine_matrix(A, B):
+          An = A / np.linalg.norm(A, axis=1, keepdims=True)
+          Bn = B / np.linalg.norm(B, axis=1, keepdims=True)
+          return An @ Bn.T
+    tests:
+      sample:
+        - args: [[[1, 0], [1, 1]], [[2, 0], [0, 3]]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, d)), rng.normal(size=(m, d))] for n, m, d in [(4, 6, 3), (10, 2, 16)]]
+    explanation: |
+      Normalising rows first turns every dot product into a cosine, so a single matrix product computes all pairs. The raw dot product (the starter) also grows with vector length.
+
+  - id: np-covariance
+    type: code
+    title: Covariance matrix
+    difficulty: medium
+    tags: [numpy, statistics, covariance]
+    prompt: |
+      Implement `covariance(X)`: the `(d, d)` sample covariance matrix of the columns of `X` (dividing by `n − 1`), without calling `np.cov`.
+    function:
+      name: covariance
+      params:
+        - { name: X, type: ndarray }
+      returns: "ndarray (d, d)"
+    starter: |
+      import numpy as np
+
+      def covariance(X):
+          return X.T @ X / (len(X) - 1)
+    solution: |
+      import numpy as np
+
+      def covariance(X):
+          Xc = X - X.mean(axis=0)
+          return Xc.T @ Xc / (len(X) - 1)
+    tests:
+      sample:
+        - args: [[[1, 2], [2, 4], [3, 6]]]
+          expected: [[1, 2], [2, 4]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(30, 3)) + 5], [rng.normal(size=(8, 5)) * [1, 2, 3, 4, 5]]]
+    explanation: |
+      Covariance measures how columns vary together **around their means**, so centre first. Without centring (the starter), the result mixes in the means and is only right for zero-mean data.
+
+  - id: np-pca-variance-ratio
+    type: code
+    title: PCA explained variance
+    difficulty: hard
+    access: pro
+    tags: [numpy, pca, svd]
+    prompt: |
+      Implement `explained_variance_ratio(X, k)`: centre the columns of `X`, run PCA, and return the share of total variance explained by each of the top `k` components, largest first.
+    function:
+      name: explained_variance_ratio
+      params:
+        - { name: X, type: ndarray }
+        - { name: k, type: int }
+      returns: "ndarray of length k, decreasing, sums to at most 1"
+    starter: |
+      import numpy as np
+
+      def explained_variance_ratio(X, k):
+          var = X.var(axis=0)
+          return np.sort(var / var.sum())[::-1][:k]
+    solution: |
+      import numpy as np
+
+      def explained_variance_ratio(X, k):
+          Xc = X - X.mean(axis=0)
+          s = np.linalg.svd(Xc, compute_uv=False)
+          return (s**2 / (s**2).sum())[:k]
+    tests:
+      sample:
+        - args: [[[2, 0], [0, 1], [-2, 0], [0, -1]], 2]
+          expected: [0.8, 0.2]
+      generate: |
+        def cases(rng):
+            Z = rng.normal(size=(50, 2))
+            X = np.column_stack([Z[:, 0], Z[:, 0] * 2 + Z[:, 1] * 0.1, Z[:, 1]])
+            return [[X, 2], [rng.normal(size=(40, 4)) @ rng.normal(size=(4, 4)), 3]]
+    explanation: |
+      The squared singular values of the centred data are proportional to the variance along each principal direction, already sorted largest first. Per-column variances (the starter) only match PCA when the columns are uncorrelated — the hidden data has strongly correlated columns.
+
+  - id: np-solve-system
+    type: code
+    title: Solve a linear system
+    difficulty: easy
+    tags: [numpy, linear-systems]
+    prompt: |
+      Implement `solve(A, b)`: the vector `x` with `A @ x = b`, for an invertible square `A`.
+    function:
+      name: solve
+      params:
+        - { name: A, type: ndarray }
+        - { name: b, type: ndarray }
+      returns: "ndarray"
+    starter: |
+      import numpy as np
+
+      def solve(A, b):
+          return b / np.diag(A)
+    solution: |
+      import numpy as np
+
+      def solve(A, b):
+          return np.linalg.solve(A, b)
+    tests:
+      sample:
+        - args: [[[2, 1], [1, 3]], [3, 5]]
+          expected: [0.8, 1.4]
+      generate: |
+        def cases(rng):
+            out = []
+            for n in [3, 6]:
+                A = rng.normal(size=(n, n)) + n * np.eye(n)
+                out.append([A, rng.normal(size=n)])
+            return out
+    explanation: |
+      `np.linalg.solve` uses an LU factorisation — faster and more accurate than forming `inv(A)` and multiplying. Dividing by the diagonal only works when `A` is diagonal.
+
+  - id: np-project-onto
+    type: code
+    title: Project one vector onto another
+    difficulty: easy
+    tags: [numpy, projection]
+    prompt: |
+      Implement `project(v, u)`: the projection of `v` onto the direction of `u` (a non-zero vector) — the vector along `u` closest to `v`.
+    function:
+      name: project
+      params:
+        - { name: v, type: ndarray }
+        - { name: u, type: ndarray }
+      returns: "ndarray, same length as v"
+    starter: |
+      import numpy as np
+
+      def project(v, u):
+          return (v @ u) * u
+    solution: |
+      import numpy as np
+
+      def project(v, u):
+          return (v @ u) / (u @ u) * u
+    tests:
+      sample:
+        - args: [[2, 3], [1, 0]]
+          expected: [2, 0]
+      hidden:
+        - args: [[1, 1], [2, 0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=d), rng.normal(size=d)] for d in [3, 10]]
+    explanation: |
+      $\frac{v \cdot u}{u \cdot u}$ is how many copies of $u$ fit in $v$'s direction; dividing by $u \cdot u$ matters unless $u$ already has length 1. Gram–Schmidt and linear regression's fitted values are both projections.
+
+  - id: np-is-orthogonal
+    type: code
+    title: Is it an orthogonal matrix?
+    difficulty: easy
+    tags: [numpy, orthogonality]
+    prompt: |
+      Implement `is_orthogonal(Q, tol)`: `True` if the square matrix `Q` satisfies $Q^\top Q = I$ with every entry within `tol`, otherwise `False`.
+    function:
+      name: is_orthogonal
+      params:
+        - { name: Q, type: ndarray }
+        - { name: tol, type: float }
+      returns: "bool"
+    starter: |
+      import numpy as np
+
+      def is_orthogonal(Q, tol):
+          return bool(abs(np.linalg.det(Q)) == 1)
+    solution: |
+      import numpy as np
+
+      def is_orthogonal(Q, tol):
+          return bool(np.allclose(Q.T @ Q, np.eye(len(Q)), rtol=0, atol=tol))
+    tests:
+      sample:
+        - args: [[[0, 1], [-1, 0]], 1e-9]
+          expected: true
+        - args: [[[1, 1], [0, 1]], 1e-9]
+          expected: false
+      hidden:
+        - args: [[[0.6, -0.8], [0.8, 0.6]], 1e-9]
+        - args: [[[2, 0], [0, 0.5]], 1e-9]
+      generate: |
+        def cases(rng):
+            Q, _ = np.linalg.qr(rng.normal(size=(5, 5)))
+            return [[Q, 1e-9], [Q * 1.01, 1e-9]]
+    explanation: |
+      Orthogonal means the columns are unit length and mutually perpendicular, which is exactly $Q^\top Q = I$. A determinant of ±1 is necessary but not sufficient — `diag(2, 0.5)` has determinant 1. Exact `==` comparisons also fail with floating-point rounding, so compare within a tolerance.
+
+  - id: np-attention
+    type: code
+    title: Scaled dot-product attention
+    difficulty: medium
+    access: pro
+    tags: [numpy, attention, transformers]
+    prompt: |
+      Implement `attention(Q, K, V)`: $\operatorname{softmax}(QK^\top / \sqrt{d}) \, V$, where `Q: (n, d)`, `K: (m, d)`, `V: (m, d_v)`, and the softmax is over each row (over the `m` keys). Make the softmax numerically stable.
+    function:
+      name: attention
+      params:
+        - { name: Q, type: ndarray }
+        - { name: K, type: ndarray }
+        - { name: V, type: ndarray }
+      returns: "ndarray (n, d_v)"
+    starter: |
+      import numpy as np
+
+      def attention(Q, K, V):
+          return (Q @ K.T) @ V
+    solution: |
+      import numpy as np
+
+      def attention(Q, K, V):
+          S = Q @ K.T / np.sqrt(Q.shape[1])
+          S = S - S.max(axis=1, keepdims=True)
+          W = np.exp(S)
+          W = W / W.sum(axis=1, keepdims=True)
+          return W @ V
+    tests:
+      sample:
+        - args: [[[1, 0]], [[1, 0], [0, 1]], [[10, 0], [0, 10]]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, d)), rng.normal(size=(m, d)), rng.normal(size=(m, v))] for n, m, d, v in [(3, 4, 8, 2), (5, 5, 16, 4)]]
+    explanation: |
+      Scores `QKᵀ` measure how well each query matches each key; dividing by √d keeps their spread from growing with the dimension (which would make the softmax nearly one-hot and its gradients tiny). Each output row is a weighted average of the value rows, with weights summing to 1.
+
+  - id: np-causal-attention
+    type: code
+    title: Causal (masked) attention
+    difficulty: hard
+    access: pro
+    tags: [numpy, attention, transformers, masking]
+    prompt: |
+      Implement `causal_attention(Q, K, V)` for a sequence of length `n` (`Q`, `K`: `(n, d)`, `V`: `(n, d_v)`): like scaled dot-product attention, but position `i` may only attend to positions `0..i` — scores for later positions are masked out before the softmax.
+    function:
+      name: causal_attention
+      params:
+        - { name: Q, type: ndarray }
+        - { name: K, type: ndarray }
+        - { name: V, type: ndarray }
+      returns: "ndarray (n, d_v)"
+    starter: |
+      import numpy as np
+
+      def causal_attention(Q, K, V):
+          S = Q @ K.T / np.sqrt(Q.shape[1])
+          W = np.exp(S - S.max(axis=1, keepdims=True))
+          W = W / W.sum(axis=1, keepdims=True)
+          return W @ V
+    solution: |
+      import numpy as np
+
+      def causal_attention(Q, K, V):
+          n = Q.shape[0]
+          S = Q @ K.T / np.sqrt(Q.shape[1])
+          S = np.where(np.tril(np.ones((n, n), dtype=bool)), S, -np.inf)
+          W = np.exp(S - S.max(axis=1, keepdims=True))
+          W = W / W.sum(axis=1, keepdims=True)
+          return W @ V
+    tests:
+      sample:
+        - args: [[[1, 0], [0, 1]], [[1, 0], [0, 1]], [[1, 2], [3, 4]]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, d)), rng.normal(size=(n, d)), rng.normal(size=(n, v))] for n, d, v in [(4, 8, 3), (7, 4, 2)]]
+    hints:
+      - "`np.tril` builds a lower-triangular mask: True where `j <= i`."
+    explanation: |
+      Setting future scores to −∞ makes their `exp` exactly 0, so each row's weights cover only the current and earlier positions. The first row always attends only to itself. The row maximum is taken after masking, and every row has at least one unmasked entry (the diagonal), so nothing becomes NaN.

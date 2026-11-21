@@ -7,10 +7,10 @@ import { useSession } from "@/app/lib/auth/useSession";
 import UserMenu from "./UserMenu";
 import { isPro } from "@/app/lib/billing/plan";
 
-type NavItem = { label: string; href: string; when?: "signedIn" | "admin" | "notPro" };
+type NavItem = { label: string; href: string; when?: "signedIn" | "admin" | "notPro"; also?: string[] };
 
 const NAV: NavItem[] = [
-  { label: "Practice", href: "/problems" },
+  { label: "Practice", href: "/practice", also: ["/problems"] },
   { label: "ML Arena", href: "/arena" },
   { label: "Institutions", href: "/institutions", when: "signedIn" },
   { label: "Create problem", href: "/create-problem", when: "admin" },
@@ -37,8 +37,8 @@ export default function AppHeader() {
           <Logo />
         </Link>
         <nav className="flex items-center gap-1 text-sm font-medium">
-          {visible.map(({ label, href }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+          {visible.map(({ label, href, also }) => {
+            const active = [href, ...(also ?? [])].some((h) => pathname === h || pathname.startsWith(`${h}/`));
             return (
               <Link
                 key={href}

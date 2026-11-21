@@ -34,3 +34,22 @@ export function handleEditorMount(editor, monaco) {
     document.fonts.ready.then(() => monaco?.editor?.remeasureFonts?.());
   }
 }
+
+/**
+ * JavaScript / JSX editing (ML Arena frontend problems, the playground):
+ * understand JSX, and keep syntax errors but drop "cannot find module 'react'"
+ * style type errors, since the editor has no type definitions.
+ */
+export function configureJsx(monaco) {
+  const js = monaco?.languages?.typescript?.javascriptDefaults;
+  if (!js) return;
+  js.setCompilerOptions({
+    ...js.getCompilerOptions(),
+    jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+    allowJs: true,
+    allowNonTsExtensions: true,
+    target: monaco.languages.typescript.ScriptTarget.ES2022,
+    module: monaco.languages.typescript.ModuleKind.ESNext,
+  });
+  js.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
+}

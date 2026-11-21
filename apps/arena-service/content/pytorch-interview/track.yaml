@@ -1,0 +1,11 @@
+id: pytorch-interview
+title: PyTorch and deep learning coding
+summary: The ML coding round in PyTorch — tensor shapes, autograd, writing nn.Modules, training loops and their classic bugs, and attention from scratch.
+level: interview
+order: 7
+topics:
+  - torch-tensors
+  - torch-autograd
+  - torch-modules
+  - torch-training
+  - torch-attention

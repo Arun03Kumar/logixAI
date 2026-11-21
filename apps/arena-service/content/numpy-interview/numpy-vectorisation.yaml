@@ -1,0 +1,299 @@
+id: numpy-vectorisation
+title: Vectorisation tricks
+summary: One-hot encoding, moving averages, counting, per-row top-k, NaN handling and einsum — replacing Python loops with array operations.
+prerequisites: [broadcasting]
+lesson: |
+  ## Why interviewers ask for "no loops"
+
+  A Python loop over a million rows runs a million interpreted steps; one NumPy call runs a compiled loop over the whole array. Interviewers want to see that you think in whole arrays: indexing, broadcasting and reductions.
+
+  ## Tricks worth knowing
+
+  | Task | Vectorised |
+  | --- | --- |
+  | One-hot | `np.eye(k)[labels]` — fancy-index the rows of an identity matrix |
+  | Count per class | `np.bincount(labels, minlength=k)` |
+  | Moving average | `np.convolve(x, np.ones(w) / w, mode="valid")`, or differences of `np.cumsum` |
+  | Top-k per row | `np.argsort(-scores, axis=1, kind="stable")[:, :k]` |
+  | Row-wise dot | `np.einsum("ij,ij->i", A, B)` or `(A * B).sum(axis=1)` |
+  | Unique values and counts | `np.unique(x, return_counts=True)` |
+
+  ## NaN
+
+  `np.nan` poisons sums and means; the `nan*` functions (`np.nanmean`, `np.nansum`) skip it. `np.isnan(X)` gives a mask you can use to fill: `X[mask] = np.take(col_means, np.where(mask)[1])`.
+
+  ## Division by zero
+
+  Normalising rows divides by their norms, and a zero row has norm 0. Guard with `np.where(norms == 0, 1, norms)` so zero rows stay zero instead of becoming NaN.
+items:
+  - id: np-one-hot
+    type: code
+    title: One-hot encode labels
+    difficulty: easy
+    tags: [numpy, indexing, encoding]
+    prompt: |
+      Implement `one_hot(labels, k)`: an `(n, k)` array of 0s and 1s with a 1 in column `labels[i]` of row `i`. Labels are integers from `0` to `k − 1`.
+    function:
+      name: one_hot
+      params:
+        - { name: labels, type: ndarray_int }
+        - { name: k, type: int }
+      returns: "ndarray of shape (n, k)"
+    starter: |
+      import numpy as np
+
+      def one_hot(labels, k):
+          return np.zeros((len(labels), k))
+    solution: |
+      import numpy as np
+
+      def one_hot(labels, k):
+          return np.eye(k)[labels]
+    tests:
+      sample:
+        - args: [[0, 2, 1, 2], 3]
+          expected: [[1, 0, 0], [0, 0, 1], [0, 1, 0], [0, 0, 1]]
+      hidden:
+        - args: [[4], 5]
+      generate: |
+        def cases(rng):
+            return [[rng.integers(0, k, size=n), int(k)] for n, k in [(10, 3), (50, 10)]]
+    explanation: |
+      Row `i` of the identity matrix is the one-hot vector for class `i`, so indexing `np.eye(k)` with the label array picks the right row for every sample at once. The loop-free alternative: `out = np.zeros((n, k)); out[np.arange(n), labels] = 1`.
+
+  - id: np-moving-average
+    type: code
+    title: Moving average
+    difficulty: easy
+    tags: [numpy, convolution, cumsum]
+    prompt: |
+      Implement `moving_average(x, w)`: the mean of every window of `w` consecutive values, for windows that fit entirely inside `x` (length `n − w + 1`).
+    function:
+      name: moving_average
+      params:
+        - { name: x, type: ndarray }
+        - { name: w, type: int }
+      returns: "ndarray of length n - w + 1"
+    starter: |
+      import numpy as np
+
+      def moving_average(x, w):
+          return x[: len(x) - w + 1]
+    solution: |
+      import numpy as np
+
+      def moving_average(x, w):
+          c = np.cumsum(np.insert(x, 0, 0.0))
+          return (c[w:] - c[:-w]) / w
+    tests:
+      sample:
+        - args: [[1, 2, 3, 4, 5], 2]
+          expected: [1.5, 2.5, 3.5, 4.5]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=n), int(w)] for n, w in [(10, 3), (100, 7), (5, 5)]]
+    explanation: |
+      With a running sum `c` (starting at 0), the sum of `x[i:i+w]` is `c[i+w] − c[i]`, so all window sums come from one subtraction of two shifted arrays. `np.convolve(x, np.ones(w) / w, mode="valid")` gives the same result.
+
+  - id: np-row-normalize
+    type: code
+    title: Unit-length rows
+    difficulty: easy
+    tags: [numpy, broadcasting, norms]
+    prompt: |
+      Implement `normalize_rows(X)`: divide each row by its Euclidean (L2) length so it has length 1. Rows of all zeros stay all zeros.
+    function:
+      name: normalize_rows
+      params:
+        - { name: X, type: ndarray }
+      returns: "ndarray, same shape as X"
+    starter: |
+      import numpy as np
+
+      def normalize_rows(X):
+          return X / np.linalg.norm(X, axis=1, keepdims=True)
+    solution: |
+      import numpy as np
+
+      def normalize_rows(X):
+          norms = np.linalg.norm(X, axis=1, keepdims=True)
+          return X / np.where(norms == 0, 1.0, norms)
+    tests:
+      sample:
+        - args: [[[3, 4], [0, 0], [1, 0]]]
+          expected: [[0.6, 0.8], [0, 0], [1, 0]]
+      generate: |
+        def cases(rng):
+            X = rng.normal(size=(20, 5))
+            X[3] = 0
+            return [[X], [rng.normal(size=(4, 2))]]
+    explanation: |
+      `keepdims=True` keeps the norms as a column `(n, 1)`, which broadcasts across each row. Replacing zero norms with 1 avoids `0 / 0 = NaN` and leaves those rows at zero.
+
+  - id: np-class-counts
+    type: code
+    title: Count each class
+    difficulty: easy
+    tags: [numpy, bincount]
+    prompt: |
+      Implement `class_counts(labels, k)`: an array of length `k` whose entry `c` is how many times label `c` appears. Classes that never appear count 0.
+    function:
+      name: class_counts
+      params:
+        - { name: labels, type: ndarray_int }
+        - { name: k, type: int }
+      returns: "int ndarray of length k"
+    starter: |
+      import numpy as np
+
+      def class_counts(labels, k):
+          return np.bincount(labels)
+    solution: |
+      import numpy as np
+
+      def class_counts(labels, k):
+          return np.bincount(labels, minlength=k)
+    tests:
+      sample:
+        - args: [[0, 2, 2, 0, 2], 4]
+          expected: [2, 0, 3, 0]
+      generate: |
+        def cases(rng):
+            return [[rng.integers(0, 3, size=30), 6], [rng.integers(0, 10, size=200), 10]]
+    explanation: |
+      `bincount` counts occurrences of 0, 1, 2, … up to the largest label present. `minlength=k` pads it so classes above the largest observed label still get a 0 — the hidden tests have such classes.
+
+  - id: np-fill-nan-col-mean
+    type: code
+    title: Fill NaNs with column means
+    difficulty: medium
+    tags: [numpy, nan, imputation]
+    prompt: |
+      Implement `fill_nan(X)`: replace each NaN in `X` with the mean of the non-NaN values in its column. (No column is entirely NaN.) Missing values appear as `null` in the examples.
+    function:
+      name: fill_nan
+      params:
+        - { name: X, type: ndarray }
+      returns: "ndarray, same shape, no NaNs"
+    starter: |
+      import numpy as np
+
+      def fill_nan(X):
+          return np.nan_to_num(X, nan=0.0)
+    solution: |
+      import numpy as np
+
+      def fill_nan(X):
+          X = X.copy()
+          means = np.nanmean(X, axis=0)
+          rows, cols = np.where(np.isnan(X))
+          X[rows, cols] = means[cols]
+          return X
+    tests:
+      sample:
+        - args: [[[1, null], [3, 4], [null, 8]]]
+          expected: [[1, 6], [3, 4], [2, 8]]
+      hidden:
+        - args: [[[null, 1, 2], [5, null, 2], [7, 3, null], [9, 5, 8]]]
+        - args: [[[1.5, 2.5], [3.5, 4.5]]]
+    explanation: |
+      `np.nanmean(axis=0)` averages each column ignoring NaNs. `np.where(np.isnan(X))` gives the row and column of every hole, and `means[cols]` looks up the right mean for each.
+
+  - id: np-top-k-per-row
+    type: code
+    title: Top-k columns in each row
+    difficulty: medium
+    tags: [numpy, argsort, ranking]
+    prompt: |
+      Implement `top_k_rows(scores, k)`: for each row, the column indices of its `k` largest values, largest first. When values tie, the smaller index comes first. Returns an `(n, k)` int array — think "top-k recommendations per user".
+    function:
+      name: top_k_rows
+      params:
+        - { name: scores, type: ndarray }
+        - { name: k, type: int }
+      returns: "int ndarray of shape (n, k)"
+    starter: |
+      import numpy as np
+
+      def top_k_rows(scores, k):
+          return np.argsort(scores, axis=1)[:, :k]
+    solution: |
+      import numpy as np
+
+      def top_k_rows(scores, k):
+          return np.argsort(-scores, axis=1, kind="stable")[:, :k]
+    tests:
+      sample:
+        - args: [[[0.1, 0.9, 0.5], [3, 3, 1]], 2]
+          expected: [[1, 2], [0, 1]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(5, 8)), 3], [rng.integers(0, 4, size=(6, 6)).astype(float), 4]]
+    explanation: |
+      Sorting `-scores` ascending is sorting `scores` descending, and `kind="stable"` keeps equal values in index order, so ties break toward the smaller index. Reversing an ascending sort would put the *larger* index first among ties.
+
+  - id: np-row-dot
+    type: code
+    title: Row-wise dot products
+    difficulty: easy
+    tags: [numpy, einsum]
+    prompt: |
+      Implement `row_dot(A, B)`: for two `(n, d)` arrays, the dot product of each row of `A` with the same row of `B`, as a length-`n` array.
+    function:
+      name: row_dot
+      params:
+        - { name: A, type: ndarray }
+        - { name: B, type: ndarray }
+      returns: "ndarray of length n"
+    starter: |
+      import numpy as np
+
+      def row_dot(A, B):
+          return A @ B.T
+    solution: |
+      import numpy as np
+
+      def row_dot(A, B):
+          return np.einsum("ij,ij->i", A, B)
+    tests:
+      sample:
+        - args: [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+          expected: [17, 53]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(n, d)), rng.normal(size=(n, d))] for n, d in [(10, 4), (3, 50)]]
+    explanation: |
+      `A @ B.T` computes every pair of rows (`n × n`) when only the diagonal is wanted — wasted work and memory. `einsum("ij,ij->i")` multiplies matching entries and sums over `j` per row; `(A * B).sum(axis=1)` is equivalent.
+
+  - id: np-unique-counts
+    type: code
+    title: Values and how often they appear
+    difficulty: easy
+    tags: [numpy, unique]
+    prompt: |
+      Implement `value_counts(x)`: return `[values, counts]` — the distinct values of `x` in ascending order, and how many times each appears.
+    function:
+      name: value_counts
+      params:
+        - { name: x, type: ndarray_int }
+      returns: "[sorted unique values, counts]"
+    starter: |
+      import numpy as np
+
+      def value_counts(x):
+          return [np.unique(x), np.ones(len(np.unique(x)), dtype=int)]
+    solution: |
+      import numpy as np
+
+      def value_counts(x):
+          values, counts = np.unique(x, return_counts=True)
+          return [values, counts]
+    tests:
+      sample:
+        - args: [[3, 1, 3, 3, 7]]
+          expected: [[1, 3, 7], [1, 3, 1]]
+      generate: |
+        def cases(rng):
+            return [[rng.integers(-5, 5, size=40)], [rng.integers(0, 1000, size=20)]]
+    explanation: |
+      `np.unique` sorts and de-duplicates; with `return_counts=True` it also returns how many times each value occurred — NumPy's `value_counts`.

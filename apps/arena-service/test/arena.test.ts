@@ -71,7 +71,7 @@ const SUCCESS = (n: number) => Array.from({ length: n }, () => ({ status: "SUCCE
 describe("catalog", () => {
   it("lists tracks, topics and items without signing in", async () => {
     const tracks = await req(null, "GET", "/tracks");
-    expect(tracks.data.map((t: { id: string }) => t.id)).toEqual(["math-for-ml", "python-numpy", "ml-fundamentals"]);
+    expect(tracks.data.map((t: { id: string }) => t.id)).toEqual(["math-for-ml", "python-numpy", "ml-fundamentals", "sql-interview", "pandas-interview", "numpy-interview", "pytorch-interview", "frontend-interview", "system-design", "llm-agents"]);
     expect(tracks.data[0]).toMatchObject({ solvedCount: 0, mastery: 0 });
 
     const topic = await req(null, "GET", "/topics/vectors");

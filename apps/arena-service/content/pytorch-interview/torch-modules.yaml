@@ -1,0 +1,410 @@
+id: torch-modules
+title: Writing nn.Modules
+summary: Layers from scratch — parameters vs plain tensors, state_dict names, train and eval modes, LayerNorm, RMSNorm, Dropout and residual blocks, plus parameter and shape arithmetic.
+prerequisites: [torch-autograd, numpy-ml-from-scratch]
+lesson: |
+  ## The shape of a module
+
+  ```python
+  import torch
+  from torch import nn
+
+  class MLP(nn.Module):
+      def __init__(self, d_in, hidden, d_out):
+          super().__init__()                 # always first
+          self.fc1 = nn.Linear(d_in, hidden)
+          self.fc2 = nn.Linear(hidden, d_out)
+
+      def forward(self, x):
+          return self.fc2(torch.relu(self.fc1(x)))
+  ```
+
+  Assigning an `nn.Module` or an `nn.Parameter` as an attribute **registers** it: it appears in `model.parameters()` (what the optimizer updates), in `model.state_dict()` under a dotted name (`fc1.weight`, `fc1.bias`, ...) and moves with `model.to(device)`. A plain tensor attribute does none of that, so it's never trained. Use `self.register_buffer("name", tensor)` for state that isn't trained but should be saved and moved (BatchNorm's running mean).
+
+  Call the module (`model(x)`), not `model.forward(x)`, so hooks run.
+
+  ## train() and eval()
+
+  `model.train()` / `model.eval()` set `self.training` on every submodule. Only some layers care: **Dropout** (on in training, identity in eval) and **BatchNorm** (batch statistics in training, running averages in eval). They don't affect gradient tracking — that's `torch.no_grad()`.
+
+  ## Normalisation layers
+
+  For a vector $x$ of size $d$ (the last dim):
+
+  - **LayerNorm**: $\dfrac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma + \beta$ with the mean $\mu$ and the **biased** variance $\sigma^2$ (divide by $d$) of that vector.
+  - **RMSNorm** (LLaMA and most recent LLMs): $\dfrac{x}{\sqrt{\operatorname{mean}(x^2) + \epsilon}} \cdot \gamma$ — no centring, no bias.
+  - **BatchNorm** normalises each feature across the **batch** instead, which is why it needs running statistics for single-example inference.
+
+  ## Counting
+
+  - `nn.Linear(a, b)`: $ab + b$ parameters.
+  - `nn.Conv2d(c_in, c_out, k)`: $c_{out} \cdot c_{in} \cdot k^2 + c_{out}$.
+  - Conv output size: $\left\lfloor \dfrac{n + 2p - k}{s} \right\rfloor + 1$.
+items:
+  - id: nn-param-count-mlp
+    type: numeric
+    title: Parameters in an MLP
+    difficulty: easy
+    tags: [pytorch, parameters]
+    prompt: |
+      How many trainable parameters does this model have?
+      ```python
+      nn.Sequential(nn.Linear(784, 256), nn.ReLU(), nn.Linear(256, 10))
+      ```
+    answer: 203530
+    tolerance: 0
+    explanation: |
+      $784 \cdot 256 + 256 = 200{,}960$ for the first layer and $256 \cdot 10 + 10 = 2{,}570$ for the second; ReLU has none. Total $203{,}530$. Check with `sum(p.numel() for p in model.parameters())`.
+
+  - id: nn-conv-params
+    type: numeric
+    title: Parameters in a conv layer
+    difficulty: easy
+    tags: [pytorch, cnn, parameters]
+    prompt: |
+      How many parameters does `nn.Conv2d(3, 64, kernel_size=3)` have?
+    answer: 1792
+    tolerance: 0
+    explanation: |
+      Each of the 64 filters has $3 \times 3 \times 3 = 27$ weights (one $3\times3$ kernel per input channel) plus a bias: $64 \cdot 28 = 1{,}792$. The image size doesn't matter — the same weights slide over every position.
+
+  - id: nn-conv-output-size
+    type: numeric
+    title: Conv output size
+    difficulty: easy
+    tags: [pytorch, cnn, shapes]
+    prompt: |
+      A `32 × 32` image goes through `nn.Conv2d(3, 16, kernel_size=5, stride=2, padding=2)`. What is the output's height (and width)?
+    answer: 16
+    tolerance: 0
+    explanation: |
+      $\lfloor (32 + 2\cdot2 - 5) / 2 \rfloor + 1 = \lfloor 31/2 \rfloor + 1 = 16$. With `padding = k // 2` and stride 2, a conv halves the size (rounding up).
+
+  - id: nn-eval-mode
+    type: mcq_multi
+    title: What model.eval() changes
+    difficulty: medium
+    tags: [pytorch, train-eval]
+    prompt: |
+      Which of these does `model.eval()` change? Select all that apply.
+    options:
+      - { id: a, text: "Dropout layers stop dropping and pass inputs through unchanged" }
+      - { id: b, text: "BatchNorm layers use their running mean and variance instead of the batch's" }
+      - { id: c, text: "Gradients stop being tracked" }
+      - { id: d, text: "The model's parameters are frozen so the optimizer can't change them" }
+    answer: [a, b]
+    explanation: |
+      `eval()` only flips `self.training`, which Dropout and BatchNorm (and any layer you write) read. It doesn't touch autograd — use `torch.no_grad()` for that — and doesn't freeze parameters (`requires_grad_(False)` does). Forgetting `eval()` at inference makes predictions random (Dropout) or batch-dependent (BatchNorm).
+
+  - id: nn-linear-from-scratch
+    type: code
+    title: A Linear layer from scratch
+    difficulty: easy
+    tags: [pytorch, nn-module, parameters]
+    prompt: |
+      Implement `MyLinear(in_features, out_features)`, an `nn.Module` with a trainable `weight` of shape `(out_features, in_features)` and a trainable `bias` of shape `(out_features,)`. `forward(x)` maps `(..., in_features)` to `(..., out_features)` as $xW^\top + b$. Initialise however you like; the tests load their own values.
+    driver: |
+      import torch
+
+      def check(x, W, b):
+          layer = MyLinear(W.shape[1], W.shape[0])
+          trainable = sorted(name for name, _ in layer.named_parameters())
+          with torch.no_grad():
+              layer.weight.copy_(W)
+              layer.bias.copy_(b)
+          return {"trainable": trainable, "output": layer(x)}
+    function:
+      name: check
+      params:
+        - { name: x, type: tensor }
+        - { name: W, type: tensor }
+        - { name: b, type: tensor }
+      returns: "the trainable parameter names and the layer's output"
+    starter: |
+      import torch
+      from torch import nn
+
+      class MyLinear(nn.Module):
+          def __init__(self, in_features, out_features):
+              super().__init__()
+              self.weight = torch.randn(out_features, in_features) * 0.01
+              self.bias = torch.zeros(out_features)
+
+          def forward(self, x):
+              return x @ self.weight.T + self.bias
+    solution: |
+      import torch
+      from torch import nn
+
+      class MyLinear(nn.Module):
+          def __init__(self, in_features, out_features):
+              super().__init__()
+              self.weight = nn.Parameter(torch.randn(out_features, in_features) / in_features ** 0.5)
+              self.bias = nn.Parameter(torch.zeros(out_features))
+
+          def forward(self, x):
+              return x @ self.weight.T + self.bias
+    tests:
+      sample:
+        - args: [[[1.0, 2.0], [0.0, -1.0]], [[1.0, 0.0], [2.0, 1.0], [0.0, 3.0]], [0.5, 0.0, -1.0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(2, 3, 4)), rng.normal(size=(5, 4)), rng.normal(size=5)]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      The maths is right in the starter, but plain tensors aren't **registered**: `parameters()` is empty, so an optimizer built from it would never update them (and `state_dict()` wouldn't save them). Wrapping them in `nn.Parameter` registers them and sets `requires_grad=True`. Scaling the initial weights by $1/\sqrt{\text{in}}$ keeps activations from growing layer by layer.
+
+  - id: nn-layernorm
+    type: code
+    title: LayerNorm from scratch
+    difficulty: medium
+    tags: [pytorch, normalization, nn-module]
+    prompt: |
+      Implement `LayerNorm(dim, eps=1e-5)` as an `nn.Module` with trainable `weight` (initialised to ones) and `bias` (zeros), both of shape `(dim,)`. `forward(x)` normalises over the **last** dimension, like `nn.LayerNorm`: subtract the mean, divide by $\sqrt{\text{variance} + \epsilon}$, then scale by `weight` and shift by `bias`.
+    driver: |
+      import torch
+
+      def check(x, weight, bias):
+          norm = LayerNorm(x.shape[-1])
+          with torch.no_grad():
+              norm.weight.copy_(weight)
+              norm.bias.copy_(bias)
+          return norm(x)
+    function:
+      name: check
+      params:
+        - { name: x, type: tensor }
+        - { name: weight, type: tensor }
+        - { name: bias, type: tensor }
+      returns: "tensor shaped like x"
+    starter: |
+      import torch
+      from torch import nn
+
+      class LayerNorm(nn.Module):
+          def __init__(self, dim, eps=1e-5):
+              super().__init__()
+              self.eps = eps
+              self.weight = nn.Parameter(torch.ones(dim))
+              self.bias = nn.Parameter(torch.zeros(dim))
+
+          def forward(self, x):
+              mean = x.mean(dim=-1, keepdim=True)
+              var = x.var(dim=-1, keepdim=True)
+              return (x - mean) / torch.sqrt(var + self.eps) * self.weight + self.bias
+    solution: |
+      import torch
+      from torch import nn
+
+      class LayerNorm(nn.Module):
+          def __init__(self, dim, eps=1e-5):
+              super().__init__()
+              self.eps = eps
+              self.weight = nn.Parameter(torch.ones(dim))
+              self.bias = nn.Parameter(torch.zeros(dim))
+
+          def forward(self, x):
+              mean = x.mean(dim=-1, keepdim=True)
+              var = x.var(dim=-1, keepdim=True, unbiased=False)
+              return (x - mean) / torch.sqrt(var + self.eps) * self.weight + self.bias
+    tests:
+      sample:
+        - args: [[[1.0, 2.0, 3.0, 4.0], [2.0, 2.0, 2.0, 2.0]], [1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(2, 3, 6)) * 4 + 1, rng.normal(size=6), rng.normal(size=6)]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    hints:
+      - "`torch.var` divides by `n − 1` by default. Which one does LayerNorm use?"
+    explanation: |
+      LayerNorm uses the **biased** variance (divide by $d$, `unbiased=False` or `correction=0`); `torch.var`'s default divides by $d - 1$, which gives slightly smaller outputs — close enough to look right, wrong enough to fail a comparison with `nn.LayerNorm`. A constant row has variance 0, and `eps` keeps the division finite.
+
+  - id: nn-rmsnorm
+    type: code
+    title: RMSNorm
+    difficulty: medium
+    access: pro
+    tags: [pytorch, normalization, llm]
+    prompt: |
+      Implement `RMSNorm(dim, eps=1e-6)` with one trainable `weight` of shape `(dim,)` (initialised to ones). Over the last dimension:
+      $$\text{out} = \frac{x}{\sqrt{\operatorname{mean}(x^2) + \epsilon}} \cdot \text{weight}$$
+    driver: |
+      import torch
+
+      def check(x, weight):
+          norm = RMSNorm(x.shape[-1])
+          names = sorted(name for name, _ in norm.named_parameters())
+          with torch.no_grad():
+              norm.weight.copy_(weight)
+          return {"trainable": names, "output": norm(x)}
+    function:
+      name: check
+      params:
+        - { name: x, type: tensor }
+        - { name: weight, type: tensor }
+      returns: "parameter names and the output"
+    starter: |
+      import torch
+      from torch import nn
+
+      class RMSNorm(nn.Module):
+          def __init__(self, dim, eps=1e-6):
+              super().__init__()
+              self.eps = eps
+              self.weight = nn.Parameter(torch.ones(dim))
+
+          def forward(self, x):
+              return x / (x.norm(dim=-1, keepdim=True) + self.eps) * self.weight
+    solution: |
+      import torch
+      from torch import nn
+
+      class RMSNorm(nn.Module):
+          def __init__(self, dim, eps=1e-6):
+              super().__init__()
+              self.eps = eps
+              self.weight = nn.Parameter(torch.ones(dim))
+
+          def forward(self, x):
+              rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+              return x / rms * self.weight
+    tests:
+      sample:
+        - args: [[[3.0, 4.0], [1.0, -1.0]], [1.0, 2.0]]
+      generate: |
+        def cases(rng):
+            return [[rng.normal(size=(3, 8)) * 2, rng.normal(size=8)]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      The **root mean square** is $\sqrt{\frac{1}{d}\sum x_i^2}$, while `x.norm()` is $\sqrt{\sum x_i^2}$ — larger by $\sqrt d$. RMSNorm skips LayerNorm's mean subtraction and bias, which saves compute and works as well in transformers; LLaMA, Mistral and most recent LLMs use it.
+
+  - id: nn-dropout
+    type: code
+    title: Dropout from scratch
+    difficulty: medium
+    tags: [pytorch, dropout, train-eval]
+    prompt: |
+      Implement `Dropout(p)` as an `nn.Module` (inverted dropout, like `nn.Dropout`):
+
+      - in **training** mode, set each element to 0 with probability `p` and multiply the survivors by $\frac{1}{1-p}$;
+      - in **eval** mode, return the input unchanged.
+
+      Use `self.training` to tell the modes apart. The test checks the behaviour statistically on 20,000 elements.
+    driver: |
+      import torch
+
+      def check(p, n):
+          torch.manual_seed(0)
+          layer = Dropout(p)
+          x = torch.ones(n)
+          layer.train()
+          y = layer(x)
+          kept = y != 0
+          layer.eval()
+          z = layer(x)
+          return {
+              "eval_returns_input": bool(torch.equal(z, x)),
+              "survivors_scaled_by_1_over_1_minus_p": bool(torch.allclose(y[kept], torch.full_like(y[kept], 1 / (1 - p)))),
+              "drop_rate_close_to_p": abs((1 - kept.float().mean().item()) - p) < 0.03,
+          }
+    function:
+      name: check
+      params:
+        - { name: p, type: float }
+        - { name: n, type: int }
+      returns: "three checks, all true"
+    starter: |
+      import torch
+      from torch import nn
+
+      class Dropout(nn.Module):
+          def __init__(self, p):
+              super().__init__()
+              self.p = p
+
+          def forward(self, x):
+              keep = (torch.rand_like(x) >= self.p).to(x.dtype)
+              return x * keep
+    solution: |
+      import torch
+      from torch import nn
+
+      class Dropout(nn.Module):
+          def __init__(self, p):
+              super().__init__()
+              self.p = p
+
+          def forward(self, x):
+              if not self.training or self.p == 0:
+                  return x
+              keep = (torch.rand_like(x) >= self.p).to(x.dtype)
+              return x * keep / (1 - self.p)
+    tests:
+      sample:
+        - args: [0.3, 20000]
+      hidden:
+        - args: [0.5, 20000]
+        - args: [0.0, 20000]
+    explanation: |
+      Scaling survivors by $1/(1-p)$ keeps each element's **expected** value equal to the input, so eval mode can simply pass inputs through and the next layer sees the same scale in both modes. The starter forgets both the scaling and eval mode, so the network sees inputs shrunk by $(1-p)$ in training and random masks at inference.
+
+  - id: nn-residual-block
+    type: code
+    title: A residual MLP block
+    difficulty: medium
+    access: pro
+    tags: [pytorch, nn-module, state-dict, residual]
+    prompt: |
+      Implement `ResidualMLP(dim, hidden)`: two linear layers named **`fc1`** (`dim → hidden`) and **`fc2`** (`hidden → dim`), with
+      $$\text{out} = x + \text{fc2}(\operatorname{ReLU}(\text{fc1}(x)))$$
+      The test loads weights with `load_state_dict`, so the attribute names matter.
+    driver: |
+      import torch
+
+      def check(x, w1, b1, w2, b2):
+          block = ResidualMLP(w1.shape[1], w1.shape[0])
+          block.load_state_dict({"fc1.weight": w1, "fc1.bias": b1, "fc2.weight": w2, "fc2.bias": b2})
+          return block(x)
+    function:
+      name: check
+      params:
+        - { name: x, type: tensor }
+        - { name: w1, type: tensor }
+        - { name: b1, type: tensor }
+        - { name: w2, type: tensor }
+        - { name: b2, type: tensor }
+      returns: "tensor shaped like x"
+    starter: |
+      import torch
+      from torch import nn
+
+      class ResidualMLP(nn.Module):
+          def __init__(self, dim, hidden):
+              super().__init__()
+              self.fc1 = nn.Linear(dim, hidden)
+              self.fc2 = nn.Linear(hidden, dim)
+
+          def forward(self, x):
+              return self.fc2(torch.relu(self.fc1(x)))
+    solution: |
+      import torch
+      from torch import nn
+
+      class ResidualMLP(nn.Module):
+          def __init__(self, dim, hidden):
+              super().__init__()
+              self.fc1 = nn.Linear(dim, hidden)
+              self.fc2 = nn.Linear(hidden, dim)
+
+          def forward(self, x):
+              return x + self.fc2(torch.relu(self.fc1(x)))
+    tests:
+      sample:
+        - args: [[[1.0, -1.0]], [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], [0.0, 0.0, 0.5], [[1.0, 0.0, 1.0], [0.0, 1.0, -1.0]], [0.0, 0.0]]
+      generate: |
+        def cases(rng):
+            d, h = 4, 6
+            return [[rng.normal(size=(3, d)), rng.normal(size=(h, d)), rng.normal(size=h), rng.normal(size=(d, h)), rng.normal(size=d)]]
+    tolerance: { abs: 1.0e-4, rel: 1.0e-4 }
+    explanation: |
+      The skip connection adds the input back, so the block only has to learn a *correction* to the identity, and gradients reach early layers directly through the addition — the reason networks with hundreds of layers train. `load_state_dict` matches keys by attribute path (`fc1.weight`), so renaming `fc1` would make loading fail.

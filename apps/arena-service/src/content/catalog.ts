@@ -5,17 +5,34 @@ import { XP_BY_DIFFICULTY, type ArenaDifficulty } from "@logixai/contracts";
 import { parse as parseYaml } from "yaml";
 import {
   GeneratedTestsSchema,
+  ListsFileSchema,
   TopicFileSchema,
   TrackFileSchema,
   type CodeItemSource,
   type GeneratedTests,
   type ItemSource,
+  type JudgedItemSource,
+  type ListsFile,
   type TopicFile,
   type TrackFile,
 } from "./schema.js";
 import { loadDataset, splitDataset, type DatasetSplit } from "./datasets.js";
+import { loadPracticeConfig, type PracticeConfig } from "./practiceConfig.js";
 
 export const GENERATED_FILE = "tests.generated.json";
+export const LISTS_FILE = "lists.yaml";
+/** SQL databases any topic can use (a map of name -> database). */
+export const SHARED_DATABASES_FILE = "sql-databases.yaml";
+/** DataFrames any topic's tests can use as {"$frame": name}. */
+export const SHARED_FRAMES_FILE = "frames.yaml";
+
+function readShared(dir: string, file: string): Record<string, unknown> {
+  const p = path.join(dir, file);
+  if (!existsSync(p)) return {};
+  const value = parseYaml(readFileSync(p, "utf8")) as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${p}: expected a map of name -> definition`);
+  return value as Record<string, unknown>;
+}
 
 export interface JudgeTest {
   args: unknown[];
@@ -44,9 +61,15 @@ export interface CatalogTrack extends Omit<TrackFile, "topics"> {
   topics: CatalogTopic[];
 }
 
-/** What a code item's expected outputs depend on; a change means rebuild. */
-export function codeItemHash(item: CodeItemSource, datasetHash?: string): string {
+/** What a judged item's expected outputs depend on; a change means rebuild. */
+export function codeItemHash(item: JudgedItemSource, datasetHash?: string): string {
+  if (item.type === "sql") {
+    const basis = JSON.stringify(["sql", item.tables, item.solution, item.tests, item.ordered, item.tolerance]);
+    return createHash("sha256").update(basis).digest("hex").slice(0, 16);
+  }
   const parts: unknown[] = [item.function, item.solution, item.tests, item.tolerance];
+  if (item.driver) parts.push({ driver: item.driver });
+  if (item.language === "javascript") parts.push({ language: item.language, expose: item.expose });
   if (item.dataset) parts.push(item.dataset, item.scoring, item.starter, datasetHash);
   const basis = JSON.stringify(parts);
   return createHash("sha256").update(basis).digest("hex").slice(0, 16);
@@ -55,16 +78,28 @@ export function codeItemHash(item: CodeItemSource, datasetHash?: string): string
 export const isCode = (item: ItemSource): item is CodeItemSource =>
   item.type === "code" || item.type === "debug";
 
+/** What the JavaScript harness needs from an item. */
+export const jsHarnessFor = (item: CodeItemSource) => ({
+  name: item.function.name,
+  expose: item.expose ?? [item.function.name],
+  ...(item.driver ? { driver: item.driver } : {}),
+});
+
+/** Items whose answer is code run by the judge: functions and SQL queries. */
+export const isJudged = (item: ItemSource): item is JudgedItemSource => isCode(item) || item.type === "sql";
+
 /** Reads and validates the YAML sources. Throws one error listing every problem. */
 export interface ContentSources {
   tracks: TrackFile[];
   topics: Map<string, TopicFile>;
+  lists: ListsFile;
 }
 
 export function readSources(dir: string): ContentSources {
   const problems: string[] = [];
   const tracks: TrackFile[] = [];
   const topics = new Map<string, TopicFile>();
+  const shared = { databases: readShared(dir, SHARED_DATABASES_FILE), frames: readShared(dir, SHARED_FRAMES_FILE) };
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -83,7 +118,13 @@ export function readSources(dir: string): ContentSources {
         problems.push(`${trackPath}: topic file ${topicId}.yaml is missing`);
         continue;
       }
-      const topic = TopicFileSchema.safeParse(parseYaml(readFileSync(topicPath, "utf8")));
+      const raw = parseYaml(readFileSync(topicPath, "utf8")) as Record<string, unknown> | null;
+      // Shared databases and frames, unless the topic defines its own with the same name.
+      if (raw && typeof raw === "object") {
+        raw.databases = { ...structuredClone(shared.databases), ...((raw.databases as object) ?? {}) };
+        raw.frames = { ...structuredClone(shared.frames), ...((raw.frames as object) ?? {}) };
+      }
+      const topic = TopicFileSchema.safeParse(raw);
       if (!topic.success) {
         problems.push(
           `${topicPath}: ${topic.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`,
@@ -126,12 +167,29 @@ export function readSources(dir: string): ContentSources {
         problems.push(`${where}: needs at least one sample test`);
       }
       if (isCode(item) && item.scoring && !item.dataset) problems.push(`${where}: scoring needs a dataset`);
+      if (isCode(item) && item.language === "javascript") {
+        if (item.dataset) problems.push(`${where}: dataset challenges are Python only`);
+        const bad = item.function.params.filter((p) => ["ndarray", "ndarray_int", "tensor", "tensor_int", "dataframe"].includes(p.type));
+        if (bad.length) problems.push(`${where}: ${bad.map((p) => p.type).join(", ")} params are Python only`);
+        if (item.driver && !item.expose?.length) problems.push(`${where}: a JavaScript driver needs expose (the names it uses)`);
+        if (item.preview && !(item.expose ?? [item.function.name]).includes(item.preview.component)) {
+          problems.push(`${where}: preview.component must be one of expose`);
+        }
+      } else if (isCode(item) && (item.expose || item.preview)) {
+        problems.push(`${where}: expose and preview are for JavaScript items`);
+      }
       if (isCode(item)) {
         const params = item.function.params.length;
         for (const t of [...item.tests.sample, ...item.tests.hidden]) {
           if (t.args.length !== params) problems.push(`${where}: a test has ${t.args.length} args, expected ${params}`);
         }
         if (item.starter.trim() === item.solution.trim()) problems.push(`${where}: starter equals the solution`);
+      }
+      if (item.type === "design" && new Set(item.rubric.map((r) => r.id)).size !== item.rubric.length) {
+        problems.push(`${where}: duplicate rubric ids`);
+      }
+      if (item.type === "sql" && item.starter.trim() === item.solution.trim()) {
+        problems.push(`${where}: starter equals the solution`);
       }
     }
   }
@@ -141,19 +199,41 @@ export function readSources(dir: string): ContentSources {
     trackIds.add(t.id);
   }
 
+  let lists: ListsFile = [];
+  const listsPath = path.join(dir, LISTS_FILE);
+  if (existsSync(listsPath)) {
+    const parsed = ListsFileSchema.safeParse(parseYaml(readFileSync(listsPath, "utf8")));
+    if (!parsed.success) {
+      problems.push(`${listsPath}: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
+    } else {
+      lists = parsed.data;
+      const listIds = new Set<string>();
+      for (const list of lists) {
+        if (listIds.has(list.id)) problems.push(`list ${list.id}: duplicate id`);
+        listIds.add(list.id);
+        for (const id of list.items) if (!itemIds.has(id)) problems.push(`list ${list.id}: unknown item ${id}`);
+        if (new Set(list.items).size !== list.items.length) problems.push(`list ${list.id}: an item is listed twice`);
+      }
+    }
+  }
+
   if (problems.length) throw new Error(`Invalid arena content:\n  - ${problems.join("\n  - ")}`);
-  return { tracks, topics };
+  return { tracks, topics, lists };
 }
 
 export class Catalog {
   readonly tracks: CatalogTrack[];
   readonly items: CatalogItem[];
+  readonly lists: ListsFile;
+  /** Mock templates and the contest schedule (set by loadCatalog). */
+  practice: PracticeConfig = { mocks: [], contests: null };
   private readonly trackById = new Map<string, CatalogTrack>();
   private readonly topicById = new Map<string, CatalogTopic>();
   private readonly itemById = new Map<string, CatalogItem>();
 
-  constructor(tracks: CatalogTrack[]) {
+  constructor(tracks: CatalogTrack[], lists: ListsFile = []) {
     this.tracks = tracks;
+    this.lists = lists;
     this.items = tracks.flatMap((t) => t.topics.flatMap((p) => p.items));
     for (const t of tracks) {
       this.trackById.set(t.id, t);
@@ -168,6 +248,7 @@ export class Catalog {
   topic = (id: string) => this.topicById.get(id);
   item = (id: string) => this.itemById.get(id);
   topics = () => [...this.topicById.values()];
+  list = (id: string) => this.lists.find((l) => l.id === id);
 }
 
 const weightOf = (d: ArenaDifficulty) => XP_BY_DIFFICULTY[d];
@@ -191,8 +272,8 @@ export function buildCatalog(
           trackId: track.id,
           items: topic.items.map((item): CatalogItem => {
             const base = { ...item, topicId, trackId: track.id, order: order++, weight: weightOf(item.difficulty) };
-            if (!isCode(item)) return base;
-            const data = item.dataset ? datasetTests(dir, item) : null;
+            if (!isJudged(item)) return base;
+            const data = isCode(item) && item.dataset ? datasetTests(dir, item) : null;
             const built = generated?.items[item.id];
             if (!built || built.hash !== codeItemHash(item, data?.hash)) {
               stale.push(item.id);
@@ -209,7 +290,7 @@ export function buildCatalog(
       `Arena tests are out of date for: ${stale.join(", ")}. Run \`npm run content:build -w @logixai/arena-service\`.`,
     );
   }
-  return new Catalog(tracks);
+  return new Catalog(tracks, sources.lists);
 }
 
 /**
@@ -237,5 +318,7 @@ export function loadCatalog(dir: string): Catalog {
   const generated = existsSync(generatedPath)
     ? GeneratedTestsSchema.parse(JSON.parse(readFileSync(generatedPath, "utf8")))
     : { items: {} };
-  return buildCatalog(sources, generated, dir);
+  const catalog = buildCatalog(sources, generated, dir);
+  catalog.practice = loadPracticeConfig(dir, catalog);
+  return catalog;
 }

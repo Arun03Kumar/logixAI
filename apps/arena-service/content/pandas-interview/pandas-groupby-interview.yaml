@@ -1,0 +1,313 @@
+id: pandas-groupby-interview
+title: GroupBy in interviews
+summary: Named aggregations, top-per-group with ties, running totals, ranks, shares and z-scores within groups.
+prerequisites: [pandas-cleaning]
+lesson: |
+  ## Three things groupby can return
+
+  | Call | Result |
+  | --- | --- |
+  | `.agg(...)` | one row per group |
+  | `.transform(...)` | one value per **original row** (aligned with it) |
+  | `.filter(fn)` | the original rows of the groups where `fn(group)` is True |
+
+  ## Named aggregation
+
+  ```python
+  df.groupby("dept", as_index=False).agg(
+      headcount=("name", "size"),
+      avg_salary=("salary", "mean"),
+      max_salary=("salary", "max"),
+  )
+  ```
+
+  Each keyword is an output column: `(input column, function)`.
+
+  ## Within-group calculations
+
+  - Running total per customer: sort by date first, then `groupby("customer")["amount"].cumsum()`.
+  - Rank within group: `groupby("dept")["salary"].rank(method="dense", ascending=False)`.
+  - Share of the group total: `amount / groupby("city")["amount"].transform("sum")`.
+  - Z-score within group: `(x - transform("mean")) / transform("std", ddof=0)` — decide what to do when a group has one member (std 0).
+
+  ## Top per group, with ties
+
+  `idxmax` returns *one* row per group, whichever comes first. If the question says how to break ties ("alphabetically"), sort by the metric and the tie-breaker, then take the first row per group: `df.sort_values(["total", "name"], ascending=[False, True]).groupby("city").head(1)`.
+items:
+  - id: pd-delivered-revenue-by-city
+    type: code
+    title: Delivered revenue by city
+    difficulty: easy
+    tags: [pandas, groupby]
+    prompt: |
+      Implement `revenue_by_city(orders)`: total `amount` of **delivered** orders per `city`, as a dict `{city: total}`. Cities with no delivered orders don't appear.
+    function:
+      name: revenue_by_city
+      params:
+        - { name: orders, type: dataframe }
+      returns: "dict {city: total}"
+    starter: |
+      import pandas as pd
+
+      def revenue_by_city(orders):
+          return orders.groupby("city")["amount"].sum().to_dict()
+    solution: |
+      import pandas as pd
+
+      def revenue_by_city(orders):
+          delivered = orders[orders["status"] == "delivered"]
+          return delivered.groupby("city")["amount"].sum().to_dict()
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: orders_b }]
+    explanation: |
+      Filter first, then group. Filtering after grouping isn't possible here, and summing every status overstates revenue.
+
+  - id: pd-top-spender-per-city
+    type: code
+    title: Top spender in each city
+    difficulty: medium
+    tags: [pandas, groupby, ties]
+    prompt: |
+      Implement `top_spenders(orders)`: for each city, the customer whose orders (any status) add up to the most. If two customers tie, pick the alphabetically first. Return `{city: customer}`.
+    function:
+      name: top_spenders
+      params:
+        - { name: orders, type: dataframe }
+      returns: "dict {city: customer}"
+    starter: |
+      import pandas as pd
+
+      def top_spenders(orders):
+          best = orders.loc[orders.groupby("city")["amount"].idxmax()]
+          return dict(zip(best["city"], best["customer"]))
+    solution: |
+      import pandas as pd
+
+      def top_spenders(orders):
+          totals = orders.groupby(["city", "customer"], as_index=False)["amount"].sum()
+          totals = totals.sort_values(["city", "amount", "customer"], ascending=[True, False, True])
+          best = totals.groupby("city").head(1)
+          return dict(zip(best["city"], best["customer"]))
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: orders_b }]
+        - args:
+            - columns: [order_id, customer, city, order_date, amount, status]
+              data:
+                - [1, Zed, Pune, "2024-01-01", 500.0, delivered]
+                - [2, Amy, Pune, "2024-01-02", 300.0, delivered]
+                - [3, Amy, Pune, "2024-01-03", 200.0, delivered]
+                - [4, Bo, Goa, "2024-01-04", 900.0, delivered]
+    hints:
+      - The starter picks the city's single largest *order*. The question is about each customer's *total*.
+    explanation: |
+      Sum per (city, customer) first. Then sort so that, within each city, the biggest total comes first and ties go alphabetically, and take the first row per city with `head(1)`. `idxmax` on totals would also work but breaks ties by row position, not by name.
+
+  - id: pd-dept-summary
+    type: code
+    title: Department summary table
+    difficulty: easy
+    tags: [pandas, groupby, named-agg]
+    prompt: |
+      Implement `dept_summary(employees)`: a DataFrame with one row per `dept`, sorted by `dept`, and columns `dept`, `headcount`, `avg_salary`, `max_salary`.
+    function:
+      name: dept_summary
+      params:
+        - { name: employees, type: dataframe }
+      returns: "DataFrame [dept, headcount, avg_salary, max_salary]"
+    starter: |
+      import pandas as pd
+
+      def dept_summary(employees):
+          return employees.groupby("dept", as_index=False)["salary"].mean()
+    solution: |
+      import pandas as pd
+
+      def dept_summary(employees):
+          return (
+              employees.groupby("dept", as_index=False)
+              .agg(headcount=("name", "size"), avg_salary=("salary", "mean"), max_salary=("salary", "max"))
+              .sort_values("dept")
+          )
+    tests:
+      sample:
+        - args: [{ $frame: employees_a }]
+      hidden:
+        - args: [{ $frame: employees_b }]
+    explanation: |
+      Named aggregation produces the exact output columns in one step. `as_index=False` keeps `dept` as a column rather than the index.
+
+  - id: pd-running-spend
+    type: code
+    title: Running spend per customer
+    difficulty: medium
+    tags: [pandas, groupby, cumsum]
+    prompt: |
+      Implement `running_spend(orders)`: for each order, the customer's total `amount` so far — this order and all their earlier ones, in `order_date` order (ties by `order_id`). Return a DataFrame with columns `order_id`, `running_total`, sorted by `order_id`.
+    function:
+      name: running_spend
+      params:
+        - { name: orders, type: dataframe }
+      returns: "DataFrame [order_id, running_total]"
+    starter: |
+      import pandas as pd
+
+      def running_spend(orders):
+          out = orders[["order_id"]].copy()
+          out["running_total"] = orders["amount"].cumsum()
+          return out
+    solution: |
+      import pandas as pd
+
+      def running_spend(orders):
+          df = orders.sort_values(["order_date", "order_id"]).copy()
+          df["running_total"] = df.groupby("customer")["amount"].cumsum()
+          return df[["order_id", "running_total"]].sort_values("order_id")
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: orders_b }]
+    explanation: |
+      Sort into time order, then `groupby(...).cumsum()` restarts the running sum for each customer. The starter's plain `cumsum` mixes every customer together.
+
+  - id: pd-salary-rank-in-dept
+    type: code
+    title: Salary rank within department
+    difficulty: medium
+    tags: [pandas, groupby, rank]
+    prompt: |
+      Implement `dept_rank(employees)`: each employee's salary rank within their department, highest = 1, equal salaries sharing a rank with no gaps afterwards (1, 1, 2). Return `{name: rank}` with integer ranks.
+    function:
+      name: dept_rank
+      params:
+        - { name: employees, type: dataframe }
+      returns: "dict {name: rank}"
+    starter: |
+      import pandas as pd
+
+      def dept_rank(employees):
+          ranks = employees["salary"].rank(ascending=False)
+          return dict(zip(employees["name"], ranks.astype(int)))
+    solution: |
+      import pandas as pd
+
+      def dept_rank(employees):
+          ranks = employees.groupby("dept")["salary"].rank(method="dense", ascending=False)
+          return dict(zip(employees["name"], ranks.astype(int)))
+    tests:
+      sample:
+        - args: [{ $frame: employees_a }]
+      hidden:
+        - args: [{ $frame: employees_b }]
+    explanation: |
+      `rank` on a grouped Series ranks within each group. `method="dense"` gives ties the same rank without gaps; the default (`"average"`) would give two tied first places 1.5 each.
+
+  - id: pd-city-share
+    type: code
+    title: Each order's share of its city
+    difficulty: easy
+    tags: [pandas, groupby, transform]
+    prompt: |
+      Implement `city_share(orders)`: each order's `amount` divided by the total amount of all orders in the same city. Return `{order_id: share}`.
+    function:
+      name: city_share
+      params:
+        - { name: orders, type: dataframe }
+      returns: "dict {order_id: share}"
+    starter: |
+      import pandas as pd
+
+      def city_share(orders):
+          share = orders["amount"] / orders["amount"].sum()
+          return dict(zip(orders["order_id"], share))
+    solution: |
+      import pandas as pd
+
+      def city_share(orders):
+          totals = orders.groupby("city")["amount"].transform("sum")
+          return dict(zip(orders["order_id"], orders["amount"] / totals))
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }]
+      hidden:
+        - args: [{ $frame: orders_b }]
+    explanation: |
+      `transform("sum")` puts each city's total on every row of that city, so the division is row by row. The starter divides by the grand total instead.
+
+  - id: pd-repeat-customers
+    type: code
+    title: Repeat customers
+    difficulty: easy
+    tags: [pandas, groupby, filter]
+    prompt: |
+      Implement `repeat_customers(orders, n)`: the customers with **at least `n`** orders (any status), as a sorted list.
+    function:
+      name: repeat_customers
+      params:
+        - { name: orders, type: dataframe }
+        - { name: n, type: int }
+      returns: "list of customer names, sorted"
+    starter: |
+      import pandas as pd
+
+      def repeat_customers(orders, n):
+          return sorted(orders["customer"].unique().tolist())
+    solution: |
+      import pandas as pd
+
+      def repeat_customers(orders, n):
+          counts = orders.groupby("customer").size()
+          return sorted(counts[counts >= n].index.tolist())
+    tests:
+      sample:
+        - args: [{ $frame: orders_a }, 2]
+      hidden:
+        - args: [{ $frame: orders_b }, 2]
+        - args: [{ $frame: orders_b }, 3]
+    explanation: |
+      `size()` counts rows per customer; keeping the counts that reach `n` and taking the index gives the names. `groupby(...).filter(lambda g: len(g) >= n)` returns the matching orders instead.
+
+  - id: pd-salary-zscore
+    type: code
+    title: Salary z-score within department
+    difficulty: medium
+    access: pro
+    tags: [pandas, groupby, transform, statistics]
+    prompt: |
+      Implement `salary_z(employees)`: for each employee, `(salary − department mean) / department standard deviation`, using the **population** standard deviation (`ddof=0`). For a department where everyone earns the same (including one-person departments), the z-score is 0. Return `{name: z}`.
+    function:
+      name: salary_z
+      params:
+        - { name: employees, type: dataframe }
+      returns: "dict {name: z}"
+    starter: |
+      import pandas as pd
+
+      def salary_z(employees):
+          s = employees["salary"]
+          z = (s - s.mean()) / s.std(ddof=0)
+          return dict(zip(employees["name"], z))
+    solution: |
+      import pandas as pd
+
+      def salary_z(employees):
+          g = employees.groupby("dept")["salary"]
+          mean = g.transform("mean")
+          std = g.transform(lambda s: s.std(ddof=0))
+          z = ((employees["salary"] - mean) / std.where(std > 0)).fillna(0.0)
+          return dict(zip(employees["name"], z))
+    tests:
+      sample:
+        - args: [{ $frame: employees_a }]
+      hidden:
+        - args: [{ $frame: employees_b }]
+    hints:
+      - Pandas' `std()` uses `ddof=1` (the sample standard deviation) unless told otherwise.
+    explanation: |
+      Group-wise mean and standard deviation via `transform`, then the usual z-score. Masking a zero std to NaN and filling the result with 0 handles single-member groups instead of dividing by zero.

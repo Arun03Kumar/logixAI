@@ -58,7 +58,7 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
-export interface Store {
+export interface Store extends PracticeStore {
   progress: {
     get(userId: string, itemId: string): Promise<ProgressRecord | null>;
     listForUser(userId: string): Promise<ProgressRecord[]>;
@@ -109,5 +109,71 @@ export interface Store {
   audit: {
     record(event: Omit<AuditEvent, "id" | "at">): Promise<void>;
     pageForInstitution(institutionId: string, query: { limit: number; cursor?: string }): Promise<Page<AuditEvent>>;
+  };
+}
+
+/** How a learner did on one question of a timed session. */
+export interface SessionItemOutcome {
+  solvedAt: Date | null;
+  /** Wrong answers / failed submits before the solve. */
+  wrong: number;
+  revealed: boolean;
+}
+
+/** A mock interview or a contest participation. */
+export interface SessionRecord {
+  id: string;
+  userId: string;
+  kind: "mock" | "contest";
+  /** Mock template id or contest id. */
+  sourceId: string;
+  title: string;
+  itemIds: string[];
+  startedAt: Date;
+  endsAt: Date;
+  finishedAt: Date | null;
+  /** Contests: counted on the leaderboard (false for virtual participation). */
+  ranked: boolean;
+  /** Penalty minutes are measured from here (the contest start for ranked entries). */
+  scoreFrom: Date;
+  /** Shown on leaderboards when the user has no public profile, e.g. "Asha K." */
+  displayName: string;
+  outcomes: Record<string, SessionItemOutcome>;
+}
+
+export type SessionEvent = "correct" | "wrong" | "revealed";
+
+export interface ProfileRecord {
+  userId: string;
+  handle: string;
+  displayName: string;
+  bio: string;
+  public: boolean;
+  createdAt: Date;
+}
+
+export interface PracticeStore {
+  sessions: {
+    create(data: Omit<SessionRecord, "id">): Promise<SessionRecord>;
+    get(id: string): Promise<SessionRecord | null>;
+    /** Newest first. */
+    listForUser(userId: string, limit: number): Promise<SessionRecord[]>;
+    /** Sessions not finished whose time hasn't run out. */
+    findOpen(userId: string, now: Date): Promise<SessionRecord[]>;
+    /** Updates one question's outcome; ignored once it's solved. */
+    recordOutcome(id: string, itemId: string, event: SessionEvent, at: Date): Promise<void>;
+    /** Marks finished unless it already is. */
+    finish(id: string, at: Date): Promise<void>;
+    /** Every session for a mock template or contest (ranked only, if asked). */
+    listForSource(sourceId: string, rankedOnly: boolean): Promise<SessionRecord[]>;
+    latestForUserAndSource(userId: string, sourceId: string): Promise<SessionRecord | null>;
+    countSince(userId: string, kind: SessionRecord["kind"], since: Date): Promise<number>;
+  };
+  profiles: {
+    get(userId: string): Promise<ProfileRecord | null>;
+    getByHandle(handle: string): Promise<ProfileRecord | null>;
+    getMany(userIds: string[]): Promise<ProfileRecord[]>;
+    /** Creates or updates. Throws an error with code 11000 if the handle is taken. */
+    upsert(data: Omit<ProfileRecord, "createdAt">, at: Date): Promise<ProfileRecord>;
   };
 }

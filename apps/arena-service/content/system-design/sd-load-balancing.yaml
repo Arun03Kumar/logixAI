@@ -1,0 +1,456 @@
+id: sd-load-balancing
+title: Load balancing and consistent hashing
+summary: Spread requests across servers — round robin with health checks, smooth weighted round robin, least connections — and spread keys across nodes with consistent hashing so adding a node moves only a fraction of them.
+prerequisites: [js-utilities]
+lesson: |
+  ## Picking a server per request
+
+  | Strategy | How | Good for |
+  | --- | --- | --- |
+  | Round robin | next server in turn, skipping unhealthy ones | identical servers, similar requests |
+  | Weighted round robin | bigger servers get proportionally more turns | mixed hardware |
+  | Least connections | the server with the fewest requests in flight | requests of very different lengths (uploads, WebSockets) |
+  | Power of two choices | pick two at random, use the less loaded | many balancers with slightly stale load info |
+
+  **Smooth** weighted round robin (nginx's algorithm) interleaves picks instead of sending a server its whole share in a row: every turn each server's `current` grows by its weight; the server with the largest `current` is picked and its `current` drops by the total weight. With weights 5, 1, 1 that gives `a a b a c a a` rather than `a a a a a b c`.
+
+  Health checks (active pings or passive error counting) take failing servers out of rotation; **connection draining** lets in-flight requests finish before a server is removed.
+
+  ## Picking a node per key
+
+  Caches and sharded databases must send the same key to the same node. `hash(key) % N` does that until N changes — then almost every key moves (from 4 to 5 nodes, 80% of keys). **Consistent hashing** places nodes and keys on a ring of hash values; a key belongs to the first node clockwise from it. Adding a node takes over only the keys between it and its predecessor (about 1/N of them). Each physical node gets many **virtual nodes** (points on the ring) so the load evens out.
+items:
+  - id: sd-round-robin-health
+    type: code
+    language: javascript
+    title: Round robin with health checks
+    difficulty: easy
+    tags: [system-design, load-balancing]
+    prompt: |
+      Implement `class RoundRobin` with `constructor(servers)` (an array of names), `next()`, `markDown(name)` and `markUp(name)`:
+
+      - `next()` returns servers in turn, starting with the first, **skipping servers marked down**, and continuing the rotation from just after the last server it returned;
+      - if every server is down, `next()` returns `null`.
+    expose: [RoundRobin]
+    driver: |
+      function check(servers, ops) {
+        const lb = new RoundRobin(servers);
+        const picks = [];
+        for (const [op, name] of ops) {
+          if (op === "next") picks.push(lb.next());
+          else if (op === "down") lb.markDown(name);
+          else lb.markUp(name);
+        }
+        return picks;
+      }
+    function:
+      name: check
+      params:
+        - { name: servers, type: list }
+        - { name: ops, type: list }
+      returns: "the server picked by each next()"
+    starter: |
+      class RoundRobin {
+        constructor(servers) {
+          this.servers = servers;
+          this.i = 0;
+        }
+
+        next() {
+          const s = this.servers[this.i % this.servers.length];
+          this.i += 1;
+          return s;
+        }
+
+        markDown(name) {}
+        markUp(name) {}
+      }
+    solution: |
+      class RoundRobin {
+        constructor(servers) {
+          this.servers = servers;
+          this.down = new Set();
+          this.i = 0;
+        }
+
+        next() {
+          const n = this.servers.length;
+          for (let k = 0; k < n; k++) {
+            const idx = (this.i + k) % n;
+            if (!this.down.has(this.servers[idx])) {
+              this.i = (idx + 1) % n;
+              return this.servers[idx];
+            }
+          }
+          return null;
+        }
+
+        markDown(name) {
+          this.down.add(name);
+        }
+
+        markUp(name) {
+          this.down.delete(name);
+        }
+      }
+    tests:
+      sample:
+        - args: [["s1", "s2", "s3"], [["next"], ["next"], ["down", "s3"], ["next"], ["next"], ["up", "s3"], ["next"], ["next"]]]
+      hidden:
+        - args: [["a", "b"], [["down", "a"], ["down", "b"], ["next"], ["up", "a"], ["next"], ["next"]]]
+        - args: [["only"], [["next"], ["next"]]]
+    explanation: |
+      Scan forward from the current position for the first healthy server and continue after it. The starter keeps sending traffic to a server the health checks have marked down — the outage a load balancer exists to prevent. Returning `null` lets the caller respond with a fast `503` instead of looping forever.
+
+  - id: sd-smooth-weighted
+    type: code
+    language: javascript
+    title: Smooth weighted round robin
+    difficulty: medium
+    tags: [system-design, load-balancing]
+    prompt: |
+      Implement `class SmoothWeighted` with `constructor(weights)` (an object `{ name: weight }`) and `next()`, using nginx's smooth algorithm:
+
+      1. every server's `current` starts at 0;
+      2. on each `next()`, add each server's weight to its `current`;
+      3. pick the server with the **largest** `current` (on a tie, the one listed first);
+      4. subtract the **total** of all weights from the picked server's `current`, and return its name.
+    expose: [SmoothWeighted]
+    visual: { kind: bars, field: counts, title: "Picks per server" }
+    driver: |
+      function check(weights, n) {
+        const lb = new SmoothWeighted(weights);
+        const sequence = Array.from({ length: n }, () => lb.next());
+        const counts = {};
+        for (const s of sequence) counts[s] = (counts[s] ?? 0) + 1;
+        return { sequence, counts };
+      }
+    function:
+      name: check
+      params:
+        - { name: weights, type: dict }
+        - { name: n, type: int }
+      returns: "the picks in order, and how many each server got"
+    starter: |
+      class SmoothWeighted {
+        constructor(weights) {
+          this.order = [];
+          for (const [name, w] of Object.entries(weights)) {
+            for (let i = 0; i < w; i++) this.order.push(name);
+          }
+          this.i = 0;
+        }
+
+        next() {
+          return this.order[this.i++ % this.order.length];
+        }
+      }
+    solution: |
+      class SmoothWeighted {
+        constructor(weights) {
+          this.peers = Object.entries(weights).map(([name, weight]) => ({ name, weight, current: 0 }));
+          this.total = this.peers.reduce((s, p) => s + p.weight, 0);
+        }
+
+        next() {
+          let best = null;
+          for (const p of this.peers) {
+            p.current += p.weight;
+            if (!best || p.current > best.current) best = p;
+          }
+          best.current -= this.total;
+          return best.name;
+        }
+      }
+    tests:
+      sample:
+        - args: [{ "a": 5, "b": 1, "c": 1 }, 7]
+      hidden:
+        - args: [{ "x": 1, "y": 1 }, 4]
+        - args: [{ "big": 3, "mid": 2, "small": 1 }, 12]
+    explanation: |
+      Over a full cycle each server is picked exactly `weight` times, but the picks are interleaved, so the heavy server never gets a long burst while the others sit idle. The starter's expanded list gives the same totals (see the chart) with the worst possible ordering: five requests in a row to `a`.
+
+  - id: sd-least-connections
+    type: code
+    language: javascript
+    title: Least connections
+    difficulty: medium
+    tags: [system-design, load-balancing, simulation]
+    prompt: |
+      Implement `class LeastConnections` with `constructor(n)` (servers `0 … n-1`), `pick()` and `release(server)`:
+
+      - `pick()` returns the server with the **fewest active requests** (ties go to the lowest index) and counts one more active request on it;
+      - `release(server)` marks one of its requests finished.
+
+      The test simulates requests `[arrival, duration]` in ms: before each arrival it releases the requests that have finished, then calls `pick()`. It reports where each request went and each server's peak concurrency.
+    expose: [LeastConnections]
+    visual: { kind: bars, field: peakConnections, title: "Peak concurrent requests per server" }
+    driver: |
+      function check(n, requests) {
+        const lb = new LeastConnections(n);
+        const active = [];
+        const current = Array(n).fill(0);
+        const peak = Array(n).fill(0);
+        const assigned = [];
+        for (const [t, duration] of requests) {
+          active.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+          while (active.length && active[0][0] <= t) {
+            const [, s] = active.shift();
+            lb.release(s);
+            current[s] -= 1;
+          }
+          const s = lb.pick();
+          assigned.push(s);
+          current[s] += 1;
+          peak[s] = Math.max(peak[s], current[s]);
+          active.push([t + duration, s]);
+        }
+        return { assigned, peakConnections: Object.fromEntries(peak.map((p, i) => ["server " + i, p])) };
+      }
+    function:
+      name: check
+      params:
+        - { name: n, type: int }
+        - { name: requests, type: list }
+      returns: "the server per request and peak concurrency per server"
+    starter: |
+      class LeastConnections {
+        constructor(n) {
+          this.n = n;
+          this.i = 0;
+        }
+
+        pick() {
+          return this.i++ % this.n;
+        }
+
+        release(server) {}
+      }
+    solution: |
+      class LeastConnections {
+        constructor(n) {
+          this.active = Array(n).fill(0);
+        }
+
+        pick() {
+          let best = 0;
+          for (let i = 1; i < this.active.length; i++) {
+            if (this.active[i] < this.active[best]) best = i;
+          }
+          this.active[best] += 1;
+          return best;
+        }
+
+        release(server) {
+          this.active[server] -= 1;
+        }
+      }
+    tests:
+      sample:
+        - args: [3, [[0, 10000], [10, 50], [20, 50], [100, 50], [110, 50], [120, 50], [200, 50], [210, 50], [220, 50]]]
+      hidden:
+        - args: [2, [[0, 100], [0, 100], [0, 100], [50, 10], [150, 10]]]
+      generate: |
+        def cases(rng):
+            arrivals = np.sort(rng.integers(0, 2000, size=40))
+            durations = rng.choice([20, 50, 100, 3000], size=40, p=[0.4, 0.3, 0.2, 0.1])
+            return [[4, [[int(a), int(d)] for a, d in zip(arrivals, durations)]]]
+    explanation: |
+      Round robin assumes requests are alike. In the sample one request lasts 10 seconds (a long upload); round robin keeps sending every third request to that busy server, stacking work on it, while least connections routes around it. The cost is shared state: the balancer must track in-flight requests per server, which is why multi-balancer setups often use "power of two choices" instead.
+
+  - id: sd-power-of-two
+    type: mcq_single
+    title: Why "power of two choices"?
+    difficulty: medium
+    tags: [system-design, load-balancing]
+    prompt: |
+      Twenty load balancers each see slightly stale load numbers. Why do they often pick **two random servers and use the less loaded one**, instead of always the globally least-loaded server?
+    options:
+      - { id: a, text: "Comparing two numbers is cheaper than finding a minimum" }
+      - { id: b, text: "With stale data, every balancer sends its traffic to the same \"least loaded\" server at once and overloads it (herding); two random choices spread the decisions while still avoiding busy servers" }
+      - { id: c, text: "It guarantees perfectly equal load" }
+      - { id: d, text: "It makes requests from one client stick to one server" }
+    answer: b
+    explanation: |
+      When many balancers act on the same stale snapshot, "pick the minimum" is a stampede: the emptiest server gets everyone's next requests. Sampling two at random gives each balancer a different pair, and choosing the lighter of the two still cuts the maximum load dramatically compared with pure random (from about $\log n / \log\log n$ to $\log\log n$ in theory).
+
+  - id: sd-modulo-rehash
+    type: numeric
+    title: How many keys move?
+    difficulty: medium
+    tags: [system-design, hashing, estimation]
+    prompt: |
+      A cache cluster routes keys with `hash(key) % N`. It grows from **4 to 5** nodes. Assuming hashes are uniform, what **percentage** of keys now map to a different node?
+    answer: 80
+    tolerance: 1
+    answerFormat: "a percentage, e.g. 25"
+    explanation: |
+      A key stays put only when `h % 4 == h % 5`, which happens for 4 of every 20 consecutive hash values ($h \bmod 20 \in \{0,1,2,3\}$): 20% stay, **80% move** — a cache that suddenly misses 80% of the time. Consistent hashing moves about $1/5 = 20\%$.
+
+  - id: sd-consistent-hashing
+    type: code
+    language: javascript
+    title: Consistent hashing with virtual nodes
+    difficulty: hard
+    access: pro
+    tags: [system-design, hashing, sharding]
+    prompt: |
+      Implement `class HashRing` with `constructor(vnodes)`, `addNode(name)`, `removeNode(name)` and `getNode(key)`:
+
+      - each node is placed on the ring `vnodes` times (e.g. at `hash32(name + "#" + i)`);
+      - a key belongs to the first virtual node at or clockwise after `hash32(key)`, wrapping around;
+      - use the `hash32` in the starter (FNV-1a with a final mix).
+
+      The test maps 6,000 keys to nodes A, B and C, adds D, then removes B, and checks: the load is roughly even, adding D moves about a quarter of the keys and **only onto D**, and removing B moves only B's keys.
+    expose: [HashRing]
+    driver: |
+      function check(vnodes) {
+        const ring = new HashRing(vnodes);
+        for (const n of ["A", "B", "C"]) ring.addNode(n);
+        const keys = Array.from({ length: 6000 }, (_, i) => "user:" + i);
+        const before = keys.map((k) => ring.getNode(k));
+        const counts = {};
+        for (const n of before) counts[n] = (counts[n] ?? 0) + 1;
+        const maxShare = Math.max(...Object.values(counts)) / (keys.length / 3);
+        ring.addNode("D");
+        const afterAdd = keys.map((k) => ring.getNode(k));
+        const moved = keys.filter((_, i) => afterAdd[i] !== before[i]).length / keys.length;
+        ring.removeNode("B");
+        const afterRemove = keys.map((k) => ring.getNode(k));
+        return {
+          everyKeyOnAKnownNode: before.every((n) => ["A", "B", "C"].includes(n)),
+          loadRoughlyEven: maxShare < 1.5,
+          addingDMovesAboutAQuarter: moved > 0.12 && moved < 0.4,
+          movedKeysAllWentToD: before.every((n, i) => afterAdd[i] === n || afterAdd[i] === "D"),
+          removingBMovesOnlyBsKeys: afterAdd.every((n, i) => n === "B" || afterRemove[i] === n),
+          nothingLeftOnB: !afterRemove.includes("B"),
+        };
+      }
+    function:
+      name: check
+      params:
+        - { name: vnodes, type: int }
+      returns: "six checks, all true"
+    starter: |
+      // FNV-1a, then a final mix so similar strings land far apart. Returns 0 … 2^32 - 1.
+      function hash32(str) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 0x01000193);
+        }
+        h ^= h >>> 16;
+        h = Math.imul(h, 0x85ebca6b);
+        h ^= h >>> 13;
+        h = Math.imul(h, 0xc2b2ae35);
+        h ^= h >>> 16;
+        return h >>> 0;
+      }
+
+      class HashRing {
+        constructor(vnodes) {
+          this.nodes = [];
+        }
+
+        addNode(name) {
+          this.nodes.push(name);
+        }
+
+        removeNode(name) {
+          this.nodes = this.nodes.filter((n) => n !== name);
+        }
+
+        getNode(key) {
+          return this.nodes[hash32(key) % this.nodes.length];
+        }
+      }
+    solution: |
+      // FNV-1a, then a final mix so similar strings land far apart. Returns 0 … 2^32 - 1.
+      function hash32(str) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 0x01000193);
+        }
+        h ^= h >>> 16;
+        h = Math.imul(h, 0x85ebca6b);
+        h ^= h >>> 13;
+        h = Math.imul(h, 0xc2b2ae35);
+        h ^= h >>> 16;
+        return h >>> 0;
+      }
+
+      class HashRing {
+        constructor(vnodes) {
+          this.vnodes = vnodes;
+          this.ring = []; // sorted [hash, node]
+        }
+
+        addNode(name) {
+          for (let i = 0; i < this.vnodes; i++) this.ring.push([hash32(name + "#" + i), name]);
+          this.ring.sort((a, b) => a[0] - b[0]);
+        }
+
+        removeNode(name) {
+          this.ring = this.ring.filter(([, n]) => n !== name);
+        }
+
+        getNode(key) {
+          if (this.ring.length === 0) return null;
+          const h = hash32(key);
+          let lo = 0;
+          let hi = this.ring.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (this.ring[mid][0] < h) lo = mid + 1;
+            else hi = mid;
+          }
+          return this.ring[lo % this.ring.length][1];
+        }
+      }
+    tests:
+      sample:
+        - args: [100]
+      hidden:
+        - args: [150]
+        - args: [300]
+    hints:
+      - "Keep the virtual nodes in an array sorted by hash; binary-search for the first hash ≥ the key's hash."
+    explanation: |
+      Each key's owner depends only on its neighbourhood on the ring, so a new node takes over just the arcs right before its virtual nodes (about $1/4$ of keys when going from 3 to 4 nodes), and a removed node's arcs fall to the next nodes clockwise. Many virtual nodes per server smooth out the arc lengths; with one point per node, one server can easily own half the ring. The starter's modulo routing moves about 75% of keys when D joins, and moves keys between surviving nodes too.
+
+  - id: sd-design-chat-lb
+    type: design
+    title: Load balancing a WebSocket chat service
+    difficulty: hard
+    access: pro
+    tags: [system-design, load-balancing, websockets, design]
+    prompt: |
+      A chat app keeps a **WebSocket** open per user (2 million concurrent connections) on a fleet of chat servers. Messages for a user must reach the server holding that user's socket.
+
+      Design the load balancing: how connections are spread, how a message finds the right server, and what happens during deploys, scaling and server crashes. Then compare with the rubric.
+    rubric:
+      - { id: long-lived, point: "Recognises connections are long-lived, so balancing happens at connect time", detail: "per-request strategies don't apply; least connections fits" }
+      - { id: l4-l7, point: "Discusses L4 vs L7 balancing for WebSockets", detail: "L7 can route by path/headers and terminate TLS; L4 is cheaper for millions of connections" }
+      - { id: routing, point: "Has a way to find the server holding a user's socket", detail: "a presence registry (user -> server) in Redis, or consistent hashing of user id to server" }
+      - { id: fanout, point: "Delivers messages across servers", detail: "pub/sub (Redis, Kafka) per server or per room, or direct server-to-server calls via the registry" }
+      - { id: draining, point: "Drains connections gracefully on deploys", detail: "stop accepting new sockets, ask clients to reconnect elsewhere over time" }
+      - { id: reconnect-storm, point: "Prevents reconnect storms", detail: "clients reconnect with exponential backoff and jitter after a crash" }
+      - { id: health, point: "Uses health checks and removes failing servers", detail: "and cleans up the presence registry (TTL/heartbeats)" }
+      - { id: capacity, point: "Estimates capacity per server", detail: "e.g. ~50k connections per server -> ~40 servers plus headroom; memory per socket" }
+      - { id: ordering, point: "Considers delivery guarantees", detail: "message ids, acks, storing messages so offline or reconnecting users catch up" }
+    modelAnswer: |
+      **Connections.** A WebSocket lives for hours, so balancing happens once, at connect time. An L4 (TCP) load balancer — or an L7 one that only does the upgrade — spreads new connections using **least connections**, since servers differ in how many sockets they hold. TLS terminates at the balancer or on the chat servers.
+
+      **Capacity.** At ~50k sockets per server (memory, file descriptors), 2M connections need ~40 servers; run ~60 for headroom and failure.
+
+      **Finding a user.** On connect, a server writes `user → server-id` to a presence registry in Redis with a TTL refreshed by heartbeats. To deliver a message, the sender's server looks up the recipient's server and publishes to that server's channel (Redis pub/sub or a Kafka partition per server). Alternative: consistent-hash users to servers and make clients connect where they belong — simpler lookup, harder rebalancing.
+
+      **Delivery.** Messages are stored first (database or log) with ids; the recipient's server pushes them and the client acks. Reconnecting clients send their last seen id and catch up from storage, so nothing is lost when a server dies.
+
+      **Deploys and scaling.** Draining: a server stops accepting new connections, then gradually tells clients to reconnect (spread over minutes) before shutting down. New servers start with zero connections and fill up naturally via least connections.
+
+      **Crashes.** Health checks pull the server out; its registry entries expire; its 50k clients reconnect with **exponential backoff and jitter** so they don't stampede the remaining servers.
+    explanation: |
+      The key insight is that long-lived connections change the problem: you balance connections, not requests, and you need a routing layer (presence registry or consistent hashing) to reach a specific user's server. Strong answers also handle the operational edges — draining on deploys and avoiding reconnect storms after a crash.
